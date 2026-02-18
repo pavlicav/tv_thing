@@ -3,6 +3,8 @@
 
 import json
 import os
+import re
+import select
 import signal
 import subprocess
 import threading
@@ -15,6 +17,16 @@ from urllib.parse import urlparse
 BASE_DIR = Path(__file__).parent
 STREAMS_DIR = BASE_DIR / "streams"
 CHANNELS_FILE = BASE_DIR / "channels.json"
+WSCAN_OUTPUT = BASE_DIR / "w_scan_output.txt"
+
+# ATSC frequency ranges
+ATSC_FREQUENCIES = []
+for _ch in range(2, 7):     # VHF-Lo: ch 2-6
+    ATSC_FREQUENCIES.append((_ch, ((_ch - 2) * 6 + 54) * 1_000_000))
+for _ch in range(7, 14):    # VHF-Hi: ch 7-13
+    ATSC_FREQUENCIES.append((_ch, ((_ch - 7) * 6 + 174) * 1_000_000))
+for _ch in range(14, 37):   # UHF: ch 14-36
+    ATSC_FREQUENCIES.append((_ch, ((_ch - 14) * 6 + 470) * 1_000_000))
 
 # Quality presets: name -> (video_bitrate, audio_bitrate, scale)
 QUALITY_PRESETS = {
@@ -149,6 +161,10 @@ class TVHandler(SimpleHTTPRequestHandler):
             self.send_error(404)
             return
 
+        if path == "/api/rescan/stream":
+            self.handle_rescan_stream()
+            return
+
         # Static files
         if path == "/" or path == "":
             path = "/index.html"
@@ -202,39 +218,179 @@ class TVHandler(SimpleHTTPRequestHandler):
             self.send_json({"ok": True})
             return
 
-        if parsed.path == "/api/rescan":
-            def do_scan():
-                try:
-                    # Stop any active stream so the DVB device is free
-                    with lock:
-                        stop_streaming()
-                    time.sleep(2)
-                    # Run VCT scan (captures from each freq, parses PSIP)
-                    result = subprocess.run(
-                        ["python3", str(BASE_DIR / "scan_vct.py")],
-                        capture_output=True, text=True, timeout=600,
-                    )
-                    print(result.stdout)
-                    if result.stderr:
-                        print(result.stderr)
-                    # Re-parse with VCT data
-                    subprocess.run(
-                        ["python3", str(BASE_DIR / "parse_channels.py")],
-                        capture_output=True, timeout=30,
-                    )
-                    channels = load_channels()
-                    return len(channels)
-                except Exception as e:
-                    return str(e)
-
-            count = do_scan()
-            if isinstance(count, int):
-                self.send_json({"ok": True, "count": count})
-            else:
-                self.send_json({"error": count}, status=500)
-            return
-
         self.send_error(404)
+
+    def handle_rescan_stream(self):
+        """Run w_scan and stream results as SSE events."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+
+        def send_sse(event, data):
+            try:
+                payload = f"event: {event}\ndata: {json.dumps(data) if not isinstance(data, str) else data}\n\n"
+                self.wfile.write(payload.encode())
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                raise
+
+        try:
+            send_sse("status", "Stopping active streams...")
+            with lock:
+                stop_streaming()
+            time.sleep(2)
+
+            send_sse("status", "Starting channel scan...")
+
+            # Run w_scan: -fa = ATSC, -c US = country, -X = output format
+            # Note: w_scan buffers all stdout until exit, so channels
+            # only appear after the process completes
+            proc = subprocess.Popen(
+                ["w_scan", "-fa", "-c", "US", "-X"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+            )
+
+            found_channels = []
+            current_freq_khz = None
+            current_rf = None
+            got_signal = False
+            past_ch36 = False
+            # Scan range for progress bar: 54 MHz to ~608 MHz (ch 36 upper edge)
+            SCAN_MIN_KHZ = 54000
+            SCAN_MAX_KHZ = 608000
+
+            def freq_khz_to_rf(freq_khz):
+                """Match w_scan's center frequency (kHz) to ATSC RF channel.
+                w_scan uses center freqs (e.g. 57 MHz for ch 2),
+                our table has lower-edge (54 MHz). Allow 4 MHz tolerance."""
+                for ch_num, ch_freq_hz in ATSC_FREQUENCIES:
+                    if abs(ch_freq_hz - freq_khz * 1000) < 4_000_000:
+                        return ch_num
+                return 0
+
+            def parse_stdout_line(line):
+                """Parse a channels.conf line from w_scan stdout."""
+                parts = line.split(":")
+                if len(parts) >= 6 and not line.startswith(";"):
+                    name = parts[0].strip()
+                    try:
+                        freq = int(parts[1])
+                    except ValueError:
+                        return None
+                    return {"line": line, "name": name, "frequency": freq}
+                return None
+
+            while True:
+                # Read stderr for progress (w_scan writes status to stderr)
+                rlist, _, _ = select.select(
+                    [proc.stderr, proc.stdout], [], [], 0.5
+                )
+
+                for stream in rlist:
+                    line = stream.readline()
+                    if not line:
+                        continue
+
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    if stream == proc.stderr:
+                        # w_scan stderr format: "57000: 8VSB(time: 00:00.196)"
+                        freq_match = re.match(r'(\d+):\s*8VSB', line)
+                        if freq_match:
+                            freq_khz = int(freq_match.group(1))
+
+                            if freq_khz > SCAN_MAX_KHZ:
+                                if not past_ch36:
+                                    past_ch36 = True
+                                    send_sse("progress", "99")
+                                    send_sse("status", "Finishing up...")
+                                continue
+
+                            # Update progress based on frequency position
+                            pct = min(99, (freq_khz - SCAN_MIN_KHZ) / (SCAN_MAX_KHZ - SCAN_MIN_KHZ) * 100)
+                            send_sse("progress", f"{pct:.0f}")
+
+                            rf = freq_khz_to_rf(freq_khz)
+                            if rf > 0 and rf != current_rf:
+                                # Mark previous freq as no-signal if it never locked
+                                if current_freq_khz and not got_signal:
+                                    send_sse("lock", {
+                                        "frequency": current_freq_khz * 1000,
+                                        "frequency_mhz": f"{current_freq_khz / 1000:.0f}",
+                                        "rf_channel": current_rf,
+                                        "locked": False,
+                                    })
+                                current_rf = rf
+                                current_freq_khz = freq_khz
+                                got_signal = False
+                                send_sse("frequency", {
+                                    "frequency": freq_khz * 1000,
+                                    "frequency_mhz": f"{freq_khz / 1000:.0f}",
+                                    "rf_channel": rf,
+                                })
+                                send_sse("status", f"Scanning RF {rf} ({freq_khz / 1000:.0f} MHz)...")
+
+                        if not past_ch36 and 'signal ok' in line.lower():
+                            got_signal = True
+                            if current_freq_khz:
+                                send_sse("lock", {
+                                    "frequency": current_freq_khz * 1000,
+                                    "frequency_mhz": f"{current_freq_khz / 1000:.0f}",
+                                    "rf_channel": current_rf,
+                                    "locked": True,
+                                })
+
+                    elif stream == proc.stdout:
+                        ch = parse_stdout_line(line)
+                        if ch and ch["frequency"] <= SCAN_MAX_KHZ * 1000:
+                            found_channels.append(ch["line"])
+                            send_sse("channel", {
+                                "frequency": ch["frequency"],
+                                "name": ch["name"],
+                            })
+
+                if proc.poll() is not None:
+                    # Process ended — drain remaining stdout
+                    for line in proc.stdout:
+                        line = line.strip()
+                        ch = parse_stdout_line(line)
+                        if ch and ch["frequency"] <= SCAN_MAX_KHZ * 1000:
+                            found_channels.append(ch["line"])
+                            send_sse("channel", {
+                                "frequency": ch["frequency"],
+                                "name": ch["name"],
+                            })
+                    break
+
+            if found_channels:
+                with open(WSCAN_OUTPUT, "w") as f:
+                    for line in found_channels:
+                        f.write(line + "\n")
+
+                # Re-parse channels
+                subprocess.run(
+                    ["python3", str(BASE_DIR / "parse_channels.py")],
+                    capture_output=True, timeout=30,
+                )
+                channels = load_channels()
+                send_sse("done", {"ok": True, "count": len(channels)})
+            else:
+                send_sse("done", {"ok": False, "error": f"w_scan found no channels (exit code {proc.returncode})"})
+
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as e:
+            try:
+                send_sse("done", {"ok": False, "error": str(e)})
+            except Exception:
+                pass
 
     def send_json(self, data, status=200):
         body = json.dumps(data).encode()

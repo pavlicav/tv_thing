@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Re-scan Channels - TV Thing</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 1.5rem;
+    }
+    h1 { font-size: 1.5rem; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 1.5rem; }
+    .card {
+      background: #16213e;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 1.5rem;
+      max-width: 700px;
+      width: 100%;
+    }
+    .warning {
+      background: #3a2a00;
+      border: 1px solid #665500;
+      border-radius: 6px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+      line-height: 1.5;
+      color: #eea;
+    }
+    .warning strong { color: #ffc; }
+    .info {
+      color: #999;
+      font-size: 0.9rem;
+      line-height: 1.5;
+      margin-bottom: 1.5rem;
+    }
+    .actions {
+      display: flex;
+      gap: 0.75rem;
+    }
+    button {
+      padding: 0.6rem 1.2rem;
+      font-size: 1rem;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: background 0.15s;
+    }
+    #start-btn { background: #0f3460; color: #eee; }
+    #start-btn:hover { background: #1a4a7a; }
+    #start-btn:disabled { background: #222; color: #555; cursor: not-allowed; }
+    #cancel-btn { background: #333; color: #ccc; }
+    #cancel-btn:hover { background: #444; }
+
+    #progress {
+      display: none;
+      margin-top: 1.5rem;
+    }
+    #progress-bar-wrap {
+      background: #111;
+      border-radius: 4px;
+      height: 6px;
+      margin-bottom: 1rem;
+      overflow: hidden;
+    }
+    #progress-bar {
+      background: #0f3460;
+      height: 100%;
+      width: 0%;
+      transition: width 0.3s;
+    }
+    #scan-status {
+      font-size: 0.9rem;
+      color: #888;
+      margin-bottom: 1rem;
+    }
+    #results {
+      background: #111;
+      border-radius: 6px;
+      padding: 0;
+      max-height: 50vh;
+      overflow-y: auto;
+      font-family: "SF Mono", "Menlo", "Consolas", monospace;
+      font-size: 0.85rem;
+    }
+    #results:empty { display: none; }
+    .freq-group {
+      border-bottom: 1px solid #222;
+      padding: 0.6rem 0.8rem;
+    }
+    .freq-group:last-child { border-bottom: none; }
+    .freq-header {
+      color: #6a9fd8;
+      font-weight: 600;
+      margin-bottom: 0.3rem;
+    }
+    .freq-header .lock { color: #5a5; }
+    .freq-header .nolock { color: #a55; }
+    .channel-line {
+      color: #bbb;
+      padding-left: 1rem;
+      line-height: 1.6;
+    }
+    .done-msg {
+      padding: 1rem;
+      text-align: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .done-msg.success { color: #5a5; }
+    .done-msg.error { color: #a55; }
+    a { color: #6a9fd8; }
+  </style>
+</head>
+<body>
+  <h1>Re-scan Channels</h1>
+
+  <div class="card">
+    <div class="warning">
+      <strong>Warning:</strong> Scanning requires exclusive access to the TV tuner.
+      Any active stream will be stopped when the scan begins.
+      The scan takes a few minutes.
+    </div>
+    <div class="info">
+      The scanner will check all ATSC frequencies and find available channels
+      in your area. Your channel list will be updated when the scan completes.
+    </div>
+    <div class="actions">
+      <button id="start-btn">Start Scan</button>
+      <button id="cancel-btn" onclick="location.href='/'">Cancel</button>
+    </div>
+
+    <div id="progress">
+      <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
+      <div id="scan-status">Starting scan...</div>
+      <div id="results"></div>
+    </div>
+  </div>
+
+  <script>
+    const startBtn = document.getElementById("start-btn");
+    const cancelBtn = document.getElementById("cancel-btn");
+    const progress = document.getElementById("progress");
+    const progressBar = document.getElementById("progress-bar");
+    const scanStatus = document.getElementById("scan-status");
+    const results = document.getElementById("results");
+
+    let eventSource = null;
+
+    startBtn.addEventListener("click", () => {
+      startBtn.disabled = true;
+      cancelBtn.textContent = "Back";
+      progress.style.display = "block";
+      results.innerHTML = "";
+      scanStatus.textContent = "Stopping active streams...";
+
+      eventSource = new EventSource("/api/rescan/stream");
+
+      eventSource.addEventListener("status", (e) => {
+        scanStatus.textContent = e.data;
+      });
+
+      eventSource.addEventListener("progress", (e) => {
+        const pct = parseFloat(e.data);
+        progressBar.style.width = pct + "%";
+      });
+
+      eventSource.addEventListener("frequency", (e) => {
+        const data = JSON.parse(e.data);
+        const group = document.createElement("div");
+        group.className = "freq-group";
+        group.id = "freq-" + data.frequency;
+
+        const header = document.createElement("div");
+        header.className = "freq-header";
+        header.textContent = `RF ${data.rf_channel}  (${data.frequency_mhz} MHz) — scanning...`;
+        group.appendChild(header);
+        results.appendChild(group);
+        results.scrollTop = results.scrollHeight;
+      });
+
+      eventSource.addEventListener("lock", (e) => {
+        const data = JSON.parse(e.data);
+        const group = document.getElementById("freq-" + data.frequency);
+        if (group) {
+          const header = group.querySelector(".freq-header");
+          if (data.locked) {
+            header.innerHTML = `RF ${data.rf_channel}  (${data.frequency_mhz} MHz) — <span class="lock">locked</span>`;
+          } else {
+            header.innerHTML = `RF ${data.rf_channel}  (${data.frequency_mhz} MHz) — <span class="nolock">no signal</span>`;
+          }
+        }
+      });
+
+      eventSource.addEventListener("channel", (e) => {
+        const data = JSON.parse(e.data);
+        const group = document.getElementById("freq-" + data.frequency);
+        if (group) {
+          const line = document.createElement("div");
+          line.className = "channel-line";
+          line.textContent = data.name;
+          group.appendChild(line);
+          results.scrollTop = results.scrollHeight;
+        }
+      });
+
+      eventSource.addEventListener("done", (e) => {
+        const data = JSON.parse(e.data);
+        eventSource.close();
+        eventSource = null;
+        progressBar.style.width = "100%";
+
+        const msg = document.createElement("div");
+        if (data.ok) {
+          scanStatus.textContent = "Scan complete!";
+          msg.className = "done-msg success";
+          msg.innerHTML = `Found ${data.count} channels. <a href="/">Return to TV Thing</a>`;
+        } else {
+          scanStatus.textContent = "Scan failed";
+          msg.className = "done-msg error";
+          msg.textContent = data.error;
+        }
+        results.appendChild(msg);
+        results.scrollTop = results.scrollHeight;
+        startBtn.disabled = false;
+      });
+
+      eventSource.onerror = () => {
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+        scanStatus.textContent = "Connection lost";
+        startBtn.disabled = false;
+      };
+    });
+  </script>
+</body>
+</html>

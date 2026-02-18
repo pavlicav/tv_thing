@@ -119,7 +119,7 @@
   <div id="status">Loading channels...</div>
 
   <footer style="padding: 2rem 1rem; text-align: center; display: flex; gap: 1.5rem; justify-content: center; align-items: center;">
-    <button id="rescan-btn" style="background: none; border: 1px solid #333; color: #556; font-size: 0.85rem; padding: 0.3rem 0.8rem; border-radius: 4px; cursor: pointer;">Re-scan channels</button>
+    <a href="/rescan.html" style="background: none; border: 1px solid #333; color: #556; font-size: 0.85rem; padding: 0.3rem 0.8rem; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block;">Re-scan channels</a>
     <a href="/about.html" style="color: #556; font-size: 0.85rem; text-decoration: none;">About TV Thing</a>
   </footer>
 
@@ -221,22 +221,6 @@
       noSignal.style.display = "flex";
       await fetch("/api/stop", {method: "POST"});
       statusEl.textContent = "Stopped";
-    });
-
-    document.getElementById("rescan-btn").addEventListener("click", async () => {
-      statusEl.textContent = "Scanning for channels... this takes a few minutes";
-      try {
-        const res = await fetch("/api/rescan", {method: "POST"});
-        const data = await res.json();
-        if (data.ok) {
-          statusEl.textContent = `Scan complete! Found ${data.count} channels.`;
-          loadChannels();
-        } else {
-          statusEl.textContent = `Scan failed: ${data.error}`;
-        }
-      } catch (e) {
-        statusEl.textContent = "Scan failed";
-      }
     });
 
     loadChannels();
