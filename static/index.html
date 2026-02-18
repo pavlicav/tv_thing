@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TV Thing</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    header {
+      padding: 1.5rem;
+      text-align: center;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+    }
+    .controls {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0 1rem 1rem;
+      width: 100%;
+      max-width: 860px;
+    }
+    select {
+      flex: 1;
+      padding: 0.6rem 0.8rem;
+      font-size: 1rem;
+      border: 1px solid #333;
+      border-radius: 6px;
+      background: #16213e;
+      color: #eee;
+      cursor: pointer;
+    }
+    button {
+      padding: 0.6rem 1.2rem;
+      font-size: 1rem;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: background 0.15s;
+    }
+    #tune-btn {
+      background: #0f3460;
+      color: #eee;
+    }
+    #tune-btn:hover { background: #1a4a7a; }
+    #stop-btn {
+      background: #533;
+      color: #eee;
+    }
+    #stop-btn:hover { background: #744; }
+    .player-wrap {
+      width: 100%;
+      max-width: 860px;
+      aspect-ratio: 16 / 9;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    #status {
+      padding: 1rem;
+      text-align: center;
+      color: #888;
+      font-size: 0.9rem;
+    }
+    .no-signal {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #555;
+      font-size: 1.2rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>TV Thing</h1>
+  </header>
+
+  <div class="controls">
+    <select id="channel-select">
+      <option value="">-- Select a station --</option>
+    </select>
+    <select id="quality-select">
+      <option value="low">Low (480p)</option>
+      <option value="medium" selected>Medium (720p)</option>
+      <option value="high">High (1080)</option>
+    </select>
+    <button id="tune-btn">Tune</button>
+    <button id="stop-btn">Stop</button>
+  </div>
+
+  <div class="player-wrap">
+    <video id="player" controls></video>
+    <div class="no-signal" id="no-signal">No signal</div>
+  </div>
+
+  <div id="status">Loading channels...</div>
+
+  <footer style="padding: 2rem 1rem; text-align: center; display: flex; gap: 1.5rem; justify-content: center; align-items: center;">
+    <button id="rescan-btn" style="background: none; border: 1px solid #333; color: #556; font-size: 0.85rem; padding: 0.3rem 0.8rem; border-radius: 4px; cursor: pointer;">Re-scan channels</button>
+    <a href="/about.html" style="color: #556; font-size: 0.85rem; text-decoration: none;">About TV Thing</a>
+  </footer>
+
+  <script src="/hls.min.js"></script>
+  <script>
+    const select = document.getElementById("channel-select");
+    const qualitySelect = document.getElementById("quality-select");
+    const tuneBtn = document.getElementById("tune-btn");
+    const stopBtn = document.getElementById("stop-btn");
+    const video = document.getElementById("player");
+    const statusEl = document.getElementById("status");
+    const noSignal = document.getElementById("no-signal");
+
+    let hls = null;
+
+    async function loadChannels() {
+      try {
+        const res = await fetch("/api/channels");
+        const channels = await res.json();
+        select.innerHTML = '<option value="">-- Select a station --</option>';
+
+        channels.forEach(ch => {
+          const opt = document.createElement("option");
+          opt.value = ch.id;
+          opt.textContent = `${ch.number} ${ch.name}`;
+          select.appendChild(opt);
+        });
+
+        statusEl.textContent = `${channels.length} channels available`;
+      } catch (e) {
+        statusEl.textContent = "Failed to load channels";
+      }
+    }
+
+    function startPlayback() {
+      noSignal.style.display = "none";
+      const streamUrl = "/stream/live.m3u8";
+
+      if (hls) {
+        hls.destroy();
+        hls = null;
+      }
+
+      if (Hls.isSupported()) {
+        hls = new Hls({
+          liveDurationInfinity: true,
+          liveBackBufferLength: 0,
+          maxBufferLength: 10,
+          maxMaxBufferLength: 20,
+        });
+        hls.loadSource(streamUrl);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          video.play();
+        });
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          if (data.fatal) {
+            // Retry after a bit — stream might still be starting
+            setTimeout(() => startPlayback(), 3000);
+          }
+        });
+      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        // Safari native HLS
+        video.src = streamUrl;
+        video.play();
+      }
+    }
+
+    tuneBtn.addEventListener("click", async () => {
+      const channelId = select.value;
+      if (!channelId) return;
+
+      statusEl.textContent = "Tuning...";
+      try {
+        const res = await fetch("/api/tune", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({channel_id: channelId, quality: qualitySelect.value}),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          statusEl.textContent = `Tuned to ${data.channel.name} — buffering...`;
+          // Wait for HLS segments to be ready
+          setTimeout(() => startPlayback(), 5000);
+        } else {
+          statusEl.textContent = `Error: ${data.error}`;
+        }
+      } catch (e) {
+        statusEl.textContent = "Failed to tune";
+      }
+    });
+
+    stopBtn.addEventListener("click", async () => {
+      if (hls) {
+        hls.destroy();
+        hls = null;
+      }
+      video.src = "";
+      noSignal.style.display = "flex";
+      await fetch("/api/stop", {method: "POST"});
+      statusEl.textContent = "Stopped";
+    });
+
+    document.getElementById("rescan-btn").addEventListener("click", async () => {
+      statusEl.textContent = "Scanning for channels... this takes a few minutes";
+      try {
+        const res = await fetch("/api/rescan", {method: "POST"});
+        const data = await res.json();
+        if (data.ok) {
+          statusEl.textContent = `Scan complete! Found ${data.count} channels.`;
+          loadChannels();
+        } else {
+          statusEl.textContent = `Scan failed: ${data.error}`;
+        }
+      } catch (e) {
+        statusEl.textContent = "Scan failed";
+      }
+    });
+
+    loadChannels();
+  </script>
+</body>
+</html>

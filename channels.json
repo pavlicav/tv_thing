@@ -1,0 +1,692 @@
+[
+  {
+    "name": "WHUT",
+    "frequency": 177000000,
+    "video_pid": 113,
+    "audio_pid": 116,
+    "service_id": 1,
+    "modulation": "VSB_8",
+    "id": "whut_7_1",
+    "number": "7.1"
+  },
+  {
+    "name": "PBSKids",
+    "frequency": 177000000,
+    "video_pid": 129,
+    "audio_pid": 132,
+    "service_id": 2,
+    "modulation": "VSB_8",
+    "id": "pbskids_7_2",
+    "number": "7.2"
+  },
+  {
+    "name": "WJLA",
+    "frequency": 177000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 3,
+    "modulation": "VSB_8",
+    "id": "wjla_7_3",
+    "number": "7.3"
+  },
+  {
+    "name": "Charge!",
+    "frequency": 177000000,
+    "video_pid": 65,
+    "audio_pid": 68,
+    "service_id": 4,
+    "modulation": "VSB_8",
+    "id": "charge_7_4",
+    "number": "7.4"
+  },
+  {
+    "name": "Comet",
+    "frequency": 177000000,
+    "video_pid": 81,
+    "audio_pid": 84,
+    "service_id": 5,
+    "modulation": "VSB_8",
+    "id": "comet_7_5",
+    "number": "7.5"
+  },
+  {
+    "name": "ROAR",
+    "frequency": 177000000,
+    "video_pid": 97,
+    "audio_pid": 100,
+    "service_id": 6,
+    "modulation": "VSB_8",
+    "id": "roar_7_6",
+    "number": "7.6"
+  },
+  {
+    "name": "WUSA-HD",
+    "frequency": 189000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 1,
+    "modulation": "VSB_8",
+    "id": "wusa_hd_9_1",
+    "number": "9.1"
+  },
+  {
+    "name": "Crime",
+    "frequency": 189000000,
+    "video_pid": 65,
+    "audio_pid": 68,
+    "service_id": 2,
+    "modulation": "VSB_8",
+    "id": "crime_9_2",
+    "number": "9.2"
+  },
+  {
+    "name": "Quest",
+    "frequency": 189000000,
+    "video_pid": 81,
+    "audio_pid": 84,
+    "service_id": 3,
+    "modulation": "VSB_8",
+    "id": "quest_9_3",
+    "number": "9.3"
+  },
+  {
+    "name": "NEST",
+    "frequency": 189000000,
+    "video_pid": 97,
+    "audio_pid": 100,
+    "service_id": 4,
+    "modulation": "VSB_8",
+    "id": "nest_9_4",
+    "number": "9.4"
+  },
+  {
+    "name": "QVC",
+    "frequency": 189000000,
+    "video_pid": 129,
+    "audio_pid": 132,
+    "service_id": 5,
+    "modulation": "VSB_8",
+    "id": "qvc_9_5",
+    "number": "9.5"
+  },
+  {
+    "name": "AltaVsn",
+    "frequency": 189000000,
+    "video_pid": 113,
+    "audio_pid": 116,
+    "service_id": 6,
+    "modulation": "VSB_8",
+    "id": "altavsn_9_6",
+    "number": "9.6"
+  },
+  {
+    "name": "DEFY",
+    "frequency": 189000000,
+    "video_pid": 145,
+    "audio_pid": 148,
+    "service_id": 7,
+    "modulation": "VSB_8",
+    "id": "defy_9_7",
+    "number": "9.7"
+  },
+  {
+    "name": "ShopLC",
+    "frequency": 473000000,
+    "video_pid": 65,
+    "audio_pid": 68,
+    "service_id": 4,
+    "modulation": "VSB_8",
+    "id": "shoplc_14_1",
+    "number": "14.1"
+  },
+  {
+    "name": "SonLife",
+    "frequency": 473000000,
+    "video_pid": 81,
+    "audio_pid": 84,
+    "service_id": 6,
+    "modulation": "VSB_8",
+    "id": "sonlife_14_2",
+    "number": "14.2"
+  },
+  {
+    "name": "QVC2",
+    "frequency": 473000000,
+    "video_pid": 97,
+    "audio_pid": 100,
+    "service_id": 8,
+    "modulation": "VSB_8",
+    "id": "qvc2_14_3",
+    "number": "14.3"
+  },
+  {
+    "name": "HSN2",
+    "frequency": 473000000,
+    "video_pid": 145,
+    "audio_pid": 148,
+    "service_id": 14,
+    "modulation": "VSB_8",
+    "id": "hsn2_14_4",
+    "number": "14.4"
+  },
+  {
+    "name": "NTDTV",
+    "frequency": 473000000,
+    "video_pid": 161,
+    "audio_pid": 164,
+    "service_id": 16,
+    "modulation": "VSB_8",
+    "id": "ntdtv_14_5",
+    "number": "14.5"
+  },
+  {
+    "name": "LATV",
+    "frequency": 473000000,
+    "video_pid": 193,
+    "audio_pid": 196,
+    "service_id": 20,
+    "modulation": "VSB_8",
+    "id": "latv_14_6",
+    "number": "14.6"
+  },
+  {
+    "name": "Univision Washington D.C.",
+    "frequency": 479000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 1,
+    "modulation": "VSB_8",
+    "id": "univision_washington_d_c_15_1",
+    "number": "15.1"
+  },
+  {
+    "name": "GREAT",
+    "frequency": 479000000,
+    "video_pid": 65,
+    "audio_pid": 68,
+    "service_id": 2,
+    "modulation": "VSB_8",
+    "id": "great_15_2",
+    "number": "15.2"
+  },
+  {
+    "name": "GRIT",
+    "frequency": 479000000,
+    "video_pid": 81,
+    "audio_pid": 84,
+    "service_id": 3,
+    "modulation": "VSB_8",
+    "id": "grit_15_3",
+    "number": "15.3"
+  },
+  {
+    "name": "UNIMAS of Washington D.C.",
+    "frequency": 479000000,
+    "video_pid": 97,
+    "audio_pid": 100,
+    "service_id": 4,
+    "modulation": "VSB_8",
+    "id": "unimas_of_washington_d_c_15_4",
+    "number": "15.4"
+  },
+  {
+    "name": "WDCW-DT",
+    "frequency": 479000000,
+    "video_pid": 305,
+    "audio_pid": 308,
+    "service_id": 5,
+    "modulation": "VSB_8",
+    "id": "wdcw_dt_15_5",
+    "number": "15.5"
+  },
+  {
+    "name": "Antenna TV",
+    "frequency": 479000000,
+    "video_pid": 321,
+    "audio_pid": 324,
+    "service_id": 6,
+    "modulation": "VSB_8",
+    "id": "antenna_tv_15_6",
+    "number": "15.6"
+  },
+  {
+    "name": "WDVM-SD",
+    "frequency": 479000000,
+    "video_pid": 337,
+    "audio_pid": 340,
+    "service_id": 7,
+    "modulation": "VSB_8",
+    "id": "wdvm_sd_15_7",
+    "number": "15.7"
+  },
+  {
+    "name": "MeTV",
+    "frequency": 509000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 3,
+    "modulation": "VSB_8",
+    "id": "metv_20_1",
+    "number": "20.1"
+  },
+  {
+    "name": "STORY",
+    "frequency": 509000000,
+    "video_pid": 65,
+    "audio_pid": 68,
+    "service_id": 4,
+    "modulation": "VSB_8",
+    "id": "story_20_2",
+    "number": "20.2"
+  },
+  {
+    "name": "CATCHY",
+    "frequency": 509000000,
+    "video_pid": 81,
+    "audio_pid": 84,
+    "service_id": 5,
+    "modulation": "VSB_8",
+    "id": "catchy_20_3",
+    "number": "20.3"
+  },
+  {
+    "name": "MeTV+",
+    "frequency": 509000000,
+    "video_pid": 97,
+    "audio_pid": 100,
+    "service_id": 6,
+    "modulation": "VSB_8",
+    "id": "metv_20_4",
+    "number": "20.4"
+  },
+  {
+    "name": "TOONS",
+    "frequency": 509000000,
+    "video_pid": 113,
+    "audio_pid": 116,
+    "service_id": 7,
+    "modulation": "VSB_8",
+    "id": "toons_20_5",
+    "number": "20.5"
+  },
+  {
+    "name": "DABL",
+    "frequency": 509000000,
+    "video_pid": 129,
+    "audio_pid": 132,
+    "service_id": 8,
+    "modulation": "VSB_8",
+    "id": "dabl_20_6",
+    "number": "20.6"
+  },
+  {
+    "name": "WEST",
+    "frequency": 509000000,
+    "video_pid": 145,
+    "audio_pid": 148,
+    "service_id": 9,
+    "modulation": "VSB_8",
+    "id": "west_20_7",
+    "number": "20.7"
+  },
+  {
+    "name": "EMLW",
+    "frequency": 509000000,
+    "video_pid": 225,
+    "audio_pid": 228,
+    "service_id": 14,
+    "modulation": "VSB_8",
+    "id": "emlw_20_8",
+    "number": "20.8"
+  },
+  {
+    "name": "MPT-HD",
+    "frequency": 515000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 1,
+    "modulation": "VSB_8",
+    "id": "mpt_hd_21_1",
+    "number": "21.1"
+  },
+  {
+    "name": "MPT-2",
+    "frequency": 515000000,
+    "video_pid": 65,
+    "audio_pid": 68,
+    "service_id": 2,
+    "modulation": "VSB_8",
+    "id": "mpt_2_21_2",
+    "number": "21.2"
+  },
+  {
+    "name": "MPTKIDS",
+    "frequency": 515000000,
+    "video_pid": 81,
+    "audio_pid": 84,
+    "service_id": 3,
+    "modulation": "VSB_8",
+    "id": "mptkids_21_3",
+    "number": "21.3"
+  },
+  {
+    "name": "NHK-WLD",
+    "frequency": 515000000,
+    "video_pid": 97,
+    "audio_pid": 100,
+    "service_id": 4,
+    "modulation": "VSB_8",
+    "id": "nhk_wld_21_4",
+    "number": "21.4"
+  },
+  {
+    "name": "CWWNUV",
+    "frequency": 515000000,
+    "video_pid": 113,
+    "audio_pid": 116,
+    "service_id": 5,
+    "modulation": "VSB_8",
+    "id": "cwwnuv_21_5",
+    "number": "21.5"
+  },
+  {
+    "name": "WDCO",
+    "frequency": 533000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 3,
+    "modulation": "VSB_8",
+    "id": "wdco_24_1",
+    "number": "24.1"
+  },
+  {
+    "name": "WETA-HD",
+    "frequency": 575000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 1,
+    "modulation": "VSB_8",
+    "id": "weta_hd_31_1",
+    "number": "31.1"
+  },
+  {
+    "name": "WETA UK",
+    "frequency": 575000000,
+    "video_pid": 65,
+    "audio_pid": 68,
+    "service_id": 2,
+    "modulation": "VSB_8",
+    "id": "weta_uk_31_2",
+    "number": "31.2"
+  },
+  {
+    "name": "KIDS",
+    "frequency": 575000000,
+    "video_pid": 81,
+    "audio_pid": 84,
+    "service_id": 3,
+    "modulation": "VSB_8",
+    "id": "kids_31_3",
+    "number": "31.3"
+  },
+  {
+    "name": "WORLD",
+    "frequency": 575000000,
+    "video_pid": 97,
+    "audio_pid": 100,
+    "service_id": 4,
+    "modulation": "VSB_8",
+    "id": "world_31_4",
+    "number": "31.4"
+  },
+  {
+    "name": "METRO",
+    "frequency": 575000000,
+    "video_pid": 113,
+    "audio_pid": 116,
+    "service_id": 5,
+    "modulation": "VSB_8",
+    "id": "metro_31_5",
+    "number": "31.5"
+  },
+  {
+    "name": "HSN2",
+    "frequency": 581000000,
+    "video_pid": 101,
+    "audio_pid": 102,
+    "service_id": 101,
+    "modulation": "VSB_8",
+    "id": "hsn2_32_1",
+    "number": "32.1"
+  },
+  {
+    "name": "ShopLC",
+    "frequency": 581000000,
+    "video_pid": 201,
+    "audio_pid": 202,
+    "service_id": 201,
+    "modulation": "VSB_8",
+    "id": "shoplc_32_2",
+    "number": "32.2"
+  },
+  {
+    "name": "MovieSp",
+    "frequency": 581000000,
+    "video_pid": 301,
+    "audio_pid": 302,
+    "service_id": 301,
+    "modulation": "VSB_8",
+    "id": "moviesp_32_3",
+    "number": "32.3"
+  },
+  {
+    "name": "WRC-HD NBC 4 Washington",
+    "frequency": 593000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 3,
+    "modulation": "VSB_8",
+    "id": "wrc_hd_nbc_4_washington_34_1",
+    "number": "34.1"
+  },
+  {
+    "name": "COZI TV on WRC-TV",
+    "frequency": 593000000,
+    "video_pid": 65,
+    "audio_pid": 68,
+    "service_id": 4,
+    "modulation": "VSB_8",
+    "id": "cozi_tv_on_wrc_tv_34_2",
+    "number": "34.2"
+  },
+  {
+    "name": "WZDC",
+    "frequency": 593000000,
+    "video_pid": 81,
+    "audio_pid": 84,
+    "service_id": 5,
+    "modulation": "VSB_8",
+    "id": "wzdc_34_3",
+    "number": "34.3"
+  },
+  {
+    "name": "XITOS",
+    "frequency": 593000000,
+    "video_pid": 97,
+    "audio_pid": 100,
+    "service_id": 6,
+    "modulation": "VSB_8",
+    "id": "xitos_34_4",
+    "number": "34.4"
+  },
+  {
+    "name": "CRIMES",
+    "frequency": 593000000,
+    "video_pid": 113,
+    "audio_pid": 116,
+    "service_id": 7,
+    "modulation": "VSB_8",
+    "id": "crimes_34_5",
+    "number": "34.5"
+  },
+  {
+    "name": "Oxygen",
+    "frequency": 593000000,
+    "video_pid": 129,
+    "audio_pid": 132,
+    "service_id": 8,
+    "modulation": "VSB_8",
+    "id": "oxygen_34_6",
+    "number": "34.6"
+  },
+  {
+    "name": "ION",
+    "frequency": 599000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 3,
+    "modulation": "VSB_8",
+    "id": "ion_35_1",
+    "number": "35.1"
+  },
+  {
+    "name": "Bounce",
+    "frequency": 599000000,
+    "video_pid": 65,
+    "audio_pid": 68,
+    "service_id": 4,
+    "modulation": "VSB_8",
+    "id": "bounce_35_2",
+    "number": "35.2"
+  },
+  {
+    "name": "CourtTV",
+    "frequency": 599000000,
+    "video_pid": 81,
+    "audio_pid": 84,
+    "service_id": 5,
+    "modulation": "VSB_8",
+    "id": "courttv_35_3",
+    "number": "35.3"
+  },
+  {
+    "name": "Laff",
+    "frequency": 599000000,
+    "video_pid": 97,
+    "audio_pid": 100,
+    "service_id": 6,
+    "modulation": "VSB_8",
+    "id": "laff_35_4",
+    "number": "35.4"
+  },
+  {
+    "name": "IONPlus",
+    "frequency": 599000000,
+    "video_pid": 113,
+    "audio_pid": 116,
+    "service_id": 7,
+    "modulation": "VSB_8",
+    "id": "ionplus_35_5",
+    "number": "35.5"
+  },
+  {
+    "name": "BUSTED",
+    "frequency": 599000000,
+    "video_pid": 129,
+    "audio_pid": 132,
+    "service_id": 8,
+    "modulation": "VSB_8",
+    "id": "busted_35_6",
+    "number": "35.6"
+  },
+  {
+    "name": "GameSho",
+    "frequency": 599000000,
+    "video_pid": 145,
+    "audio_pid": 148,
+    "service_id": 9,
+    "modulation": "VSB_8",
+    "id": "gamesho_35_7",
+    "number": "35.7"
+  },
+  {
+    "name": "HSN",
+    "frequency": 599000000,
+    "video_pid": 161,
+    "audio_pid": 164,
+    "service_id": 10,
+    "modulation": "VSB_8",
+    "id": "hsn_35_8",
+    "number": "35.8"
+  },
+  {
+    "name": "WTTG-DT",
+    "frequency": 605000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 3,
+    "modulation": "VSB_8",
+    "id": "wttg_dt_36_1",
+    "number": "36.1"
+  },
+  {
+    "name": "WDCA",
+    "frequency": 605000000,
+    "video_pid": 65,
+    "audio_pid": 68,
+    "service_id": 4,
+    "modulation": "VSB_8",
+    "id": "wdca_36_2",
+    "number": "36.2"
+  },
+  {
+    "name": "BUZZR",
+    "frequency": 605000000,
+    "video_pid": 81,
+    "audio_pid": 84,
+    "service_id": 5,
+    "modulation": "VSB_8",
+    "id": "buzzr_36_3",
+    "number": "36.3"
+  },
+  {
+    "name": "START",
+    "frequency": 605000000,
+    "video_pid": 97,
+    "audio_pid": 100,
+    "service_id": 6,
+    "modulation": "VSB_8",
+    "id": "start_36_4",
+    "number": "36.4"
+  },
+  {
+    "name": "MOVIES",
+    "frequency": 605000000,
+    "video_pid": 113,
+    "audio_pid": 116,
+    "service_id": 7,
+    "modulation": "VSB_8",
+    "id": "movies_36_5",
+    "number": "36.5"
+  },
+  {
+    "name": "HEROES",
+    "frequency": 605000000,
+    "video_pid": 129,
+    "audio_pid": 132,
+    "service_id": 8,
+    "modulation": "VSB_8",
+    "id": "heroes_36_6",
+    "number": "36.6"
+  },
+  {
+    "name": "FOXWX",
+    "frequency": 605000000,
+    "video_pid": 145,
+    "audio_pid": 148,
+    "service_id": 9,
+    "modulation": "VSB_8",
+    "id": "foxwx_36_7",
+    "number": "36.7"
+  }
+]

@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+streams/
+w_scan_output.txt
+vct_data.json
+.claude/
