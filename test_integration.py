@@ -13,12 +13,16 @@ Usage:
 
 import json
 import random
+import sys
 import time
+from pathlib import Path
 
 import pytest
 import requests
 
 BASE_URL = "http://localhost:8080"
+BASE_DIR = Path(__file__).parent
+sys.path.insert(0, str(BASE_DIR))
 TUNE_TIMEOUT = 45   # seconds to wait for first HLS segment after tuning
 SEGMENT_MIN = 1_000  # minimum bytes for a valid .ts segment (some subchannels are low-bitrate)
 
@@ -320,3 +324,75 @@ class TestRescan:
             f"Expected 409 while scanning, got {r.status_code}: {r.text}"
 
         t.join(timeout=600)
+
+
+# ---------------------------------------------------------------------------
+# VCT / PSIP virtual channel number test (slow — tunes each frequency briefly)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.slow
+class TestVCT:
+    def test_vct_fetch_writes_data(self, tmp_path, monkeypatch):
+        """fetch_vct.main() tunes each frequency and writes vct_data.json
+        with at least one frequency worth of real PSIP channel records."""
+        import fetch_vct
+
+        # Point VCT cache at a temp file so we don't clobber the real one
+        monkeypatch.setattr(fetch_vct, "VCT_CACHE", tmp_path / "vct_data.json")
+        # Also redirect parse_channels output to temp dir
+        import parse_channels
+        monkeypatch.setattr(parse_channels, "VCT_CACHE", tmp_path / "vct_data.json")
+        monkeypatch.setattr(parse_channels, "CHANNELS_JSON", tmp_path / "channels.json")
+
+        fetch_vct.main()
+
+        assert (tmp_path / "vct_data.json").exists(), "vct_data.json not written"
+        vct = json.loads((tmp_path / "vct_data.json").read_text())
+        assert len(vct) > 0, "vct_data.json is empty — section filter returned no data"
+
+        total_channels = sum(len(v) for v in vct.values())
+        assert total_channels > 0, "VCT data has no channel records"
+        print(f"\n  VCT: {len(vct)} frequencies, {total_channels} channel records")
+
+        # Spot-check: each record should have major/minor in sane range
+        for freq_str, freq_entry in vct.items():
+            for sid_str, ch in freq_entry.items():
+                assert 1 <= ch["major"] <= 99,  f"major {ch['major']} out of range"
+                assert 1 <= ch["minor"] <= 999, f"minor {ch['minor']} out of range"
+
+    def test_psip_numbers_used_in_channel_list(self):
+        """After a VCT fetch, at least some channels should have a virtual
+        channel major number that differs from their RF channel number,
+        proving PSIP data was used rather than the RF fallback."""
+        vct_path = BASE_DIR / "vct_data.json"
+        if not vct_path.exists():
+            pytest.skip("vct_data.json not present — run fetch_vct.py first")
+
+        vct = json.loads(vct_path.read_text())
+        if not vct:
+            pytest.skip("vct_data.json is empty")
+
+        channels = requests.get(f"{BASE_URL}/api/channels", timeout=5).json()
+        assert channels, "No channels loaded"
+
+        # Build a set of (rf_channel, major) pairs from channels that have VCT data.
+        # If PSIP is working, major != rf_channel for many channels
+        # (e.g. WRC-TV is RF 34 but PSIP major 4).
+        psip_channels = [
+            ch for ch in channels
+            if str(ch["frequency"]) in vct
+            and str(ch["service_id"]) in vct[str(ch["frequency"])]
+        ]
+        assert psip_channels, "No channels matched VCT data"
+
+        mismatches = [
+            ch for ch in psip_channels
+            if int(ch["number"].split(".")[0]) != ch["rf_channel"]
+        ]
+        assert mismatches, (
+            "All PSIP major numbers equal their RF channel — "
+            "VCT data may not be applied (or all stations happen to match)"
+        )
+        print(f"\n  {len(mismatches)} channels with PSIP major ≠ RF channel:")
+        for ch in mismatches[:5]:
+            print(f"    {ch['number']} {ch['name']}  (RF {ch['rf_channel']})")
