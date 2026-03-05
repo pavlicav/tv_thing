@@ -22,8 +22,10 @@ VCT_CACHE = BASE_DIR / "vct_data.json"
 def freq_to_rf(freq):
     """Convert frequency in Hz to ATSC RF channel number."""
     f = freq / 1_000_000  # MHz
-    if 54 <= f <= 88:       # VHF-Lo: ch 2-6
+    if 54 <= f < 72:        # VHF-Lo ch 2-4: 54, 60, 66 MHz
         return int((f - 54) / 6) + 2
+    elif 76 <= f < 88:      # VHF-Lo ch 5-6: 76, 82 MHz (gap at 72-76)
+        return int((f - 76) / 6) + 5
     elif 174 <= f <= 216:   # VHF-Hi: ch 7-13
         return int((f - 174) / 6) + 7
     elif 470 <= f <= 890:   # UHF: ch 14-83

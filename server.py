@@ -19,13 +19,16 @@ STREAMS_DIR = BASE_DIR / "streams"
 CHANNELS_FILE = BASE_DIR / "channels.json"
 WSCAN_OUTPUT = BASE_DIR / "w_scan_output.txt"
 
-# ATSC frequency ranges
+# ATSC frequency ranges (lower-edge MHz)
+# VHF-Lo has a gap at 72-76 MHz: ch 2-4 are contiguous from 54, ch 5-6 start at 76.
 ATSC_FREQUENCIES = []
-for _ch in range(2, 7):     # VHF-Lo: ch 2-6
+for _ch in range(2, 5):     # VHF-Lo ch 2-4: 54, 60, 66 MHz
     ATSC_FREQUENCIES.append((_ch, ((_ch - 2) * 6 + 54) * 1_000_000))
-for _ch in range(7, 14):    # VHF-Hi: ch 7-13
+for _ch in range(5, 7):     # VHF-Lo ch 5-6: 76, 82 MHz (gap at 72-76)
+    ATSC_FREQUENCIES.append((_ch, ((_ch - 5) * 6 + 76) * 1_000_000))
+for _ch in range(7, 14):    # VHF-Hi: ch 7-13: 174-210 MHz
     ATSC_FREQUENCIES.append((_ch, ((_ch - 7) * 6 + 174) * 1_000_000))
-for _ch in range(14, 37):   # UHF: ch 14-36
+for _ch in range(14, 37):   # UHF: ch 14-36: 470-602 MHz
     ATSC_FREQUENCIES.append((_ch, ((_ch - 14) * 6 + 470) * 1_000_000))
 
 # Quality presets: name -> (video_bitrate, audio_bitrate, scale)
