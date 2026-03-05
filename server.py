@@ -395,9 +395,16 @@ class TVHandler(SimpleHTTPRequestHandler):
                     for line in found_channels:
                         f.write(line + "\n")
 
-                # Re-parse channels
-                import parse_channels
-                parse_channels.main()
+                # Fetch PSIP virtual channel numbers (writes vct_data.json,
+                # then calls parse_channels internally)
+                try:
+                    import fetch_vct
+                    fetch_vct.main(progress_cb=lambda msg: send_sse("status", msg))
+                except Exception as e:
+                    print(f"VCT fetch failed ({e}), falling back to RF numbers")
+                    import parse_channels
+                    parse_channels.main()
+
                 channels = load_channels()
                 send_sse("done", {"ok": True, "count": len(channels)})
             else:
