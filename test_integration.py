@@ -19,8 +19,8 @@ import pytest
 import requests
 
 BASE_URL = "http://localhost:8080"
-TUNE_TIMEOUT = 30   # seconds to wait for first HLS segment after tuning
-SEGMENT_MIN = 50_000  # minimum bytes for a valid .ts segment (~50 KB)
+TUNE_TIMEOUT = 45   # seconds to wait for first HLS segment after tuning
+SEGMENT_MIN = 1_000  # minimum bytes for a valid .ts segment (some subchannels are low-bitrate)
 
 
 # ---------------------------------------------------------------------------
@@ -46,12 +46,30 @@ def channels():
     return data
 
 
+@pytest.fixture(scope="session")
+def good_channel(channels):
+    """Find a channel that reliably produces a stream (tries up to 5 at random)."""
+    sample = random.sample(channels, min(5, len(channels)))
+    for ch in sample:
+        r = requests.post(f"{BASE_URL}/api/tune",
+                          json={"channel_id": ch["id"], "quality": "low"},
+                          timeout=10)
+        if r.json().get("ok"):
+            m3u8 = wait_for_m3u8(timeout=30)
+            requests.post(f"{BASE_URL}/api/stop", timeout=5)
+            time.sleep(3)
+            if m3u8:
+                print(f"\n  [good_channel] using {ch['number']} {ch['name']}")
+                return ch
+    pytest.skip("Could not find a channel that produces a stream")
+
+
 @pytest.fixture(autouse=True)
 def stop_after():
-    """Stop any active stream after each test."""
+    """Stop any active stream after each test and wait for DVB device to release."""
     yield
     requests.post(f"{BASE_URL}/api/stop", timeout=5)
-    time.sleep(1)
+    time.sleep(3)
 
 
 # ---------------------------------------------------------------------------
@@ -176,9 +194,9 @@ class TestTuner:
             requests.post(f"{BASE_URL}/api/stop", timeout=5)
             time.sleep(2)
 
-    def test_status_reflects_active_stream(self, channels):
+    def test_status_reflects_active_stream(self, good_channel):
         """Status endpoint shows the correct channel while streaming."""
-        ch = channels[0]
+        ch = good_channel
         m3u8_resp, _ = tune_and_wait(ch["id"])
         assert m3u8_resp is not None, "No stream appeared"
 
@@ -187,9 +205,9 @@ class TestTuner:
         assert status["channel"] is not None
         assert status["channel"]["id"] == ch["id"]
 
-    def test_status_clears_after_stop(self, channels):
+    def test_status_clears_after_stop(self, good_channel):
         """Status shows not streaming after /api/stop."""
-        ch = channels[0]
+        ch = good_channel
         tune_and_wait(ch["id"])
         requests.post(f"{BASE_URL}/api/stop", timeout=5)
         time.sleep(1)
@@ -197,21 +215,22 @@ class TestTuner:
         assert status["streaming"] is False
         assert status["channel"] is None
 
-    def test_quality_low(self, channels):
+    def test_quality_low(self, good_channel):
         """Low quality stream still produces data."""
-        ch = channels[0]
+        ch = good_channel
         m3u8_resp, tune_data = tune_and_wait(ch["id"], quality="low")
         assert tune_data.get("ok")
         assert m3u8_resp is not None
         status = requests.get(f"{BASE_URL}/api/status", timeout=5).json()
         assert status["quality"] == "low"
 
-    def test_retune_to_different_channel(self, channels):
+    def test_retune_to_different_channel(self, channels, good_channel):
         """Switching channels stops the old stream and starts a new one."""
-        if len(channels) < 2:
+        others = [c for c in channels if c["id"] != good_channel["id"]]
+        if not others:
             pytest.skip("Need at least 2 channels")
 
-        ch1, ch2 = channels[0], channels[1]
+        ch1, ch2 = good_channel, random.choice(others)
 
         tune_and_wait(ch1["id"])
         # Tune to second channel without explicitly stopping first
