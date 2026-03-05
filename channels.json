@@ -1,65 +1,5 @@
 [
   {
-    "name": "WHUT",
-    "frequency": 177000000,
-    "video_pid": 113,
-    "audio_pid": 116,
-    "service_id": 1,
-    "modulation": "VSB_8",
-    "id": "whut_7_1",
-    "number": "7.1"
-  },
-  {
-    "name": "PBSKids",
-    "frequency": 177000000,
-    "video_pid": 129,
-    "audio_pid": 132,
-    "service_id": 2,
-    "modulation": "VSB_8",
-    "id": "pbskids_7_2",
-    "number": "7.2"
-  },
-  {
-    "name": "WJLA",
-    "frequency": 177000000,
-    "video_pid": 49,
-    "audio_pid": 52,
-    "service_id": 3,
-    "modulation": "VSB_8",
-    "id": "wjla_7_3",
-    "number": "7.3"
-  },
-  {
-    "name": "Charge!",
-    "frequency": 177000000,
-    "video_pid": 65,
-    "audio_pid": 68,
-    "service_id": 4,
-    "modulation": "VSB_8",
-    "id": "charge_7_4",
-    "number": "7.4"
-  },
-  {
-    "name": "Comet",
-    "frequency": 177000000,
-    "video_pid": 81,
-    "audio_pid": 84,
-    "service_id": 5,
-    "modulation": "VSB_8",
-    "id": "comet_7_5",
-    "number": "7.5"
-  },
-  {
-    "name": "ROAR",
-    "frequency": 177000000,
-    "video_pid": 97,
-    "audio_pid": 100,
-    "service_id": 6,
-    "modulation": "VSB_8",
-    "id": "roar_7_6",
-    "number": "7.6"
-  },
-  {
     "name": "WUSA-HD",
     "frequency": 189000000,
     "video_pid": 49,
@@ -67,7 +7,8 @@
     "service_id": 1,
     "modulation": "VSB_8",
     "id": "wusa_hd_9_1",
-    "number": "9.1"
+    "number": "9.1",
+    "rf_channel": 9
   },
   {
     "name": "Crime",
@@ -77,7 +18,8 @@
     "service_id": 2,
     "modulation": "VSB_8",
     "id": "crime_9_2",
-    "number": "9.2"
+    "number": "9.2",
+    "rf_channel": 9
   },
   {
     "name": "Quest",
@@ -87,7 +29,8 @@
     "service_id": 3,
     "modulation": "VSB_8",
     "id": "quest_9_3",
-    "number": "9.3"
+    "number": "9.3",
+    "rf_channel": 9
   },
   {
     "name": "NEST",
@@ -97,7 +40,8 @@
     "service_id": 4,
     "modulation": "VSB_8",
     "id": "nest_9_4",
-    "number": "9.4"
+    "number": "9.4",
+    "rf_channel": 9
   },
   {
     "name": "QVC",
@@ -107,7 +51,8 @@
     "service_id": 5,
     "modulation": "VSB_8",
     "id": "qvc_9_5",
-    "number": "9.5"
+    "number": "9.5",
+    "rf_channel": 9
   },
   {
     "name": "AltaVsn",
@@ -117,7 +62,8 @@
     "service_id": 6,
     "modulation": "VSB_8",
     "id": "altavsn_9_6",
-    "number": "9.6"
+    "number": "9.6",
+    "rf_channel": 9
   },
   {
     "name": "DEFY",
@@ -127,7 +73,8 @@
     "service_id": 7,
     "modulation": "VSB_8",
     "id": "defy_9_7",
-    "number": "9.7"
+    "number": "9.7",
+    "rf_channel": 9
   },
   {
     "name": "ShopLC",
@@ -137,7 +84,8 @@
     "service_id": 4,
     "modulation": "VSB_8",
     "id": "shoplc_14_1",
-    "number": "14.1"
+    "number": "14.1",
+    "rf_channel": 14
   },
   {
     "name": "SonLife",
@@ -147,7 +95,8 @@
     "service_id": 6,
     "modulation": "VSB_8",
     "id": "sonlife_14_2",
-    "number": "14.2"
+    "number": "14.2",
+    "rf_channel": 14
   },
   {
     "name": "QVC2",
@@ -157,7 +106,8 @@
     "service_id": 8,
     "modulation": "VSB_8",
     "id": "qvc2_14_3",
-    "number": "14.3"
+    "number": "14.3",
+    "rf_channel": 14
   },
   {
     "name": "HSN2",
@@ -167,7 +117,8 @@
     "service_id": 14,
     "modulation": "VSB_8",
     "id": "hsn2_14_4",
-    "number": "14.4"
+    "number": "14.4",
+    "rf_channel": 14
   },
   {
     "name": "NTDTV",
@@ -177,7 +128,8 @@
     "service_id": 16,
     "modulation": "VSB_8",
     "id": "ntdtv_14_5",
-    "number": "14.5"
+    "number": "14.5",
+    "rf_channel": 14
   },
   {
     "name": "LATV",
@@ -187,7 +139,8 @@
     "service_id": 20,
     "modulation": "VSB_8",
     "id": "latv_14_6",
-    "number": "14.6"
+    "number": "14.6",
+    "rf_channel": 14
   },
   {
     "name": "Univision Washington D.C.",
@@ -197,7 +150,8 @@
     "service_id": 1,
     "modulation": "VSB_8",
     "id": "univision_washington_d_c_15_1",
-    "number": "15.1"
+    "number": "15.1",
+    "rf_channel": 15
   },
   {
     "name": "GREAT",
@@ -207,7 +161,8 @@
     "service_id": 2,
     "modulation": "VSB_8",
     "id": "great_15_2",
-    "number": "15.2"
+    "number": "15.2",
+    "rf_channel": 15
   },
   {
     "name": "GRIT",
@@ -217,7 +172,8 @@
     "service_id": 3,
     "modulation": "VSB_8",
     "id": "grit_15_3",
-    "number": "15.3"
+    "number": "15.3",
+    "rf_channel": 15
   },
   {
     "name": "UNIMAS of Washington D.C.",
@@ -227,7 +183,8 @@
     "service_id": 4,
     "modulation": "VSB_8",
     "id": "unimas_of_washington_d_c_15_4",
-    "number": "15.4"
+    "number": "15.4",
+    "rf_channel": 15
   },
   {
     "name": "WDCW-DT",
@@ -237,7 +194,8 @@
     "service_id": 5,
     "modulation": "VSB_8",
     "id": "wdcw_dt_15_5",
-    "number": "15.5"
+    "number": "15.5",
+    "rf_channel": 15
   },
   {
     "name": "Antenna TV",
@@ -247,7 +205,8 @@
     "service_id": 6,
     "modulation": "VSB_8",
     "id": "antenna_tv_15_6",
-    "number": "15.6"
+    "number": "15.6",
+    "rf_channel": 15
   },
   {
     "name": "WDVM-SD",
@@ -257,7 +216,8 @@
     "service_id": 7,
     "modulation": "VSB_8",
     "id": "wdvm_sd_15_7",
-    "number": "15.7"
+    "number": "15.7",
+    "rf_channel": 15
   },
   {
     "name": "MeTV",
@@ -267,7 +227,8 @@
     "service_id": 3,
     "modulation": "VSB_8",
     "id": "metv_20_1",
-    "number": "20.1"
+    "number": "20.1",
+    "rf_channel": 20
   },
   {
     "name": "STORY",
@@ -277,7 +238,8 @@
     "service_id": 4,
     "modulation": "VSB_8",
     "id": "story_20_2",
-    "number": "20.2"
+    "number": "20.2",
+    "rf_channel": 20
   },
   {
     "name": "CATCHY",
@@ -287,7 +249,8 @@
     "service_id": 5,
     "modulation": "VSB_8",
     "id": "catchy_20_3",
-    "number": "20.3"
+    "number": "20.3",
+    "rf_channel": 20
   },
   {
     "name": "MeTV+",
@@ -297,7 +260,8 @@
     "service_id": 6,
     "modulation": "VSB_8",
     "id": "metv_20_4",
-    "number": "20.4"
+    "number": "20.4",
+    "rf_channel": 20
   },
   {
     "name": "TOONS",
@@ -307,7 +271,8 @@
     "service_id": 7,
     "modulation": "VSB_8",
     "id": "toons_20_5",
-    "number": "20.5"
+    "number": "20.5",
+    "rf_channel": 20
   },
   {
     "name": "DABL",
@@ -317,7 +282,8 @@
     "service_id": 8,
     "modulation": "VSB_8",
     "id": "dabl_20_6",
-    "number": "20.6"
+    "number": "20.6",
+    "rf_channel": 20
   },
   {
     "name": "WEST",
@@ -327,7 +293,8 @@
     "service_id": 9,
     "modulation": "VSB_8",
     "id": "west_20_7",
-    "number": "20.7"
+    "number": "20.7",
+    "rf_channel": 20
   },
   {
     "name": "EMLW",
@@ -337,7 +304,8 @@
     "service_id": 14,
     "modulation": "VSB_8",
     "id": "emlw_20_8",
-    "number": "20.8"
+    "number": "20.8",
+    "rf_channel": 20
   },
   {
     "name": "MPT-HD",
@@ -347,7 +315,8 @@
     "service_id": 1,
     "modulation": "VSB_8",
     "id": "mpt_hd_21_1",
-    "number": "21.1"
+    "number": "21.1",
+    "rf_channel": 21
   },
   {
     "name": "MPT-2",
@@ -357,7 +326,8 @@
     "service_id": 2,
     "modulation": "VSB_8",
     "id": "mpt_2_21_2",
-    "number": "21.2"
+    "number": "21.2",
+    "rf_channel": 21
   },
   {
     "name": "MPTKIDS",
@@ -367,7 +337,8 @@
     "service_id": 3,
     "modulation": "VSB_8",
     "id": "mptkids_21_3",
-    "number": "21.3"
+    "number": "21.3",
+    "rf_channel": 21
   },
   {
     "name": "NHK-WLD",
@@ -377,7 +348,8 @@
     "service_id": 4,
     "modulation": "VSB_8",
     "id": "nhk_wld_21_4",
-    "number": "21.4"
+    "number": "21.4",
+    "rf_channel": 21
   },
   {
     "name": "CWWNUV",
@@ -387,7 +359,8 @@
     "service_id": 5,
     "modulation": "VSB_8",
     "id": "cwwnuv_21_5",
-    "number": "21.5"
+    "number": "21.5",
+    "rf_channel": 21
   },
   {
     "name": "WDCO",
@@ -397,7 +370,8 @@
     "service_id": 3,
     "modulation": "VSB_8",
     "id": "wdco_24_1",
-    "number": "24.1"
+    "number": "24.1",
+    "rf_channel": 24
   },
   {
     "name": "WETA-HD",
@@ -407,7 +381,8 @@
     "service_id": 1,
     "modulation": "VSB_8",
     "id": "weta_hd_31_1",
-    "number": "31.1"
+    "number": "31.1",
+    "rf_channel": 31
   },
   {
     "name": "WETA UK",
@@ -417,7 +392,8 @@
     "service_id": 2,
     "modulation": "VSB_8",
     "id": "weta_uk_31_2",
-    "number": "31.2"
+    "number": "31.2",
+    "rf_channel": 31
   },
   {
     "name": "KIDS",
@@ -427,7 +403,8 @@
     "service_id": 3,
     "modulation": "VSB_8",
     "id": "kids_31_3",
-    "number": "31.3"
+    "number": "31.3",
+    "rf_channel": 31
   },
   {
     "name": "WORLD",
@@ -437,7 +414,8 @@
     "service_id": 4,
     "modulation": "VSB_8",
     "id": "world_31_4",
-    "number": "31.4"
+    "number": "31.4",
+    "rf_channel": 31
   },
   {
     "name": "METRO",
@@ -447,7 +425,8 @@
     "service_id": 5,
     "modulation": "VSB_8",
     "id": "metro_31_5",
-    "number": "31.5"
+    "number": "31.5",
+    "rf_channel": 31
   },
   {
     "name": "HSN2",
@@ -457,7 +436,8 @@
     "service_id": 101,
     "modulation": "VSB_8",
     "id": "hsn2_32_1",
-    "number": "32.1"
+    "number": "32.1",
+    "rf_channel": 32
   },
   {
     "name": "ShopLC",
@@ -467,7 +447,8 @@
     "service_id": 201,
     "modulation": "VSB_8",
     "id": "shoplc_32_2",
-    "number": "32.2"
+    "number": "32.2",
+    "rf_channel": 32
   },
   {
     "name": "MovieSp",
@@ -477,7 +458,8 @@
     "service_id": 301,
     "modulation": "VSB_8",
     "id": "moviesp_32_3",
-    "number": "32.3"
+    "number": "32.3",
+    "rf_channel": 32
   },
   {
     "name": "WRC-HD NBC 4 Washington",
@@ -487,7 +469,8 @@
     "service_id": 3,
     "modulation": "VSB_8",
     "id": "wrc_hd_nbc_4_washington_34_1",
-    "number": "34.1"
+    "number": "34.1",
+    "rf_channel": 34
   },
   {
     "name": "COZI TV on WRC-TV",
@@ -497,7 +480,8 @@
     "service_id": 4,
     "modulation": "VSB_8",
     "id": "cozi_tv_on_wrc_tv_34_2",
-    "number": "34.2"
+    "number": "34.2",
+    "rf_channel": 34
   },
   {
     "name": "WZDC",
@@ -507,7 +491,8 @@
     "service_id": 5,
     "modulation": "VSB_8",
     "id": "wzdc_34_3",
-    "number": "34.3"
+    "number": "34.3",
+    "rf_channel": 34
   },
   {
     "name": "XITOS",
@@ -517,7 +502,8 @@
     "service_id": 6,
     "modulation": "VSB_8",
     "id": "xitos_34_4",
-    "number": "34.4"
+    "number": "34.4",
+    "rf_channel": 34
   },
   {
     "name": "CRIMES",
@@ -527,7 +513,8 @@
     "service_id": 7,
     "modulation": "VSB_8",
     "id": "crimes_34_5",
-    "number": "34.5"
+    "number": "34.5",
+    "rf_channel": 34
   },
   {
     "name": "Oxygen",
@@ -537,7 +524,8 @@
     "service_id": 8,
     "modulation": "VSB_8",
     "id": "oxygen_34_6",
-    "number": "34.6"
+    "number": "34.6",
+    "rf_channel": 34
   },
   {
     "name": "ION",
@@ -547,7 +535,8 @@
     "service_id": 3,
     "modulation": "VSB_8",
     "id": "ion_35_1",
-    "number": "35.1"
+    "number": "35.1",
+    "rf_channel": 35
   },
   {
     "name": "Bounce",
@@ -557,7 +546,8 @@
     "service_id": 4,
     "modulation": "VSB_8",
     "id": "bounce_35_2",
-    "number": "35.2"
+    "number": "35.2",
+    "rf_channel": 35
   },
   {
     "name": "CourtTV",
@@ -567,7 +557,8 @@
     "service_id": 5,
     "modulation": "VSB_8",
     "id": "courttv_35_3",
-    "number": "35.3"
+    "number": "35.3",
+    "rf_channel": 35
   },
   {
     "name": "Laff",
@@ -577,7 +568,8 @@
     "service_id": 6,
     "modulation": "VSB_8",
     "id": "laff_35_4",
-    "number": "35.4"
+    "number": "35.4",
+    "rf_channel": 35
   },
   {
     "name": "IONPlus",
@@ -587,7 +579,8 @@
     "service_id": 7,
     "modulation": "VSB_8",
     "id": "ionplus_35_5",
-    "number": "35.5"
+    "number": "35.5",
+    "rf_channel": 35
   },
   {
     "name": "BUSTED",
@@ -597,7 +590,8 @@
     "service_id": 8,
     "modulation": "VSB_8",
     "id": "busted_35_6",
-    "number": "35.6"
+    "number": "35.6",
+    "rf_channel": 35
   },
   {
     "name": "GameSho",
@@ -607,7 +601,8 @@
     "service_id": 9,
     "modulation": "VSB_8",
     "id": "gamesho_35_7",
-    "number": "35.7"
+    "number": "35.7",
+    "rf_channel": 35
   },
   {
     "name": "HSN",
@@ -617,7 +612,8 @@
     "service_id": 10,
     "modulation": "VSB_8",
     "id": "hsn_35_8",
-    "number": "35.8"
+    "number": "35.8",
+    "rf_channel": 35
   },
   {
     "name": "WTTG-DT",
@@ -627,7 +623,8 @@
     "service_id": 3,
     "modulation": "VSB_8",
     "id": "wttg_dt_36_1",
-    "number": "36.1"
+    "number": "36.1",
+    "rf_channel": 36
   },
   {
     "name": "WDCA",
@@ -637,7 +634,8 @@
     "service_id": 4,
     "modulation": "VSB_8",
     "id": "wdca_36_2",
-    "number": "36.2"
+    "number": "36.2",
+    "rf_channel": 36
   },
   {
     "name": "BUZZR",
@@ -647,7 +645,8 @@
     "service_id": 5,
     "modulation": "VSB_8",
     "id": "buzzr_36_3",
-    "number": "36.3"
+    "number": "36.3",
+    "rf_channel": 36
   },
   {
     "name": "START",
@@ -657,7 +656,8 @@
     "service_id": 6,
     "modulation": "VSB_8",
     "id": "start_36_4",
-    "number": "36.4"
+    "number": "36.4",
+    "rf_channel": 36
   },
   {
     "name": "MOVIES",
@@ -667,7 +667,8 @@
     "service_id": 7,
     "modulation": "VSB_8",
     "id": "movies_36_5",
-    "number": "36.5"
+    "number": "36.5",
+    "rf_channel": 36
   },
   {
     "name": "HEROES",
@@ -677,7 +678,8 @@
     "service_id": 8,
     "modulation": "VSB_8",
     "id": "heroes_36_6",
-    "number": "36.6"
+    "number": "36.6",
+    "rf_channel": 36
   },
   {
     "name": "FOXWX",
@@ -687,6 +689,7 @@
     "service_id": 9,
     "modulation": "VSB_8",
     "id": "foxwx_36_7",
-    "number": "36.7"
+    "number": "36.7",
+    "rf_channel": 36
   }
 ]

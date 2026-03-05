@@ -103,6 +103,7 @@ def parse():
             chan_id = f"{chan_id}_{number.replace('.', '_')}"
             entry["id"] = chan_id
             entry["number"] = number
+            entry["rf_channel"] = rf
             channels.append(entry)
 
     # Sort by major, then minor

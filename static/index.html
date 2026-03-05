@@ -178,7 +178,8 @@
       font-variant-numeric: tabular-nums;
     }
     .ch-btn.active .ch-num { opacity: 1; }
-    .ch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .ch-rf { font-size: 0.65rem; color: #555; white-space: nowrap; margin-left: auto; padding-left: 0.4rem; }
 
     /* =============================================
        WIDE MODE — landscape, close to 16:9
@@ -319,7 +320,7 @@
           const btn = document.createElement("button");
           btn.className = "ch-btn";
           btn.dataset.id = ch.id;
-          btn.innerHTML = `<span class="ch-num">${ch.number}</span><span class="ch-name">${ch.name}</span>`;
+          btn.innerHTML = `<span class="ch-num">${ch.number}</span><span class="ch-name">${ch.name}</span><span class="ch-rf">RF&nbsp;${ch.rf_channel}</span>`;
           btn.addEventListener("click", () => {
             tune(ch.id);
             if (isWide()) closeChannelList();
