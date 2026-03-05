@@ -410,15 +410,15 @@
       try {
         const res = await fetch("/api/status");
         const data = await res.json();
-        if (data.tuned && data.channel_id) {
-          currentChannelId = data.channel_id;
+        if (data.streaming && data.channel) {
+          currentChannelId = data.channel.id;
           currentQuality = data.quality || "medium";
           qualityPills.forEach(p => {
             p.classList.toggle("active", p.dataset.quality === currentQuality);
           });
-          setActiveChannel(data.channel_id);
+          setActiveChannel(data.channel.id);
           startPlayback();
-          statusEl.textContent = data.channel_name || "Playing";
+          statusEl.textContent = data.channel.name || "Playing";
         }
       } catch (e) {}
     }

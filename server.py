@@ -40,6 +40,7 @@ procs = {"vlc": None}
 current_channel = None
 current_quality = "medium"
 lock = threading.Lock()
+scanning = False  # True while w_scan is running; blocks /api/tune
 
 
 def load_channels():
@@ -204,6 +205,9 @@ class TVHandler(SimpleHTTPRequestHandler):
                 return
 
             with lock:
+                if scanning:
+                    self.send_json({"error": "Channel scan in progress"}, status=409)
+                    return
                 ok = start_streaming(channel, quality)
 
             if ok:
@@ -253,6 +257,10 @@ class TVHandler(SimpleHTTPRequestHandler):
             time.sleep(1)
 
             send_sse("status", "Starting channel scan...")
+
+            global scanning
+            with lock:
+                scanning = True
 
             # Run w_scan: -fa = ATSC, -c US = country, -X = output format
             # Note: w_scan buffers all stdout until exit, so channels
@@ -385,10 +393,8 @@ class TVHandler(SimpleHTTPRequestHandler):
                         f.write(line + "\n")
 
                 # Re-parse channels
-                subprocess.run(
-                    ["python3", str(BASE_DIR / "parse_channels.py")],
-                    capture_output=True, timeout=30,
-                )
+                import parse_channels
+                parse_channels.main()
                 channels = load_channels()
                 send_sse("done", {"ok": True, "count": len(channels)})
             else:
@@ -401,6 +407,9 @@ class TVHandler(SimpleHTTPRequestHandler):
                 send_sse("done", {"ok": False, "error": str(e)})
             except Exception:
                 pass
+        finally:
+            with lock:
+                scanning = False
 
     def send_json(self, data, status=200):
         body = json.dumps(data).encode()

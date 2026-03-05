@@ -9,7 +9,7 @@ SCAN_OUTPUT="$SCRIPT_DIR/w_scan_output.txt"
 CHANNELS_CONF="$SCRIPT_DIR/channels.conf"
 
 echo "Scanning for ATSC channels (this takes a few minutes)..."
-w_scan -fa -c US -X > "$SCAN_OUTPUT" 2>&1 || true
+w_scan -fa -c US -X > "$SCAN_OUTPUT" 2>/dev/null || true
 
 # Extract just the channel lines (VLC/xine format)
 grep -v "^;" "$SCAN_OUTPUT" | grep ":" > "$CHANNELS_CONF" 2>/dev/null || true
