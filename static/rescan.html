@@ -8,38 +8,47 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #1a1a2e;
-      color: #eee;
+      font-family: Georgia, "Times New Roman", serif;
+      background: #111;
+      color: #d4cfc7;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
       padding: 1.5rem;
     }
-    h1 { font-size: 1.5rem; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 1.5rem; }
+    h1 {
+      font-size: 1.3rem;
+      font-weight: 400;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #b8a070;
+      margin-bottom: 1.5rem;
+    }
     .card {
-      background: #16213e;
-      border: 1px solid #333;
-      border-radius: 8px;
+      background: #161616;
+      border: 1px solid #2a2520;
+      border-radius: 4px;
       padding: 1.5rem;
       max-width: 700px;
       width: 100%;
     }
     .warning {
-      background: #3a2a00;
-      border: 1px solid #665500;
-      border-radius: 6px;
+      background: #1a1710;
+      border: 1px solid #3a3020;
+      border-radius: 3px;
       padding: 1rem;
       margin-bottom: 1.5rem;
-      line-height: 1.5;
-      color: #eea;
+      line-height: 1.7;
+      color: #c8b888;
+      font-size: 0.95rem;
     }
-    .warning strong { color: #ffc; }
+    .warning strong { color: #d4c090; }
     .info {
-      color: #999;
-      font-size: 0.9rem;
-      line-height: 1.5;
+      color: #777;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.85rem;
+      line-height: 1.6;
       margin-bottom: 1.5rem;
     }
     .actions {
@@ -47,66 +56,84 @@
       gap: 0.75rem;
     }
     button {
-      padding: 0.6rem 1.2rem;
-      font-size: 1rem;
-      border: none;
-      border-radius: 6px;
+      padding: 0.5rem 1rem;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.85rem;
+      border: 1px solid #333;
+      border-radius: 3px;
       cursor: pointer;
       font-weight: 500;
-      transition: background 0.15s;
+      transition: all 0.15s;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }
-    #start-btn { background: #0f3460; color: #eee; }
-    #start-btn:hover { background: #1a4a7a; }
-    #start-btn:disabled { background: #222; color: #555; cursor: not-allowed; }
-    #cancel-btn { background: #333; color: #ccc; }
-    #cancel-btn:hover { background: #444; }
+    #start-btn {
+      background: #2a2520;
+      color: #b8a070;
+      border-color: #4a3f30;
+    }
+    #start-btn:hover { background: #3a3025; border-color: #6a5a40; }
+    #start-btn:disabled { background: #1a1a1a; color: #444; border-color: #252525; cursor: not-allowed; }
+    #cancel-btn {
+      background: #1a1a1a;
+      color: #888;
+      border-color: #333;
+    }
+    #cancel-btn:hover { background: #252525; color: #aaa; }
 
     #progress {
       display: none;
       margin-top: 1.5rem;
     }
     #progress-bar-wrap {
-      background: #111;
-      border-radius: 4px;
-      height: 6px;
+      background: #0a0a0a;
+      border: 1px solid #222;
+      border-radius: 2px;
+      height: 4px;
       margin-bottom: 1rem;
       overflow: hidden;
     }
     #progress-bar {
-      background: #0f3460;
+      background: #8a7a5a;
       height: 100%;
       width: 0%;
       transition: width 0.3s;
     }
     #scan-status {
-      font-size: 0.9rem;
-      color: #888;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.8rem;
+      color: #666;
       margin-bottom: 1rem;
+      letter-spacing: 0.03em;
     }
     #results {
-      background: #111;
-      border-radius: 6px;
+      background: #0a0a0a;
+      border: 1px solid #1a1a1a;
+      border-radius: 3px;
       padding: 0;
       max-height: 50vh;
       overflow-y: auto;
       font-family: "SF Mono", "Menlo", "Consolas", monospace;
-      font-size: 0.85rem;
+      font-size: 0.8rem;
     }
     #results:empty { display: none; }
+    #results::-webkit-scrollbar { width: 6px; }
+    #results::-webkit-scrollbar-track { background: #0a0a0a; }
+    #results::-webkit-scrollbar-thumb { background: #2a2520; border-radius: 3px; }
     .freq-group {
-      border-bottom: 1px solid #222;
-      padding: 0.6rem 0.8rem;
+      border-bottom: 1px solid #1a1a1a;
+      padding: 0.5rem 0.75rem;
     }
     .freq-group:last-child { border-bottom: none; }
     .freq-header {
-      color: #6a9fd8;
+      color: #8a7a5a;
       font-weight: 600;
-      margin-bottom: 0.3rem;
+      margin-bottom: 0.2rem;
     }
-    .freq-header .lock { color: #5a5; }
-    .freq-header .nolock { color: #a55; }
+    .freq-header .lock { color: #6a8a5a; }
+    .freq-header .nolock { color: #555; }
     .channel-line {
-      color: #bbb;
+      color: #999;
       padding-left: 1rem;
       line-height: 1.6;
     }
@@ -114,10 +141,12 @@
       padding: 1rem;
       text-align: center;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.85rem;
     }
-    .done-msg.success { color: #5a5; }
-    .done-msg.error { color: #a55; }
-    a { color: #6a9fd8; }
+    .done-msg.success { color: #6a8a5a; }
+    .done-msg.error { color: #a07060; }
+    a { color: #b8a070; text-decoration: none; }
+    a:hover { color: #d4c090; }
   </style>
 </head>
 <body>
@@ -181,7 +210,7 @@
 
         const header = document.createElement("div");
         header.className = "freq-header";
-        header.textContent = `RF ${data.rf_channel}  (${data.frequency_mhz} MHz) — scanning...`;
+        header.textContent = `RF ${data.rf_channel}  (${data.frequency_mhz} MHz) \u2014 scanning...`;
         group.appendChild(header);
         results.appendChild(group);
         results.scrollTop = results.scrollHeight;
@@ -193,9 +222,9 @@
         if (group) {
           const header = group.querySelector(".freq-header");
           if (data.locked) {
-            header.innerHTML = `RF ${data.rf_channel}  (${data.frequency_mhz} MHz) — <span class="lock">locked</span>`;
+            header.innerHTML = `RF ${data.rf_channel}  (${data.frequency_mhz} MHz) \u2014 <span class="lock">locked</span>`;
           } else {
-            header.innerHTML = `RF ${data.rf_channel}  (${data.frequency_mhz} MHz) — <span class="nolock">no signal</span>`;
+            header.innerHTML = `RF ${data.rf_channel}  (${data.frequency_mhz} MHz) \u2014 <span class="nolock">no signal</span>`;
           }
         }
       });
@@ -220,7 +249,7 @@
 
         const msg = document.createElement("div");
         if (data.ok) {
-          scanStatus.textContent = "Scan complete!";
+          scanStatus.textContent = "Scan complete.";
           msg.className = "done-msg success";
           msg.innerHTML = `Found ${data.count} channels. <a href="/">Return to TV Thing</a>`;
         } else {

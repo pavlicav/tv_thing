@@ -240,7 +240,17 @@ class TVHandler(SimpleHTTPRequestHandler):
             send_sse("status", "Stopping active streams...")
             with lock:
                 stop_streaming()
-            time.sleep(2)
+            # VLC can be slow to release the DVB device after termination.
+            # Wait and verify no vlc processes remain.
+            for _ in range(10):
+                time.sleep(1)
+                result = subprocess.run(
+                    ["pgrep", "-x", "vlc"],
+                    capture_output=True,
+                )
+                if result.returncode != 0:
+                    break
+            time.sleep(1)
 
             send_sse("status", "Starting channel scan...")
 

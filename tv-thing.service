@@ -1,0 +1,14 @@
+[Unit]
+Description=TV Thing ATSC streaming server
+After=network.target
+
+[Service]
+Type=simple
+User=vivian
+WorkingDirectory=/home/vivian/tv_thing
+ExecStart=/home/vivian/miniconda3/bin/python3 /home/vivian/tv_thing/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -7,80 +7,38 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root { --bar-h: 2.2rem; }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #1a1a2e;
-      color: #eee;
-      min-height: 100vh;
+      font-family: Georgia, "Times New Roman", serif;
+      background: #0a0a0a;
+      color: #d4cfc7;
       display: flex;
       flex-direction: column;
-      align-items: center;
     }
-    header {
-      padding: 1.5rem;
-      text-align: center;
-    }
-    h1 {
-      font-size: 1.5rem;
-      font-weight: 600;
-      letter-spacing: 0.05em;
-    }
-    .controls {
+
+    /* =============================================
+       TALL MODE (default) — portrait / square
+       Video at 16:9 top, channel list scrolls below
+       ============================================= */
+    .player-col {
       display: flex;
-      gap: 0.75rem;
-      align-items: center;
-      padding: 0 1rem 1rem;
+      flex-direction: column;
       width: 100%;
-      max-width: 860px;
     }
-    select {
-      flex: 1;
-      padding: 0.6rem 0.8rem;
-      font-size: 1rem;
-      border: 1px solid #333;
-      border-radius: 6px;
-      background: #16213e;
-      color: #eee;
-      cursor: pointer;
-    }
-    button {
-      padding: 0.6rem 1.2rem;
-      font-size: 1rem;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      font-weight: 500;
-      transition: background 0.15s;
-    }
-    #tune-btn {
-      background: #0f3460;
-      color: #eee;
-    }
-    #tune-btn:hover { background: #1a4a7a; }
-    #stop-btn {
-      background: #533;
-      color: #eee;
-    }
-    #stop-btn:hover { background: #744; }
-    .player-wrap {
+    .screen {
       width: 100%;
-      max-width: 860px;
       aspect-ratio: 16 / 9;
       background: #000;
-      border-radius: 8px;
-      overflow: hidden;
       position: relative;
+      overflow: hidden;
+      flex-shrink: 0;
     }
     video {
-      width: 100%;
-      height: 100%;
+      width: 100%; height: 100%;
       display: block;
-    }
-    #status {
-      padding: 1rem;
-      text-align: center;
-      color: #888;
-      font-size: 0.9rem;
+      object-fit: contain;
     }
     .no-signal {
       position: absolute;
@@ -88,69 +46,319 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      flex-direction: column;
+      gap: 0.5rem;
+      color: #333;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.9rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      background: repeating-linear-gradient(
+        0deg, transparent, transparent 2px,
+        rgba(255,255,255,0.01) 2px, rgba(255,255,255,0.01) 4px
+      );
+    }
+
+    /* Control bar */
+    .control-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0 0.75rem;
+      height: var(--bar-h);
+      background: #0f0f0f;
+      border-top: 1px solid #1a1a1a;
+      flex-shrink: 0;
+    }
+    .brand {
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 0.65rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #3a3530;
+    }
+    .bar-sep { width: 1px; height: 12px; background: #222; }
+    .quality-pills {
+      display: flex;
+      border: 1px solid #333;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .quality-pill {
+      padding: 0.2rem 0.6rem;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.7rem;
+      font-weight: 500;
+      letter-spacing: 0.03em;
+      background: #1a1a1a;
+      color: #777;
+      border: none;
+      cursor: pointer;
+      transition: all 0.15s;
+      border-right: 1px solid #333;
+    }
+    .quality-pill:last-child { border-right: none; }
+    .quality-pill:hover { background: #222; color: #aaa; }
+    .quality-pill.active { background: #2a2520; color: #b8a070; }
+    #status {
       color: #555;
-      font-size: 1.2rem;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.7rem;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .bar-spacer { flex: 1; }
+    .bar-link {
+      color: #383838;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.6rem;
+      text-decoration: none;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      transition: color 0.15s;
+    }
+    .bar-link:hover { color: #8a7a5a; }
+    #stop-btn {
+      padding: 0.2rem 0.7rem;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.7rem;
+      font-weight: 500;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      background: #1a1a1a;
+      color: #888;
+      border: 1px solid #333;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    #stop-btn:hover { background: #252525; color: #aaa; }
+
+    /* Channel toggle button — hidden in tall mode */
+    #ch-toggle { display: none; }
+
+    /* Channel list — tall mode: normal flow, scrollable */
+    .channel-list {
+      overflow-y: auto;
+      background: #0f0f0f;
+      border-top: 1px solid #222;
+      scrollbar-width: thin;
+      scrollbar-color: #333 transparent;
+    }
+    .channel-list::-webkit-scrollbar { width: 4px; }
+    .channel-list::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+    .ch-btn {
+      display: flex;
+      align-items: baseline;
+      gap: 0.5rem;
+      padding: 0.5rem 0.7rem;
+      width: 100%;
+      background: none;
+      border: none;
+      border-bottom: 1px solid #1a1a1a;
+      color: #888;
+      cursor: pointer;
+      transition: all 0.12s;
+      text-align: left;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.8rem;
+      line-height: 1.3;
+    }
+    .ch-btn:last-child { border-bottom: none; }
+    .ch-btn:hover { background: #1a1816; color: #ccc; }
+    .ch-btn.active { background: #2a2520; color: #b8a070; }
+    .ch-num {
+      font-weight: 600;
+      font-size: 0.75rem;
+      min-width: 2.5em;
+      opacity: 0.7;
+      font-variant-numeric: tabular-nums;
+    }
+    .ch-btn.active .ch-num { opacity: 1; }
+    .ch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* =============================================
+       WIDE MODE — landscape, close to 16:9
+       Video fills window, channel list is a
+       slide-up panel triggered by a button
+       ============================================= */
+    @media (min-aspect-ratio: 4/3) {
+      html, body { height: 100%; overflow: hidden; }
+
+      .player-col { flex: 1; min-height: 0; position: relative; }
+
+      .screen { aspect-ratio: unset; width: 100%; height: 100%; }
+
+      /* control bar fixed to bottom */
+      .control-bar {
+        position: fixed;
+        bottom: 0; left: 0; right: 0;
+        z-index: 20;
+        border-top: 1px solid #1a1a1a;
+      }
+
+      /* push video up so it doesn't hide under the bar */
+      .screen { padding-bottom: var(--bar-h); }
+
+      /* channel toggle visible */
+      #ch-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        padding: 0.2rem 0.7rem;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 0.7rem;
+        font-weight: 500;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        background: #1a1a1a;
+        color: #888;
+        border: 1px solid #333;
+        border-radius: 999px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      #ch-toggle:hover { background: #252525; color: #aaa; }
+      #ch-toggle.open { background: #2a2520; color: #b8a070; border-color: #4a3f30; }
+
+      /* channel list: slide-up panel fixed above the control bar */
+      .channel-list {
+        position: fixed;
+        left: 0; right: 0;
+        bottom: var(--bar-h);
+        max-height: 45%;
+        overflow-y: auto;
+        background: rgba(12, 12, 12, 0.97);
+        border-top: 1px solid #333;
+        z-index: 15;
+        transform: translateY(100%);
+        transition: transform 0.25s ease;
+      }
+      .channel-list.open {
+        transform: translateY(0);
+      }
     }
   </style>
 </head>
 <body>
-  <header>
-    <h1>TV Thing</h1>
-  </header>
-
-  <div class="controls">
-    <select id="channel-select">
-      <option value="">-- Select a station --</option>
-    </select>
-    <select id="quality-select">
-      <option value="low">Low (480p)</option>
-      <option value="medium" selected>Medium (720p)</option>
-      <option value="high">High (1080)</option>
-    </select>
-    <button id="tune-btn">Tune</button>
-    <button id="stop-btn">Stop</button>
+  <div class="player-col">
+    <div class="screen">
+      <video id="player" controls></video>
+      <div class="no-signal" id="no-signal">No Signal</div>
+    </div>
+    <div class="control-bar">
+      <span class="brand">tv thing</span>
+      <div class="bar-sep"></div>
+      <div class="quality-pills">
+        <button class="quality-pill" data-quality="low">480p</button>
+        <button class="quality-pill active" data-quality="medium">720p</button>
+        <button class="quality-pill" data-quality="high">1080p</button>
+      </div>
+      <span id="status">Loading channels...</span>
+      <div class="bar-spacer"></div>
+      <button id="ch-toggle">&#9776; Channels</button>
+      <a class="bar-link" href="/rescan.html">Re-scan</a>
+      <a class="bar-link" href="/about.html">About</a>
+      <button id="stop-btn">Stop</button>
+    </div>
+    <div class="channel-list" id="channel-list"></div>
   </div>
-
-  <div class="player-wrap">
-    <video id="player" controls></video>
-    <div class="no-signal" id="no-signal">No signal</div>
-  </div>
-
-  <div id="status">Loading channels...</div>
-
-  <footer style="padding: 2rem 1rem; text-align: center; display: flex; gap: 1.5rem; justify-content: center; align-items: center;">
-    <a href="/rescan.html" style="background: none; border: 1px solid #333; color: #556; font-size: 0.85rem; padding: 0.3rem 0.8rem; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block;">Re-scan channels</a>
-    <a href="/about.html" style="color: #556; font-size: 0.85rem; text-decoration: none;">About TV Thing</a>
-  </footer>
 
   <script src="/hls.min.js"></script>
   <script>
-    const select = document.getElementById("channel-select");
-    const qualitySelect = document.getElementById("quality-select");
-    const tuneBtn = document.getElementById("tune-btn");
+    const channelList = document.getElementById("channel-list");
+    const chToggle = document.getElementById("ch-toggle");
+    const qualityPills = document.querySelectorAll(".quality-pill");
     const stopBtn = document.getElementById("stop-btn");
     const video = document.getElementById("player");
     const statusEl = document.getElementById("status");
     const noSignal = document.getElementById("no-signal");
 
     let hls = null;
+    let channels = [];
+    let currentChannelId = null;
+    let currentQuality = "medium";
+
+    const wideQuery = window.matchMedia("(min-aspect-ratio: 4/3)");
+
+    function isWide() { return wideQuery.matches; }
+
+    function openChannelList() {
+      channelList.classList.add("open");
+      chToggle.classList.add("open");
+    }
+    function closeChannelList() {
+      channelList.classList.remove("open");
+      chToggle.classList.remove("open");
+    }
+    function toggleChannelList() {
+      channelList.classList.toggle("open");
+      chToggle.classList.toggle("open");
+    }
+
+    chToggle.addEventListener("click", toggleChannelList);
+
+    // Keyboard: 'c' toggles in wide mode, Escape closes
+    document.addEventListener("keydown", (e) => {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+      if (!isWide()) return;
+      if (e.key === "c" || e.key === "C") toggleChannelList();
+      else if (e.key === "Escape") closeChannelList();
+    });
 
     async function loadChannels() {
       try {
         const res = await fetch("/api/channels");
-        const channels = await res.json();
-        select.innerHTML = '<option value="">-- Select a station --</option>';
+        channels = await res.json();
+        channelList.innerHTML = "";
 
         channels.forEach(ch => {
-          const opt = document.createElement("option");
-          opt.value = ch.id;
-          opt.textContent = `${ch.number} ${ch.name}`;
-          select.appendChild(opt);
+          const btn = document.createElement("button");
+          btn.className = "ch-btn";
+          btn.dataset.id = ch.id;
+          btn.innerHTML = `<span class="ch-num">${ch.number}</span><span class="ch-name">${ch.name}</span>`;
+          btn.addEventListener("click", () => {
+            tune(ch.id);
+            if (isWide()) closeChannelList();
+          });
+          channelList.appendChild(btn);
         });
 
-        statusEl.textContent = `${channels.length} channels available`;
+        statusEl.textContent = `${channels.length} channels`;
       } catch (e) {
         statusEl.textContent = "Failed to load channels";
+      }
+    }
+
+    function setActiveChannel(id) {
+      currentChannelId = id;
+      channelList.querySelectorAll(".ch-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.id === id);
+      });
+    }
+
+    async function tune(channelId) {
+      setActiveChannel(channelId);
+      statusEl.textContent = "Tuning...";
+
+      try {
+        const res = await fetch("/api/tune", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({channel_id: channelId, quality: currentQuality}),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          statusEl.textContent = `${data.channel.name} \u2014 buffering...`;
+          setTimeout(() => startPlayback(), 5000);
+        } else {
+          statusEl.textContent = `Error: ${data.error}`;
+        }
+      } catch (e) {
+        statusEl.textContent = "Failed to tune";
       }
     }
 
@@ -158,10 +366,7 @@
       noSignal.style.display = "none";
       const streamUrl = "/stream/live.m3u8";
 
-      if (hls) {
-        hls.destroy();
-        hls = null;
-      }
+      if (hls) { hls.destroy(); hls = null; }
 
       if (Hls.isSupported()) {
         hls = new Hls({
@@ -172,58 +377,53 @@
         });
         hls.loadSource(streamUrl);
         hls.attachMedia(video);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          video.play();
-        });
+        hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
         hls.on(Hls.Events.ERROR, (event, data) => {
-          if (data.fatal) {
-            // Retry after a bit — stream might still be starting
-            setTimeout(() => startPlayback(), 3000);
-          }
+          if (data.fatal) setTimeout(() => startPlayback(), 3000);
         });
       } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        // Safari native HLS
         video.src = streamUrl;
         video.play();
       }
     }
 
-    tuneBtn.addEventListener("click", async () => {
-      const channelId = select.value;
-      if (!channelId) return;
-
-      statusEl.textContent = "Tuning...";
-      try {
-        const res = await fetch("/api/tune", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({channel_id: channelId, quality: qualitySelect.value}),
-        });
-        const data = await res.json();
-        if (data.ok) {
-          statusEl.textContent = `Tuned to ${data.channel.name} — buffering...`;
-          // Wait for HLS segments to be ready
-          setTimeout(() => startPlayback(), 5000);
-        } else {
-          statusEl.textContent = `Error: ${data.error}`;
-        }
-      } catch (e) {
-        statusEl.textContent = "Failed to tune";
-      }
+    qualityPills.forEach(pill => {
+      pill.addEventListener("click", () => {
+        qualityPills.forEach(p => p.classList.remove("active"));
+        pill.classList.add("active");
+        currentQuality = pill.dataset.quality;
+        if (currentChannelId) tune(currentChannelId);
+      });
     });
 
     stopBtn.addEventListener("click", async () => {
-      if (hls) {
-        hls.destroy();
-        hls = null;
-      }
+      if (hls) { hls.destroy(); hls = null; }
       video.src = "";
       noSignal.style.display = "flex";
+      currentChannelId = null;
+      channelList.querySelectorAll(".ch-btn").forEach(btn => btn.classList.remove("active"));
       await fetch("/api/stop", {method: "POST"});
       statusEl.textContent = "Stopped";
     });
 
-    loadChannels();
+    async function checkStatus() {
+      try {
+        const res = await fetch("/api/status");
+        const data = await res.json();
+        if (data.tuned && data.channel_id) {
+          currentChannelId = data.channel_id;
+          currentQuality = data.quality || "medium";
+          qualityPills.forEach(p => {
+            p.classList.toggle("active", p.dataset.quality === currentQuality);
+          });
+          setActiveChannel(data.channel_id);
+          startPlayback();
+          statusEl.textContent = data.channel_name || "Playing";
+        }
+      } catch (e) {}
+    }
+
+    loadChannels().then(() => checkStatus());
   </script>
 </body>
 </html>

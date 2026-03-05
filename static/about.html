@@ -3,69 +3,117 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TV Thing - About</title>
+  <title>About - TV Thing</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #1a1a2e;
-      color: #ddd;
-      line-height: 1.7;
-      padding: 2rem 1rem;
-      max-width: 860px;
+      font-family: Georgia, "Times New Roman", serif;
+      background: #111;
+      color: #d4cfc7;
+      line-height: 1.8;
+      padding: 2rem 1.5rem;
+      max-width: 740px;
       margin: 0 auto;
     }
-    a { color: #6ea8fe; }
-    h1 { font-size: 2rem; margin-bottom: 0.5rem; color: #fff; }
-    h2 { font-size: 1.4rem; margin: 2rem 0 0.75rem; color: #fff; border-bottom: 1px solid #333; padding-bottom: 0.3rem; }
-    h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; color: #ccc; }
-    p { margin-bottom: 1rem; }
+    a { color: #b8a070; text-decoration: none; }
+    a:hover { color: #d4c090; }
+    h1 {
+      font-size: 1.3rem;
+      font-weight: 400;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #b8a070;
+      margin-bottom: 0.3rem;
+    }
+    h2 {
+      font-size: 1rem;
+      font-weight: 400;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin: 2.5rem 0 0.75rem;
+      color: #8a7a5a;
+      border-bottom: 1px solid #222;
+      padding-bottom: 0.4rem;
+    }
+    h3 {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin: 1.5rem 0 0.5rem;
+      color: #888;
+    }
+    p { margin-bottom: 1rem; font-size: 0.95rem; }
     code {
-      background: #16213e;
-      padding: 0.15em 0.4em;
-      border-radius: 4px;
-      font-size: 0.9em;
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      background: #1a1a1a;
+      padding: 0.1em 0.35em;
+      border-radius: 2px;
+      font-size: 0.85em;
+      color: #c8b888;
     }
     pre {
-      background: #0f0f23;
-      border: 1px solid #333;
-      border-radius: 8px;
+      background: #0a0a0a;
+      border: 1px solid #1a1a1a;
+      border-radius: 3px;
       padding: 1rem;
       overflow-x: auto;
       margin: 1rem 0;
-      font-size: 0.85rem;
+      font-size: 0.8rem;
       line-height: 1.5;
     }
-    pre code { background: none; padding: 0; }
-    ul, ol { margin: 0.5rem 0 1rem 1.5rem; }
+    pre code { background: none; padding: 0; color: #999; }
+    ul, ol { margin: 0.5rem 0 1rem 1.5rem; font-size: 0.95rem; }
     li { margin-bottom: 0.3rem; }
-    .subtitle { color: #888; font-size: 1rem; margin-bottom: 2rem; }
+    .subtitle {
+      color: #777;
+      font-size: 0.9rem;
+      margin-bottom: 2rem;
+      font-style: italic;
+    }
     .diagram {
-      background: #0f0f23;
-      border: 1px solid #333;
-      border-radius: 8px;
-      padding: 1.5rem;
+      background: #0a0a0a;
+      border: 1px solid #1a1a1a;
+      border-radius: 3px;
+      padding: 1.25rem;
       overflow-x: auto;
       margin: 1rem 0;
-      font-family: "Courier New", monospace;
-      font-size: 0.8rem;
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      font-size: 0.75rem;
       line-height: 1.4;
       white-space: pre;
-      color: #b8c0e0;
+      color: #888;
     }
     table {
       width: 100%;
       border-collapse: collapse;
       margin: 1rem 0;
+      font-size: 0.9rem;
     }
     th, td {
       text-align: left;
-      padding: 0.5rem 0.75rem;
-      border-bottom: 1px solid #333;
+      padding: 0.45rem 0.6rem;
+      border-bottom: 1px solid #1a1a1a;
     }
-    th { color: #fff; font-weight: 600; }
-    .back { display: inline-block; margin-bottom: 1.5rem; }
+    th {
+      color: #8a7a5a;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .back {
+      display: inline-block;
+      margin-bottom: 1.5rem;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.8rem;
+      letter-spacing: 0.03em;
+      color: #666;
+    }
+    .back:hover { color: #b8a070; }
   </style>
 </head>
 <body>
@@ -73,7 +121,7 @@
 <a href="/" class="back">&larr; Back to TV Thing</a>
 
 <h1>TV Thing</h1>
-<p class="subtitle">Stream over-the-air ATSC TV broadcasts to any device on your local network.</p>
+<p class="subtitle">Stream over-the-air ATSC television to any device on the local network.</p>
 
 <h2>How It Works</h2>
 
@@ -116,9 +164,9 @@
 
 <p>The signal path has three stages:</p>
 <ol>
-  <li><strong>Tuning + Capture + Transcoding</strong> &mdash; <code>cvlc</code> (headless VLC) handles everything in one process: it commands the DVB frontend to lock onto an ATSC frequency, demuxes the transport stream, selects the right program, transcodes video to H.264 and audio to AAC, and writes HLS segments directly to disk</li>
-  <li><strong>Serving</strong> &mdash; The Python server serves the HLS playlist and segments to any browser on the LAN</li>
-  <li><strong>Playback</strong> &mdash; hls.js in the browser fetches segments and plays them back in real time</li>
+  <li><strong>Tuning, capture, and transcoding</strong> &mdash; <code>cvlc</code> (headless VLC) handles everything in one process: it commands the DVB frontend to lock onto an ATSC frequency, demuxes the transport stream, selects the right program, transcodes video to H.264 and audio to AAC, and writes HLS segments directly to disk.</li>
+  <li><strong>Serving</strong> &mdash; The Python server serves the HLS playlist and segments to any browser on the LAN.</li>
+  <li><strong>Playback</strong> &mdash; hls.js in the browser fetches segments and plays them back in real time.</li>
 </ol>
 
 <h2>Architecture</h2>
@@ -183,22 +231,21 @@
   <tr><td><code>cvlc</code></td><td>VLC headless &mdash; DVB tuning, TS demux, H.264+AAC transcode, HLS output (all-in-one)</td></tr>
   <tr><td><code>server.py</code></td><td>HTTP server: REST API, static files, HLS stream serving</td></tr>
   <tr><td><code>hls.js</code></td><td>Browser-side HLS playback (bundled locally)</td></tr>
-  <tr><td><code>w_scan</code></td><td>Channel scanning (run once to find available stations)</td></tr>
+  <tr><td><code>w_scan</code></td><td>Channel scanning (finds available stations)</td></tr>
 </table>
 
 <h2>Project Files</h2>
 
 <pre><code>tv_thing/
 ├── server.py            Main server: API + static files + stream serving
-├── tuner.py             DVB frontend ioctl helpers (experimental)
 ├── parse_channels.py    Converts w_scan output to channels.json
-├── scan_channels.sh     Helper script to re-scan for channels
-├── channels.json        69 discovered ATSC channels (auto-generated)
-├── channels.conf        azap-format channel list
-├── w_scan_output.txt    Raw w_scan results
+├── channels.json        Discovered ATSC channels (auto-generated)
+├── channels.conf        Channel list (azap format)
 ├── static/
-│   ├── index.html       Web UI: dropdown + video player
+│   ├── index.html       Web UI: station picker + video player
+│   ├── rescan.html      Channel re-scan page
 │   ├── about.html       This page
+│   ├── favicon.svg      Favicon
 │   └── hls.min.js       HLS playback library (bundled for LAN use)
 └── streams/             HLS segments written here at runtime
     ├── live.m3u8        Live HLS playlist
@@ -209,58 +256,29 @@
 <table>
   <tr><th>Endpoint</th><th>Method</th><th>Description</th></tr>
   <tr><td><code>/api/channels</code></td><td>GET</td><td>List all available channels</td></tr>
-  <tr><td><code>/api/tune</code></td><td>POST</td><td>Tune to a channel. Body: <code>{"channel_id": "..."}</code></td></tr>
+  <tr><td><code>/api/tune</code></td><td>POST</td><td>Tune to a channel: <code>{"channel_id": "...", "quality": "medium"}</code></td></tr>
   <tr><td><code>/api/stop</code></td><td>POST</td><td>Stop current stream</td></tr>
   <tr><td><code>/api/status</code></td><td>GET</td><td>Current tuner state</td></tr>
+  <tr><td><code>/api/rescan/stream</code></td><td>GET</td><td>SSE stream of channel scan progress</td></tr>
   <tr><td><code>/stream/live.m3u8</code></td><td>GET</td><td>HLS playlist</td></tr>
   <tr><td><code>/stream/segment_NNN.ts</code></td><td>GET</td><td>HLS video segments</td></tr>
 </table>
 
-<h2>Channel Scan</h2>
-
-<p>69 channels were found in the DC metro area across 12 frequencies:</p>
-
-<table>
-  <tr><th>Freq (MHz)</th><th>Major Channels</th><th>Stations</th></tr>
-  <tr><td>177</td><td>7.x</td><td>WJLA, WHUT, PBSKids, Charge!, Comet, ROAR</td></tr>
-  <tr><td>189</td><td>9.x</td><td>WUSA-HD, Crime, Quest, NEST, QVC</td></tr>
-  <tr><td>473</td><td>14.x</td><td>ShopLC, SonLife, QVC2, HSN2, NTDTV, LATV</td></tr>
-  <tr><td>479</td><td>15.x</td><td>Univision, GRIT, UNIMAS, WDCW, Antenna TV</td></tr>
-  <tr><td>509</td><td>20.x</td><td>MeTV, STORY, CATCHY, TOONS, DABL</td></tr>
-  <tr><td>515</td><td>22.x</td><td>MPT-HD, MPT-2, MPTKIDS, NHK World</td></tr>
-  <tr><td>533</td><td>28.x</td><td>WDCO</td></tr>
-  <tr><td>575</td><td>26.x</td><td>WETA-HD, WETA UK, KIDS, WORLD, METRO</td></tr>
-  <tr><td>593</td><td>4.x</td><td>WRC-HD (NBC4), COZI TV, WZDC, Oxygen</td></tr>
-  <tr><td>599</td><td>36.x</td><td>ION, Bounce, CourtTV, Laff, HSN</td></tr>
-  <tr><td>605</td><td>5.x</td><td>WTTG-DT (Fox5), WDCA, BUZZR, MOVIES</td></tr>
-</table>
-
-<p>To re-scan: <code>w_scan -fa -c US -X > w_scan_output.txt && python3 parse_channels.py</code></p>
-
-<h2>Usage</h2>
-
-<pre><code># Start the server
-python3 server.py
-
-# Access from any device on the network
-# http://&lt;server-ip&gt;:8080</code></pre>
-
 <h2>Known Quirks</h2>
 
 <ul>
-  <li>The cx18 driver's DVR device (<code>/dev/dvb/adapter0/dvr0</code>) never produces data despite successful frontend lock. VLC's internal DVB implementation bypasses this by accessing the DVB subsystem directly.</li>
+  <li>The cx18 driver's DVR device (<code>/dev/dvb/adapter0/dvr0</code>) never produces data despite successful frontend lock. VLC's internal DVB implementation bypasses this entirely.</li>
   <li>Only one channel can be tuned at a time (single tuner).</li>
-  <li>Channel changes take ~8-10 seconds (VLC startup + tune + lock + first HLS segment).</li>
-  <li>Subchannels on the same frequency (e.g., 7.1 through 7.6) all share one RF frequency. VLC's <code>--program</code> flag selects the specific subchannel by service ID.</li>
+  <li>Channel changes take ~8&ndash;10 seconds (VLC startup + tune + lock + first HLS segment).</li>
+  <li>Subchannels on the same frequency share one RF channel. VLC's <code>--program</code> flag selects the specific subchannel by service ID.</li>
 </ul>
 
 <h2>Future Plans</h2>
 
 <ul>
   <li>Roku TV app (Roku natively supports HLS)</li>
-  <li>FM radio support &mdash; the analog tuner covers 44-958 MHz (FM broadcast is 87.5-108 MHz). The cx18 driver has a <code>radio</code> module parameter; loading with <code>radio=1</code> should create <code>/dev/radio0</code></li>
+  <li>FM radio support &mdash; the analog tuner covers 44&ndash;958 MHz, which includes FM broadcast (87.5&ndash;108 MHz)</li>
   <li>EPG (Electronic Program Guide) data from ATSC PSIP tables</li>
-  <li>Adaptive bitrate streaming (multiple quality levels)</li>
 </ul>
 
 </body>
