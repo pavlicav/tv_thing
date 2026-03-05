@@ -87,7 +87,7 @@ def start_streaming(channel, quality="medium"):
     # Build transcode string with optional scaling
     transcode_opts = f"vcodec=h264,vb={preset['vb']},acodec=aac,ab={preset['ab']},channels=2"
     if preset["scale"]:
-        transcode_opts += f",height={preset['scale']},vfilter=canvas{{width=0,height={preset['scale']}}}"
+        transcode_opts += f",height={preset['scale']}"
 
     # cvlc handles everything: DVB tuning, TS demux, transcode, HLS output
     vlc_cmd = [
