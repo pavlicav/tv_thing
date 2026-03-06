@@ -129,89 +129,58 @@
  Antenna
     |
     v
-+--------------------------+       +-------------------+
-| Hauppauge HVR-1600       |       |   Web Browser     |
-| (Conexant CX23418)       |       |                   |
-|                          |       |  +-------------+  |
-|  DVB Frontend            |       |  | Station     |  |
-|  (Samsung S5H1409)       |       |  | Dropdown    |  |
-|     |                    |       |  +-------------+  |
-|     | tunes to freq      |       |  +-------------+  |
-|     v                    |       |  |             |  |
-|  Internal ATSC Decoder   |       |  |  HLS Video  |  |
-|                          |       |  |  Player     |  |
-+-----------+--------------+       |  |  (hls.js)   |  |
-            |                      |  +-------------+  |
-            | DVB TS data          +--------^----------+
-            v                               |
-   +------------------+               HTTP requests
-   |  cvlc             |                    |
-   |  (VLC headless)   |           +--------+----------+
-   |                   |           |  Python Server    |
-   |  DVB tuning +     |           |  (port 8080)      |
-   |  TS demux +       |           |                   |
-   |  H.264 transcode  |           |  /api/channels    |
-   |  + HLS output     |           |  /api/tune        |
-   |                   |           |  /api/stop        |
-   |  all in one       |           |  /api/status      |
-   |  process!         |           |  /stream/*.m3u8   |
-   |                   |           |  /stream/*.ts     |
-   +--------+----------+           +---------^---------+
-            |                                |
-            +------>  .m3u8 + .ts segments --+
-                      in streams/ directory
++--------------------+
+| Hauppauge HVR-1600 |   cx18 kernel driver
+| DVB frontend       |   /dev/dvb/adapter0/frontend0  (tuning)
+| /dev/dvb/adapter0/ |   /dev/dvb/adapter0/demux0     (section filters)
++--------+-----------+   NOTE: dvr0 is broken on this card — VLC works around it
+         |
+         | (tuned, locked)
+         |
+   +-----+-------------------------------+
+   |                                     |
+   v                                     v
++------------------+           +--------------------+
+| cvlc             |           | fetch_vct.py       |  (during rescan only)
+| atsc://frequency |           |                    |
+| DVB tune + demux |           | opens demux0 fd    |
+| select --program |           | DMX_SET_FILTER:    |
+| H.264 + AAC      |           |   PID 0x1FFB (PSIP)|
+| livehttp HLS out |           |   table 0xC8 (TVCT)|
++--------+---------+           | reads virtual ch # |
+         |                     | writes vct_data.json
+         v                     +--------------------+
+  streams/live.m3u8
+  streams/segment_NNN.ts
+         |
+         v
++------------------+
+| server.py        |   Python HTTP, ThreadingMixIn, port 8080
+| /api/channels    |   serves channels.json
+| /api/tune        |   spawns cvlc, manages process
+| /api/stop        |   kills cvlc, clears streams/
+| /api/status      |   returns streaming state
+| /api/rescan/     |   SSE: w_scan → fetch_vct → parse_channels
+|   stream         |
+| /stream/*.m3u8   |   serves HLS playlist
+| /stream/*.ts     |   serves HLS segments
++--------+---------+
+         |
+         v
++------------------+
+| Browser (hls.js) |   MSE-based HLS playback, any device on LAN
+| Channel list     |   PSIP virtual numbers (4.1, 5.1, 9.1 …)
+| Quality picker   |   480p / 720p / 1080p
++------------------+
 </div>
 
-<p>The signal path has three stages:</p>
+<p>The signal path has four stages:</p>
 <ol>
-  <li><strong>Tuning, capture, and transcoding</strong> &mdash; <code>cvlc</code> (headless VLC) handles everything in one process: it commands the DVB frontend to lock onto an ATSC frequency, demuxes the transport stream, selects the right program, transcodes video to H.264 and audio to AAC, and writes HLS segments directly to disk.</li>
-  <li><strong>Serving</strong> &mdash; The Python server serves the HLS playlist and segments to any browser on the LAN.</li>
-  <li><strong>Playback</strong> &mdash; hls.js in the browser fetches segments and plays them back in real time.</li>
+  <li><strong>Tuning &amp; streaming</strong> &mdash; <code>cvlc</code> (headless VLC) commands the DVB frontend, demuxes the transport stream, selects the right program by service ID, transcodes video to H.264 and audio to AAC, and writes HLS segments to <code>streams/</code>.</li>
+  <li><strong>Channel numbering</strong> &mdash; During a rescan, <code>fetch_vct.py</code> opens a separate fd on <code>demux0</code> and installs a DVB section filter for PID <code>0x1FFB</code> (the PSIP base PID) to read the Virtual Channel Table. This gives real virtual channel numbers (WRC-TV = 4.1, Fox 5 = 5.1) rather than RF channel numbers.</li>
+  <li><strong>Serving</strong> &mdash; The Python server serves the HLS playlist and segments, plus the REST API and web UI.</li>
+  <li><strong>Playback</strong> &mdash; hls.js in the browser fetches segments and plays them in real time.</li>
 </ol>
-
-<h2>Architecture</h2>
-
-<div class="diagram">
-+---------------------------------------------------------------+
-|                        HARDWARE LAYER                         |
-|                                                               |
-|  Hauppauge HVR-1600 (PCIe) - Conexant CX23418                |
-|  +---------------------------+  +---------------------------+ |
-|  | Analog Path               |  | Digital Path (ATSC)       | |
-|  | v4l2 tuner -> HW encoder  |  | DVB frontend -> decoder   | |
-|  | /dev/video0 (MPEG-PS out) |  | /dev/dvb/adapter0/*       | |
-|  +---------------------------+  +---------------------------+ |
-+-------------------------------+-------------------------------+
-                                |
-                    +-----------v-----------+
-                    |   VLC (cvlc)          |
-                    |                       |
-                    |  atsc:// input        |
-                    |  DVB tuning           |
-                    |  TS demux + program   |
-                    |  selection            |
-                    |  H.264 + AAC          |
-                    |  transcode            |
-                    |  livehttp HLS output  |
-                    +-----------+-----------+
-                                |
-                    +-----------v-----------+
-                    |     SERVER LAYER      |
-                    |                       |
-                    |  Python HTTP server   |
-                    |  Threaded (parallel)  |
-                    |  REST API + static    |
-                    |  files + HLS serving  |
-                    +-----------+-----------+
-                                |
-                 +--------------+--------------+
-                 |                             |
-        +--------v--------+          +--------v--------+
-        |   Web Browser   |          |   Roku App      |
-        |   (any device   |          |   (future)      |
-        |    on LAN)      |          |   Native HLS    |
-        +-----------------+          +-----------------+
-</div>
 
 <h2>Components</h2>
 
@@ -228,26 +197,40 @@
 <h3>Software</h3>
 <table>
   <tr><th>Component</th><th>Role</th></tr>
-  <tr><td><code>cvlc</code></td><td>VLC headless &mdash; DVB tuning, TS demux, H.264+AAC transcode, HLS output (all-in-one)</td></tr>
-  <tr><td><code>server.py</code></td><td>HTTP server: REST API, static files, HLS stream serving</td></tr>
-  <tr><td><code>hls.js</code></td><td>Browser-side HLS playback (bundled locally)</td></tr>
-  <tr><td><code>w_scan</code></td><td>Channel scanning (finds available stations)</td></tr>
+  <tr><td><code>cvlc</code></td><td>VLC headless &mdash; DVB tuning, TS demux, program selection, H.264+AAC transcode, HLS output</td></tr>
+  <tr><td><code>server.py</code></td><td>HTTP server: REST API, static files, HLS stream serving, rescan SSE endpoint</td></tr>
+  <tr><td><code>fetch_vct.py</code></td><td>Reads ATSC PSIP Virtual Channel Table via DVB section filter; writes <code>vct_data.json</code> with real virtual channel numbers</td></tr>
+  <tr><td><code>parse_channels.py</code></td><td>Converts <code>w_scan</code> output + VCT data into <code>channels.json</code></td></tr>
+  <tr><td><code>w_scan</code></td><td>ATSC frequency scan (finds active RF channels)</td></tr>
+  <tr><td><code>hls.js</code></td><td>Browser-side HLS playback (bundled locally for LAN use)</td></tr>
+</table>
+
+<h3>Quality Presets</h3>
+<table>
+  <tr><th>Preset</th><th>Video</th><th>Audio</th><th>Scale</th></tr>
+  <tr><td>Low</td><td>500 kbps H.264</td><td>64 kbps AAC</td><td>480p</td></tr>
+  <tr><td>Medium (default)</td><td>1000 kbps H.264</td><td>96 kbps AAC</td><td>720p</td></tr>
+  <tr><td>High</td><td>2000 kbps H.264</td><td>128 kbps AAC</td><td>Native</td></tr>
 </table>
 
 <h2>Project Files</h2>
 
 <pre><code>tv_thing/
-├── server.py            Main server: API + static files + stream serving
-├── parse_channels.py    Converts w_scan output to channels.json
-├── channels.json        Discovered ATSC channels (auto-generated)
-├── channels.conf        Channel list (azap format)
+├── server.py            HTTP server: API, static files, stream serving, rescan SSE
+├── fetch_vct.py         Reads PSIP VCT via DVB section filter → vct_data.json
+├── parse_channels.py    Converts w_scan output + VCT data → channels.json
+├── scan_channels.sh     Manual one-shot channel scan wrapper
+├── tv-thing.service     systemd service unit
+├── channels.json        Channel list with PSIP numbers (auto-generated)
+├── vct_data.json        PSIP virtual channel table cache (auto-generated)
+├── w_scan_output.txt    Raw w_scan output (auto-generated)
 ├── static/
-│   ├── index.html       Web UI: station picker + video player
-│   ├── rescan.html      Channel re-scan page
+│   ├── index.html       Web UI: channel list + video player
+│   ├── rescan.html      Channel rescan page with live progress
 │   ├── about.html       This page
 │   ├── favicon.svg      Favicon
 │   └── hls.min.js       HLS playback library (bundled for LAN use)
-└── streams/             HLS segments written here at runtime
+└── streams/             HLS segments written here at runtime (auto-generated)
     ├── live.m3u8        Live HLS playlist
     └── segment_NNN.ts   4-second video segments</code></pre>
 
@@ -264,13 +247,24 @@
   <tr><td><code>/stream/segment_NNN.ts</code></td><td>GET</td><td>HLS video segments</td></tr>
 </table>
 
+<h2>Channel Rescan</h2>
+
+<p>The rescan page runs a two-phase process:</p>
+<ol>
+  <li><strong>w_scan</strong> &mdash; scans all ATSC frequencies (RF channels 2&ndash;36) and finds active stations. Progress streams live to the browser via Server-Sent Events.</li>
+  <li><strong>VCT fetch</strong> &mdash; for each found frequency, <code>fetch_vct.py</code> tunes briefly with VLC then reads the PSIP Virtual Channel Table via a DVB section filter on <code>/dev/dvb/adapter0/demux0</code>. This extracts real virtual channel numbers (major.minor) broadcast by each station.</li>
+</ol>
+<p>The channel list is rebuilt with correct PSIP numbers after both phases complete. Tuning is blocked (returns 409) while a scan is in progress.</p>
+
 <h2>Known Quirks</h2>
 
 <ul>
-  <li>The cx18 driver's DVR device (<code>/dev/dvb/adapter0/dvr0</code>) never produces data despite successful frontend lock. VLC's internal DVB implementation bypasses this entirely.</li>
+  <li>The cx18 driver's DVR device (<code>/dev/dvb/adapter0/dvr0</code>) never produces data despite a successful frontend lock &mdash; a known driver issue with this card. VLC's internal DVB stack works around this entirely and is the only path that produces data.</li>
+  <li>DVB <em>section</em> filters (used by <code>fetch_vct.py</code>) work fine even though DVR doesn't &mdash; they go through the demux device directly rather than through <code>dvr0</code>.</li>
   <li>Only one channel can be tuned at a time (single tuner).</li>
   <li>Channel changes take ~8&ndash;10 seconds (VLC startup + tune + lock + first HLS segment).</li>
-  <li>Subchannels on the same frequency share one RF channel. VLC's <code>--program</code> flag selects the specific subchannel by service ID.</li>
+  <li>Subchannels on the same RF frequency share one multiplex. VLC's <code>--program</code> flag selects the specific subchannel by PSIP service ID.</li>
+  <li>RF channel 7 (177 MHz) does not produce a signal at this location and is excluded from the channel list.</li>
 </ul>
 
 <h2>Future Plans</h2>
@@ -278,7 +272,7 @@
 <ul>
   <li>Roku TV app (Roku natively supports HLS)</li>
   <li>FM radio support &mdash; the analog tuner covers 44&ndash;958 MHz, which includes FM broadcast (87.5&ndash;108 MHz)</li>
-  <li>EPG (Electronic Program Guide) data from ATSC PSIP tables</li>
+  <li>EPG (Electronic Program Guide) from ATSC PSIP EIT tables</li>
 </ul>
 
 </body>
