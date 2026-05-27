@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="MainScene" extends="Scene">
+  <interface>
+    <field id="serverUrl" type="string" onChange="onServerUrl"/>
+  </interface>
+  <children>
+
+    <!-- Full-screen video (behind everything) -->
+    <Video id="videoPlayer" width="1280" height="720" visible="false"/>
+
+    <!-- Channel list panel — shown in idle and overlay states -->
+    <Group id="channelPanel" visible="false">
+      <Rectangle color="0xd0000000" width="380" height="720"/>
+      <Label text="TV THING"
+             font="font:SmallBoldSystemFont"
+             color="0x8a7a5aff"
+             translation="[20, 14]"/>
+      <Label id="channelCount"
+             text="Loading..."
+             font="font:SmallSystemFont"
+             color="0x444444ff"
+             translation="[20, 38]"/>
+      <MarkupList id="channelList"
+                  translation="[0, 68]"
+                  itemSize="[380, 58]"
+                  itemSpacing="[0, 1]"
+                  numRows="11"
+                  itemComponentName="ChannelItem"
+                  visible="false"/>
+      <BusySpinner id="spinner" translation="[170, 370]"/>
+    </Group>
+
+    <!-- Tuning overlay — shown on top of everything while tuning -->
+    <Group id="tuningOverlay" visible="false">
+      <Rectangle color="0xb0000000" width="1280" height="720"/>
+      <Label id="tuningMsg"
+             text="Tuning..."
+             font="font:LargeSystemFont"
+             color="0xb8a070ff"
+             horizAlign="center"
+             width="1280"
+             translation="[0, 290]"/>
+      <Label id="tuningCh"
+             text=""
+             font="font:MediumSystemFont"
+             color="0x777777ff"
+             horizAlign="center"
+             width="1280"
+             translation="[0, 360]"/>
+    </Group>
+
+    <!-- Channel info banner (shown during up/down browse in playing state) -->
+    <Group id="channelInfo" visible="false" translation="[0, 620]">
+      <Rectangle color="0xd0000000" width="1280" height="100"/>
+      <Label id="infoNumber"
+             font="font:LargeBoldSystemFont"
+             color="0xd4c090ff"
+             translation="[40, 18]"/>
+      <Label id="infoName"
+             font="font:MediumSystemFont"
+             color="0xccccccff"
+             translation="[160, 22]"/>
+      <Label id="infoRF"
+             font="font:SmallSystemFont"
+             color="0x666666ff"
+             translation="[160, 58]"/>
+    </Group>
+
+  </children>
+  <script type="text/brightscript" uri="pkg:/components/MainScene.brs"/>
+</component>

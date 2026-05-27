@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="TuneTask" extends="Task">
+  <interface>
+    <field id="serverUrl"  type="string"/>
+    <field id="channelId"  type="string"/>
+    <field id="quality"    type="string" value="medium"/>
+    <field id="result"     type="assocarray"/>
+  </interface>
+  <script type="text/brightscript" uri="pkg:/components/TuneTask.brs"/>
+</component>

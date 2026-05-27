@@ -7,65 +7,56 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      font-family: Georgia, "Times New Roman", serif;
-      background: #111;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0a0a0a;
       color: #d4cfc7;
       min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
       padding: 1.5rem;
     }
+
+    .top-bar {
+      display: flex;
+      align-items: baseline;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .back {
+      color: #555;
+      text-decoration: none;
+      font-size: 0.8rem;
+      letter-spacing: 0.03em;
+    }
+    .back:hover { color: #b8a070; }
     h1 {
-      font-size: 1.3rem;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 1.1rem;
       font-weight: 400;
       letter-spacing: 0.15em;
       text-transform: uppercase;
       color: #b8a070;
-      margin-bottom: 1.5rem;
     }
-    .card {
-      background: #161616;
-      border: 1px solid #2a2520;
-      border-radius: 4px;
-      padding: 1.5rem;
-      max-width: 700px;
-      width: 100%;
-    }
-    .warning {
-      background: #1a1710;
-      border: 1px solid #3a3020;
-      border-radius: 3px;
-      padding: 1rem;
-      margin-bottom: 1.5rem;
-      line-height: 1.7;
-      color: #c8b888;
-      font-size: 0.95rem;
-    }
-    .warning strong { color: #d4c090; }
-    .info {
-      color: #777;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 0.85rem;
-      line-height: 1.6;
-      margin-bottom: 1.5rem;
-    }
-    .actions {
+
+    /* ── controls ── */
+    .controls {
       display: flex;
+      align-items: center;
       gap: 0.75rem;
+      margin-bottom: 1.25rem;
+      flex-wrap: wrap;
     }
     button {
-      padding: 0.5rem 1rem;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 0.85rem;
-      border: 1px solid #333;
-      border-radius: 3px;
-      cursor: pointer;
+      padding: 0.4rem 1rem;
+      font-family: inherit;
+      font-size: 0.8rem;
       font-weight: 500;
-      transition: all 0.15s;
-      text-transform: uppercase;
       letter-spacing: 0.05em;
+      text-transform: uppercase;
+      border-radius: 3px;
+      border: 1px solid #333;
+      cursor: pointer;
+      transition: all 0.15s;
     }
     #start-btn {
       background: #2a2520;
@@ -73,201 +64,403 @@
       border-color: #4a3f30;
     }
     #start-btn:hover { background: #3a3025; border-color: #6a5a40; }
-    #start-btn:disabled { background: #1a1a1a; color: #444; border-color: #252525; cursor: not-allowed; }
+    #start-btn:disabled { background: #151515; color: #444; border-color: #222; cursor: not-allowed; }
     #cancel-btn {
-      background: #1a1a1a;
-      color: #888;
-      border-color: #333;
+      background: #151515;
+      color: #777;
     }
-    #cancel-btn:hover { background: #252525; color: #aaa; }
+    #cancel-btn:hover { background: #1f1f1f; color: #aaa; }
 
-    #progress {
-      display: none;
-      margin-top: 1.5rem;
+    #status-text {
+      font-size: 0.8rem;
+      color: #666;
+      letter-spacing: 0.02em;
     }
-    #progress-bar-wrap {
-      background: #0a0a0a;
-      border: 1px solid #222;
+
+    /* ── progress bar ── */
+    .progress-wrap {
+      background: #111;
+      border: 1px solid #1e1e1e;
       border-radius: 2px;
-      height: 4px;
-      margin-bottom: 1rem;
+      height: 3px;
+      margin-bottom: 1.5rem;
       overflow: hidden;
     }
     #progress-bar {
-      background: #8a7a5a;
+      background: linear-gradient(90deg, #5a4a2a, #b8a070);
       height: 100%;
       width: 0%;
-      transition: width 0.3s;
+      transition: width 0.4s ease;
     }
-    #scan-status {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 0.8rem;
-      color: #666;
-      margin-bottom: 1rem;
-      letter-spacing: 0.03em;
+
+    /* ── band sections ── */
+    .band {
+      margin-bottom: 1.5rem;
     }
-    #results {
-      background: #0a0a0a;
-      border: 1px solid #1a1a1a;
-      border-radius: 3px;
-      padding: 0;
-      max-height: 50vh;
-      overflow-y: auto;
-      font-family: "SF Mono", "Menlo", "Consolas", monospace;
-      font-size: 0.8rem;
+    .band-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.6rem;
     }
-    #results:empty { display: none; }
-    #results::-webkit-scrollbar { width: 6px; }
-    #results::-webkit-scrollbar-track { background: #0a0a0a; }
-    #results::-webkit-scrollbar-thumb { background: #2a2520; border-radius: 3px; }
-    .freq-group {
-      border-bottom: 1px solid #1a1a1a;
-      padding: 0.5rem 0.75rem;
-    }
-    .freq-group:last-child { border-bottom: none; }
-    .freq-header {
-      color: #8a7a5a;
+    .band-label {
+      font-size: 0.65rem;
       font-weight: 600;
-      margin-bottom: 0.2rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #555;
     }
-    .freq-header .lock { color: #6a8a5a; }
-    .freq-header .nolock { color: #555; }
-    .channel-line {
-      color: #999;
-      padding-left: 1rem;
-      line-height: 1.6;
+    .band-range {
+      font-size: 0.65rem;
+      color: #3a3a3a;
     }
-    .done-msg {
-      padding: 1rem;
-      text-align: center;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    .band-line {
+      flex: 1;
+      height: 1px;
+      background: #1a1a1a;
+    }
+
+    /* ── channel grid ── */
+    .ch-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .ch-cell {
+      width: 90px;
+      min-height: 72px;
+      border: 1px solid #222;
+      border-radius: 3px;
+      background: #111;
+      padding: 0.4rem 0.5rem;
+      transition: background 0.3s, border-color 0.3s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* state: scanning */
+    .ch-cell.scanning {
+      background: #1a1600;
+      border-color: #4a3e10;
+      animation: pulse-scan 1s ease-in-out infinite;
+    }
+    @keyframes pulse-scan {
+      0%, 100% { border-color: #4a3e10; }
+      50%       { border-color: #8a7a30; }
+    }
+
+    /* state: locked (signal, channels found) */
+    .ch-cell.locked {
+      background: #0d1a0d;
+      border-color: #2a5a2a;
+    }
+
+    /* state: empty-lock (signal locked but no channels parsed) */
+    .ch-cell.empty-lock {
+      background: #141a0d;
+      border-color: #3a5020;
+    }
+
+    /* state: no-signal */
+    .ch-cell.no-signal {
+      background: #150d0d;
+      border-color: #3a1a1a;
+    }
+
+    .ch-num {
+      font-size: 1rem;
+      font-weight: 700;
+      line-height: 1;
+      margin-bottom: 0.15rem;
+      font-variant-numeric: tabular-nums;
+      color: #555;
+      transition: color 0.3s;
+    }
+    .ch-cell.scanning .ch-num  { color: #a89040; }
+    .ch-cell.locked .ch-num    { color: #5aaa5a; }
+    .ch-cell.empty-lock .ch-num { color: #7a9a50; }
+    .ch-cell.no-signal .ch-num { color: #6a2a2a; }
+
+    .ch-mhz {
+      font-size: 0.6rem;
+      color: #333;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.35rem;
+    }
+    .ch-cell.scanning .ch-mhz  { color: #6a5a20; }
+    .ch-cell.locked .ch-mhz    { color: #2a5a2a; }
+    .ch-cell.no-signal .ch-mhz { color: #3a1a1a; }
+
+    .ch-channels {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .ch-chan-name {
+      font-size: 0.62rem;
+      color: #4a8a4a;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.35;
+    }
+
+    .ch-state-icon {
+      position: absolute;
+      top: 0.35rem;
+      right: 0.4rem;
+      font-size: 0.55rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .ch-cell.locked .ch-state-icon    { color: #3a7a3a; content: "OK"; }
+    .ch-cell.no-signal .ch-state-icon { color: #5a2222; }
+
+    /* ── done message ── */
+    #done-msg {
+      display: none;
+      margin-top: 1rem;
+      padding: 0.75rem 1rem;
+      border-radius: 3px;
       font-size: 0.85rem;
     }
-    .done-msg.success { color: #6a8a5a; }
-    .done-msg.error { color: #a07060; }
-    a { color: #b8a070; text-decoration: none; }
-    a:hover { color: #d4c090; }
+    #done-msg.success {
+      background: #0d1a0d;
+      border: 1px solid #2a5a2a;
+      color: #6aaa6a;
+    }
+    #done-msg.error {
+      background: #1a0d0d;
+      border: 1px solid #5a2a2a;
+      color: #aa6a6a;
+    }
+    #done-msg a { color: #b8a070; text-decoration: none; }
+    #done-msg a:hover { color: #d4c090; }
+
+    /* ── legend ── */
+    .legend {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+      flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.7rem;
+      color: #555;
+    }
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      border: 1px solid;
+    }
+    .legend-dot.pending   { background: #111;    border-color: #222; }
+    .legend-dot.scanning  { background: #1a1600; border-color: #4a3e10; }
+    .legend-dot.locked    { background: #0d1a0d; border-color: #2a5a2a; }
+    .legend-dot.no-signal { background: #150d0d; border-color: #3a1a1a; }
   </style>
 </head>
 <body>
-  <h1>Re-scan Channels</h1>
 
-  <div class="card">
-    <div class="warning">
-      <strong>Warning:</strong> Scanning requires exclusive access to the TV tuner.
-      Any active stream will be stopped when the scan begins.
-      The scan takes a few minutes.
-    </div>
-    <div class="info">
-      The scanner will check all ATSC frequencies and find available channels
-      in your area. Your channel list will be updated when the scan completes.
-    </div>
-    <div class="actions">
-      <button id="start-btn">Start Scan</button>
-      <button id="cancel-btn" onclick="location.href='/'">Cancel</button>
-    </div>
-
-    <div id="progress">
-      <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
-      <div id="scan-status">Starting scan...</div>
-      <div id="results"></div>
-    </div>
+  <div class="top-bar">
+    <a href="/" class="back">&larr; Back</a>
+    <h1>Channel Scan</h1>
   </div>
 
+  <div class="controls">
+    <button id="start-btn">Start Scan</button>
+    <button id="cancel-btn" onclick="location.href='/'">Cancel</button>
+    <span id="status-text">Ready. Scanning takes a few minutes and stops any active stream.</span>
+  </div>
+
+  <div class="progress-wrap">
+    <div id="progress-bar"></div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot pending"></div> Not scanned</div>
+    <div class="legend-item"><div class="legend-dot scanning"></div> Scanning</div>
+    <div class="legend-item"><div class="legend-dot locked"></div> Signal found</div>
+    <div class="legend-item"><div class="legend-dot no-signal"></div> No signal</div>
+  </div>
+
+  <!-- VHF Low -->
+  <div class="band">
+    <div class="band-header">
+      <span class="band-label">VHF Low</span>
+      <span class="band-range">ch 2–6 &nbsp;·&nbsp; 54–88 MHz</span>
+      <div class="band-line"></div>
+    </div>
+    <div class="ch-grid" id="band-vhf-lo"></div>
+  </div>
+
+  <!-- VHF High -->
+  <div class="band">
+    <div class="band-header">
+      <span class="band-label">VHF High</span>
+      <span class="band-range">ch 7–13 &nbsp;·&nbsp; 174–216 MHz</span>
+      <div class="band-line"></div>
+    </div>
+    <div class="ch-grid" id="band-vhf-hi"></div>
+  </div>
+
+  <!-- UHF -->
+  <div class="band">
+    <div class="band-header">
+      <span class="band-label">UHF</span>
+      <span class="band-range">ch 14–36 &nbsp;·&nbsp; 470–608 MHz</span>
+      <div class="band-line"></div>
+    </div>
+    <div class="ch-grid" id="band-uhf"></div>
+  </div>
+
+  <div id="done-msg"></div>
+
   <script>
-    const startBtn = document.getElementById("start-btn");
-    const cancelBtn = document.getElementById("cancel-btn");
-    const progress = document.getElementById("progress");
-    const progressBar = document.getElementById("progress-bar");
-    const scanStatus = document.getElementById("scan-status");
-    const results = document.getElementById("results");
+    // ── ATSC channel → frequency table (center = lower edge + 3 MHz) ──────────
+    // Matches server.py ATSC_FREQUENCIES exactly.
+    const ATSC = [];
+    for (let ch = 2; ch <= 4; ch++) ATSC.push({ ch, hz: ((ch - 2) * 6 + 54) * 1e6 });
+    for (let ch = 5; ch <= 6; ch++) ATSC.push({ ch, hz: ((ch - 5) * 6 + 76) * 1e6 });
+    for (let ch = 7; ch <= 13; ch++) ATSC.push({ ch, hz: ((ch - 7) * 6 + 174) * 1e6 });
+    for (let ch = 14; ch <= 36; ch++) ATSC.push({ ch, hz: ((ch - 14) * 6 + 470) * 1e6 });
+
+    // band assignments
+    function bandFor(ch) {
+      if (ch <= 6)  return "band-vhf-lo";
+      if (ch <= 13) return "band-vhf-hi";
+      return "band-uhf";
+    }
+
+    // Build cells
+    const cellByRF = {};  // rf_channel (int) → cell element
+
+    ATSC.forEach(({ ch, hz }) => {
+      const mhz = (hz / 1e6).toFixed(0);
+      const cell = document.createElement("div");
+      cell.className = "ch-cell";
+      cell.id = "cell-rf" + ch;
+      cell.innerHTML = `
+        <div class="ch-num">${ch}</div>
+        <div class="ch-mhz">${mhz} MHz</div>
+        <div class="ch-channels"></div>
+        <span class="ch-state-icon"></span>
+      `;
+      document.getElementById(bandFor(ch)).appendChild(cell);
+      cellByRF[ch] = cell;
+    });
+
+    // ── SSE scan logic ────────────────────────────────────────────────────────
+    const startBtn     = document.getElementById("start-btn");
+    const cancelBtn    = document.getElementById("cancel-btn");
+    const statusText   = document.getElementById("status-text");
+    const progressBar  = document.getElementById("progress-bar");
+    const doneMsg      = document.getElementById("done-msg");
 
     let eventSource = null;
+
+    // channel events only have a raw center frequency — match with ±4 MHz tolerance
+    function cellForFreq(freqHz) {
+      for (const { ch, hz } of ATSC) {
+        if (Math.abs(hz - freqHz) < 4_000_000) return cellByRF[ch];
+      }
+      return null;
+    }
+
+    function resetCells() {
+      document.querySelectorAll(".ch-cell").forEach(c => {
+        c.className = "ch-cell";
+        c.querySelector(".ch-channels").innerHTML = "";
+        c.querySelector(".ch-state-icon").textContent = "";
+      });
+      progressBar.style.width = "0%";
+      doneMsg.style.display = "none";
+      doneMsg.className = "";
+    }
 
     startBtn.addEventListener("click", () => {
       startBtn.disabled = true;
       cancelBtn.textContent = "Back";
-      progress.style.display = "block";
-      results.innerHTML = "";
-      scanStatus.textContent = "Stopping active streams...";
+      resetCells();
+      statusText.textContent = "Stopping active streams...";
 
       eventSource = new EventSource("/api/rescan/stream");
 
-      eventSource.addEventListener("status", (e) => {
-        scanStatus.textContent = e.data;
+      eventSource.addEventListener("status", e => {
+        statusText.textContent = e.data;
       });
 
-      eventSource.addEventListener("progress", (e) => {
-        const pct = parseFloat(e.data);
-        progressBar.style.width = pct + "%";
+      eventSource.addEventListener("progress", e => {
+        progressBar.style.width = parseFloat(e.data) + "%";
       });
 
-      eventSource.addEventListener("frequency", (e) => {
-        const data = JSON.parse(e.data);
-        const group = document.createElement("div");
-        group.className = "freq-group";
-        group.id = "freq-" + data.frequency;
-
-        const header = document.createElement("div");
-        header.className = "freq-header";
-        header.textContent = `RF ${data.rf_channel}  (${data.frequency_mhz} MHz) \u2014 scanning...`;
-        group.appendChild(header);
-        results.appendChild(group);
-        results.scrollTop = results.scrollHeight;
-      });
-
-      eventSource.addEventListener("lock", (e) => {
-        const data = JSON.parse(e.data);
-        const group = document.getElementById("freq-" + data.frequency);
-        if (group) {
-          const header = group.querySelector(".freq-header");
-          if (data.locked) {
-            header.innerHTML = `RF ${data.rf_channel}  (${data.frequency_mhz} MHz) \u2014 <span class="lock">locked</span>`;
-          } else {
-            header.innerHTML = `RF ${data.rf_channel}  (${data.frequency_mhz} MHz) \u2014 <span class="nolock">no signal</span>`;
-          }
+      eventSource.addEventListener("frequency", e => {
+        const d = JSON.parse(e.data);
+        const cell = cellByRF[d.rf_channel];
+        if (cell) {
+          cell.classList.add("scanning");
+          cell.querySelector(".ch-state-icon").textContent = "…";
+          cell.scrollIntoView({ behavior: "smooth", block: "nearest" });
         }
       });
 
-      eventSource.addEventListener("channel", (e) => {
-        const data = JSON.parse(e.data);
-        const group = document.getElementById("freq-" + data.frequency);
-        if (group) {
-          const line = document.createElement("div");
-          line.className = "channel-line";
-          line.textContent = data.name;
-          group.appendChild(line);
-          results.scrollTop = results.scrollHeight;
+      eventSource.addEventListener("lock", e => {
+        const d = JSON.parse(e.data);
+        const cell = cellByRF[d.rf_channel];
+        if (!cell) return;
+        cell.classList.remove("scanning");
+        if (d.locked) {
+          // will be upgraded to "locked" when channels arrive; set empty-lock for now
+          cell.classList.add("empty-lock");
+          cell.querySelector(".ch-state-icon").textContent = "";
+        } else {
+          cell.classList.add("no-signal");
+          cell.querySelector(".ch-state-icon").textContent = "–";
         }
       });
 
-      eventSource.addEventListener("done", (e) => {
-        const data = JSON.parse(e.data);
+      eventSource.addEventListener("channel", e => {
+        const d = JSON.parse(e.data);
+        const cell = cellForFreq(d.frequency);
+        if (!cell) return;
+        // upgrade to full locked state
+        cell.classList.remove("empty-lock");
+        cell.classList.add("locked");
+        cell.querySelector(".ch-state-icon").textContent = "";
+        const list = cell.querySelector(".ch-channels");
+        const span = document.createElement("span");
+        span.className = "ch-chan-name";
+        span.textContent = d.name;
+        list.appendChild(span);
+      });
+
+      eventSource.addEventListener("done", e => {
+        const d = JSON.parse(e.data);
         eventSource.close();
         eventSource = null;
         progressBar.style.width = "100%";
-
-        const msg = document.createElement("div");
-        if (data.ok) {
-          scanStatus.textContent = "Scan complete.";
-          msg.className = "done-msg success";
-          msg.innerHTML = `Found ${data.count} channels. <a href="/">Return to TV Thing</a>`;
-        } else {
-          scanStatus.textContent = "Scan failed";
-          msg.className = "done-msg error";
-          msg.textContent = data.error;
-        }
-        results.appendChild(msg);
-        results.scrollTop = results.scrollHeight;
         startBtn.disabled = false;
+
+        doneMsg.style.display = "block";
+        if (d.ok) {
+          doneMsg.className = "success";
+          doneMsg.innerHTML = `Found ${d.count} channels. <a href="/">Return to TV Thing &rarr;</a>`;
+          statusText.textContent = "Scan complete.";
+        } else {
+          doneMsg.className = "error";
+          doneMsg.textContent = "Scan failed: " + d.error;
+          statusText.textContent = "Scan failed.";
+        }
       });
 
       eventSource.onerror = () => {
-        if (eventSource) {
-          eventSource.close();
-          eventSource = null;
-        }
-        scanStatus.textContent = "Connection lost";
+        if (eventSource) { eventSource.close(); eventSource = null; }
+        statusText.textContent = "Connection lost.";
         startBtn.disabled = false;
       };
     });

@@ -106,13 +106,16 @@ def parse():
             entry["rf_channel"] = rf
             channels.append(entry)
 
-    # Sort by major, then minor
+    # All .1 channels first (sorted by major), then subchannels grouped by major
     def sort_key(c):
         parts = c["number"].split(".")
         try:
-            return (int(parts[0]), int(parts[1]))
+            major, minor = int(parts[0]), int(parts[1])
+            if minor == 1:
+                return (0, major, 0)
+            return (1, major, minor)
         except (ValueError, IndexError):
-            return (9999, 0)
+            return (9999, 0, 0)
 
     channels.sort(key=sort_key)
     return channels

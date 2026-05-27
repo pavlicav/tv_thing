@@ -21,10 +21,11 @@ Antenna → HVR-1600 (cx18) → cvlc (DVB tune + demux + transcode) → HLS segm
 | File | Role |
 |---|---|
 | `server.py` | Main HTTP server, tuner control, rescan SSE |
-| `parse_channels.py` | Converts `w_scan` output → `channels.json` |
+| `parse_channels.py` | Converts `w_scan` output + VCT data → `channels.json` |
+| `fetch_vct.py` | Reads ATSC PSIP Virtual Channel Table via DVB section filter |
 | `scan_channels.sh` | One-shot shell wrapper for manual scans |
 | `static/index.html` | Player UI with channel list |
-| `static/rescan.html` | Rescan page with live scan progress |
+| `static/rescan.html` | Rescan page — RF channel grid, live scan progress |
 | `tv-thing.service` | systemd unit |
 
 ### VLC command
@@ -45,12 +46,18 @@ cvlc atsc://frequency=FREQ
 ### Channel numbering
 
 `parse_channels.py` groups channels by RF frequency and assigns virtual channel numbers in two ways:
-- **VCT data** (`vct_data.json`): Uses the actual major.minor numbers broadcast in the ATSC Virtual Channel Table (e.g., `7.1`, `7.2`)
+- **VCT data** (`vct_data.json`): Uses the actual major.minor numbers broadcast in the ATSC Virtual Channel Table (e.g., `4.1` for WRC-TV on RF 34)
 - **Fallback**: Derives the RF channel number from the frequency, then numbers sub-channels sequentially (e.g., RF 7 → `7.1`, `7.2`, ...)
+
+Channels are sorted so all `.1` primaries appear first (sorted by major number), then subchannels grouped by their parent station.
+
+### PSIP / VCT fetch
+
+After `w_scan` completes, `fetch_vct.py` reads the ATSC PSIP Virtual Channel Table for each found frequency. It tunes with VLC (to lock the frontend) then opens a separate fd on `/dev/dvb/adapter0/demux0` and installs a DVB section filter for PID `0x1FFB` (PSIP base PID), table `0xC8` (Terrestrial VCT). Section filters use the demux device directly — a different kernel codepath from the broken DVR device — so they work even though DVR doesn't. The parsed major.minor numbers (e.g., WRC-TV = 4.1, Fox = 5.1) are written to `vct_data.json` and picked up by `parse_channels.py`.
 
 ### Rescan page
 
-The `/api/rescan/stream` endpoint is a Server-Sent Events stream that runs `w_scan` and feeds live progress to the browser. It parses `w_scan`'s stderr for frequency/lock status and its stdout for found channels. The UI renders a live list of RF groups with locked/no-signal labels and channel names appearing under each group as they're found.
+The `/api/rescan/stream` endpoint is a Server-Sent Events stream that runs `w_scan` followed by `fetch_vct.py`. The UI shows a pre-built grid of all 35 RF channels (2–36) split into three band sections (VHF Low, VHF High, UHF). Each cell updates live as the scan progresses: pulsing amber while scanning, green when channels are found (with names listed inside), red for no signal. The `frequency` and `lock` SSE events carry an `rf_channel` field used to directly address grid cells; the `channel` event uses center-frequency tolerance matching (±4 MHz).
 
 ### ATSC frequency table
 
@@ -61,102 +68,48 @@ The server pre-computes center frequencies for RF channels 2–36 (the entire po
 
 ---
 
-## Bugs
+## Bugs Found and Fixed
 
-### 1. `checkStatus()` uses wrong field names — reconnect on refresh is broken
+### 1. `checkStatus()` used wrong field names ✓ fixed
 
-**`static/index.html:412–422`**
+`static/index.html` — `checkStatus()` read `data.tuned`, `data.channel_id`, `data.channel_name`, none of which exist in the `/api/status` response. Fixed to `data.streaming`, `data.channel.id`, `data.channel.name`. Refreshing the page now correctly reattaches playback if a stream is active.
 
-The `/api/status` endpoint returns:
-```json
-{"channel": {...channel object...}, "streaming": true, "quality": "medium"}
-```
+### 2. Race condition: `/api/tune` during rescan ✓ fixed
 
-But `checkStatus()` reads fields that don't exist:
-```js
-if (data.tuned && data.channel_id) {   // data.tuned is always undefined
-    currentChannelId = data.channel_id; // data.channel_id is always undefined
-    statusEl.textContent = data.channel_name || "Playing"; // same
-```
+`server.py` — The rescan handler released its lock before running `w_scan`, so a concurrent tune request could start VLC while the scanner was using the DVB device. Fixed with a `scanning` boolean flag that the tune handler checks and rejects (returns 409) for the full duration of the scan including the VCT fetch phase.
 
-Should be `data.streaming`, `data.channel?.id`, and `data.channel?.name`. As-is, refreshing the page while a stream is active never reattaches the player — the "No Signal" overlay stays up even though VLC is running.
+### 3. `parse_channels.py` spawned as subprocess ✓ fixed
 
-### 2. Race condition: `/api/tune` can contend with `w_scan`
+`server.py` — Was calling `subprocess.run(["python3", ...])` which could use the wrong interpreter and silently swallowed errors. Replaced with a direct `import parse_channels; parse_channels.main()` call.
 
-**`server.py:241–391`**
+### 4. `scan_channels.sh` merged stdout and stderr ✓ fixed
 
-The rescan handler stops any active stream under the lock, then releases it before running `w_scan`. A concurrent `POST /api/tune` could start VLC while `w_scan` is using the DVB device, causing both processes to fight over the tuner.
+`scan_channels.sh` — `2>&1` mixed w_scan's status output into the channel data file. Fixed to `2>/dev/null`.
 
-```python
-# Lock released here after stop_streaming()
-proc = subprocess.Popen(["w_scan", ...])  # w_scan runs outside the lock
-```
+### 5. VHF-Lo ch 5–6 wrong frequency ✓ fixed
 
-The whole `w_scan` run (several minutes) should hold the lock, or there should be a separate "scanning" state that the tune endpoint checks.
+`server.py` and `parse_channels.py` — VHF-Lo has a 4 MHz gap at 72–76 MHz (ch 4 ends at 72, ch 5 starts at 76). The original code computed ch 5 as 72 MHz. Fixed by splitting the loop: ch 2–4 from 54 MHz base, ch 5–6 from 76 MHz base.
 
-### 3. `parse_channels.py` spawned as a subprocess with a bare `python3`
+### 6. VLC `canvas` filter cropped video ✓ fixed
 
-**`server.py:388–391`**
+`server.py` — The quality scaling used `vfilter=canvas{...}` which is a padding/cropping filter, not a scaler. This caused video to show only the top-left portion. Fixed by removing `vfilter` entirely and keeping only `height=N` in the transcode options.
 
-```python
-subprocess.run(["python3", str(BASE_DIR / "parse_channels.py")], ...)
-```
+### 7. Rescan UI cells never updated ✓ fixed
 
-If the server is running under a conda environment or venv, `python3` on `PATH` may not be the same interpreter. Errors are silently swallowed (`capture_output=True`). Since `parse_channels.parse()` is a plain function, it should just be imported and called directly.
-
-### 4. `scan_channels.sh` merges stdout and stderr
-
-**`scan_channels.sh:12`**
-
-```bash
-w_scan -fa -c US -X > "$SCAN_OUTPUT" 2>&1
-```
-
-This mixes `w_scan`'s progress/status stderr with channel data stdout in the same file. The `grep -v "^;"` on line 15 partially compensates, but any stderr line that doesn't start with `;` (e.g., frequency lines like `57000: 8VSB ...`) ends up in `channels.conf`. The server's rescan path (`server.py:260`) correctly uses separate pipes; the shell script is inconsistent with that.
+`static/rescan.html` — The grid cells were keyed by lower-edge frequency (from the ATSC table) but SSE events carry w_scan's center frequency. Nothing ever matched. Fixed: cells are now keyed by RF channel number; `frequency`/`lock` events use `rf_channel` directly; `channel` events use ±4 MHz tolerance matching against the lower-edge table.
 
 ---
 
-## Minor Issues
+## Open Minor Issues
 
-### `log_message` override drops HTTP method and status code
+### `log_message` drops status code
 
-**`server.py:413–414`**
+**`server.py`** — The log override prints `args[0]` (request line) but drops `args[1]` (status code). Low impact.
 
-```python
-def log_message(self, format, *args):
-    print(f"[HTTP] {args[0]}" if args else "")
-```
+### Thread-safety of status reads
 
-`args[0]` is the request line (e.g., `"GET /api/channels HTTP/1.1"`), which is fine. But `args[1]` (status code) and `args[2]` (response size) are dropped. Standard format would be: `f"[HTTP] {args[0]} {args[1]}"`.
-
-### Thread-safety of `current_channel` and `current_quality` reads
-
-**`server.py:136–143`**
-
-The `/api/status` handler reads `current_channel` and `current_quality` without holding the lock. In CPython the GIL makes this safe in practice, but it's technically a data race. Reads should either hold the lock or the values should be read atomically.
-
-### VLC scaling uses `canvas` filter
-
-**`server.py:89`**
-
-```python
-transcode_opts += f",height={preset['scale']},vfilter=canvas{{width=0,height={preset['scale']}}}"
-```
-
-`canvas` is a padding filter, not a scale filter. `width=0` lets VLC choose the width. This may produce unexpected results on content with unusual aspect ratios. A `scale` or `croppadd` filter would be more appropriate.
-
-### VLC stderr monitor thread
-
-**`server.py:114–122`**
-
-The monitor thread calls `vlc_proc.stderr.read()` after `wait()`. Since stderr is a `PIPE`, this will block until the pipe closes. If VLC produced a lot of output this could be slow, but in practice the pipe closes with the process. Low risk.
+**`server.py`** — `/api/status` reads `current_channel` and `current_quality` without holding the lock. Safe in CPython due to the GIL, but technically a data race.
 
 ### 5-second fixed buffer delay
 
-**`static/index.html:356`**
-
-```js
-setTimeout(() => startPlayback(), 5000);
-```
-
-The client always waits 5 seconds after tuning before loading the playlist, regardless of how quickly VLC produces the first segment. This could be replaced with polling for `live.m3u8` existence.
+**`static/index.html`** — The client always waits 5 seconds after tuning before loading the playlist, regardless of how quickly VLC produces the first segment. Could poll for `live.m3u8` instead.

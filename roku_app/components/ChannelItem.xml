@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ChannelItem — row renderer for the MarkupList channel list.
+  Layout (380 x 58 px):
+    [accent bar][  number  ][  name  .....................]
+-->
+<component name="ChannelItem" extends="Group">
+  <interface>
+    <field id="itemContent"    type="node"   onChange="onContent"/>
+    <field id="focusBitmapUri" type="string" onChange="onFocus"/>
+    <field id="width"          type="float"  value="380"/>
+    <field id="height"         type="float"  value="58"/>
+  </interface>
+  <children>
+    <Rectangle id="bg"  color="0x111111ff" width="380" height="58"/>
+    <Rectangle id="bar" color="0x6a5a30ff" width="3"   height="36"
+               translation="[0, 11]" visible="false"/>
+    <!-- channel number, right-aligned in a 72px column -->
+    <Label id="num"
+           font="font:SmallBoldSystemFont"
+           color="0x8a7a5aff"
+           text=""
+           width="68"
+           height="58"
+           horizAlign="right"
+           vertAlign="center"
+           translation="[0, 0]"/>
+    <!-- channel name -->
+    <Label id="nam"
+           font="font:SmallSystemFont"
+           color="0x777777ff"
+           text=""
+           width="292"
+           height="58"
+           vertAlign="center"
+           translation="[80, 0]"
+           truncateOnDelimiter=" "/>
+  </children>
+  <script type="text/brightscript"><![CDATA[
+    sub init()
+        m.bg  = m.top.findNode("bg")
+        m.bar = m.top.findNode("bar")
+        m.num = m.top.findNode("num")
+        m.nam = m.top.findNode("nam")
+    end sub
+
+    sub onContent()
+        c = m.top.itemContent
+        if c = invalid then return
+        m.num.text = c.number
+        m.nam.text = c.title
+        applyFocus(m.top.focusBitmapUri <> "")
+    end sub
+
+    sub onFocus()
+        applyFocus(m.top.focusBitmapUri <> "")
+    end sub
+
+    sub applyFocus(focused as Boolean)
+        if focused
+            m.bg.color  = "0x1e1c16ff"
+            m.bar.visible = true
+            m.num.color = "0xd4c090ff"
+            m.nam.color = "0xd4cfc7ff"
+        else
+            m.bg.color  = "0x111111ff"
+            m.bar.visible = false
+            c = m.top.itemContent
+            if c <> invalid and c.isSubchannel = true
+                m.num.color = "0x5a5040ff"
+                m.nam.color = "0x555555ff"
+            else
+                m.num.color = "0x8a7a5aff"
+                m.nam.color = "0x777777ff"
+            end if
+        end if
+    end sub
+  ]]></script>
+</component>

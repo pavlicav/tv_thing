@@ -11,6 +11,204 @@
     "rf_channel": 34
   },
   {
+    "name": "WTTG-DT",
+    "frequency": 605000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 3,
+    "modulation": "VSB_8",
+    "id": "wttg_dt_5_1",
+    "number": "5.1",
+    "rf_channel": 36
+  },
+  {
+    "name": "WJLA",
+    "frequency": 177000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 3,
+    "modulation": "VSB_8",
+    "id": "wjla_7_1",
+    "number": "7.1",
+    "rf_channel": 7
+  },
+  {
+    "name": "WUSA-HD",
+    "frequency": 189000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 1,
+    "modulation": "VSB_8",
+    "id": "wusa_hd_9_1",
+    "number": "9.1",
+    "rf_channel": 9
+  },
+  {
+    "name": "WDCO",
+    "frequency": 533000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 3,
+    "modulation": "VSB_8",
+    "id": "wdco_10_1",
+    "number": "10.1",
+    "rf_channel": 24
+  },
+  {
+    "name": "Univision Washington D.C.",
+    "frequency": 479000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 1,
+    "modulation": "VSB_8",
+    "id": "univision_washington_d_c_14_1",
+    "number": "14.1",
+    "rf_channel": 15
+  },
+  {
+    "name": "WDCA",
+    "frequency": 605000000,
+    "video_pid": 65,
+    "audio_pid": 68,
+    "service_id": 4,
+    "modulation": "VSB_8",
+    "id": "wdca_20_1",
+    "number": "20.1",
+    "rf_channel": 36
+  },
+  {
+    "name": "MPT-HD",
+    "frequency": 515000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 1,
+    "modulation": "VSB_8",
+    "id": "mpt_hd_22_1",
+    "number": "22.1",
+    "rf_channel": 21
+  },
+  {
+    "name": "WDVM-SD",
+    "frequency": 479000000,
+    "video_pid": 337,
+    "audio_pid": 340,
+    "service_id": 7,
+    "modulation": "VSB_8",
+    "id": "wdvm_sd_25_1",
+    "number": "25.1",
+    "rf_channel": 15
+  },
+  {
+    "name": "WETA-HD",
+    "frequency": 575000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 1,
+    "modulation": "VSB_8",
+    "id": "weta_hd_26_1",
+    "number": "26.1",
+    "rf_channel": 31
+  },
+  {
+    "name": "HSN2",
+    "frequency": 581000000,
+    "video_pid": 101,
+    "audio_pid": 102,
+    "service_id": 101,
+    "modulation": "VSB_8",
+    "id": "hsn2_31_1",
+    "number": "31.1",
+    "rf_channel": 32
+  },
+  {
+    "name": "WHUT",
+    "frequency": 177000000,
+    "video_pid": 113,
+    "audio_pid": 116,
+    "service_id": 1,
+    "modulation": "VSB_8",
+    "id": "whut_32_1",
+    "number": "32.1",
+    "rf_channel": 7
+  },
+  {
+    "name": "WZDC",
+    "frequency": 593000000,
+    "video_pid": 81,
+    "audio_pid": 84,
+    "service_id": 5,
+    "modulation": "VSB_8",
+    "id": "wzdc_44_1",
+    "number": "44.1",
+    "rf_channel": 34
+  },
+  {
+    "name": "LATV",
+    "frequency": 473000000,
+    "video_pid": 193,
+    "audio_pid": 196,
+    "service_id": 20,
+    "modulation": "VSB_8",
+    "id": "latv_47_1",
+    "number": "47.1",
+    "rf_channel": 14
+  },
+  {
+    "name": "MeTV",
+    "frequency": 509000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 3,
+    "modulation": "VSB_8",
+    "id": "metv_48_1",
+    "number": "48.1",
+    "rf_channel": 20
+  },
+  {
+    "name": "WDCW-DT",
+    "frequency": 479000000,
+    "video_pid": 305,
+    "audio_pid": 308,
+    "service_id": 5,
+    "modulation": "VSB_8",
+    "id": "wdcw_dt_50_1",
+    "number": "50.1",
+    "rf_channel": 15
+  },
+  {
+    "name": "CWWNUV",
+    "frequency": 515000000,
+    "video_pid": 113,
+    "audio_pid": 116,
+    "service_id": 5,
+    "modulation": "VSB_8",
+    "id": "cwwnuv_54_1",
+    "number": "54.1",
+    "rf_channel": 21
+  },
+  {
+    "name": "ION",
+    "frequency": 599000000,
+    "video_pid": 49,
+    "audio_pid": 52,
+    "service_id": 3,
+    "modulation": "VSB_8",
+    "id": "ion_66_1",
+    "number": "66.1",
+    "rf_channel": 35
+  },
+  {
+    "name": "AltaVsn",
+    "frequency": 189000000,
+    "video_pid": 113,
+    "audio_pid": 116,
+    "service_id": 6,
+    "modulation": "VSB_8",
+    "id": "altavsn_68_1",
+    "number": "68.1",
+    "rf_channel": 9
+  },
+  {
     "name": "COZI TV on WRC-TV",
     "frequency": 593000000,
     "video_pid": 65,
@@ -44,17 +242,6 @@
     "rf_channel": 34
   },
   {
-    "name": "WTTG-DT",
-    "frequency": 605000000,
-    "video_pid": 49,
-    "audio_pid": 52,
-    "service_id": 3,
-    "modulation": "VSB_8",
-    "id": "wttg_dt_5_1",
-    "number": "5.1",
-    "rf_channel": 36
-  },
-  {
     "name": "BUZZR",
     "frequency": 605000000,
     "video_pid": 81,
@@ -77,15 +264,37 @@
     "rf_channel": 36
   },
   {
-    "name": "WUSA-HD",
-    "frequency": 189000000,
-    "video_pid": 49,
-    "audio_pid": 52,
-    "service_id": 1,
+    "name": "Charge!",
+    "frequency": 177000000,
+    "video_pid": 65,
+    "audio_pid": 68,
+    "service_id": 4,
     "modulation": "VSB_8",
-    "id": "wusa_hd_9_1",
-    "number": "9.1",
-    "rf_channel": 9
+    "id": "charge_7_2",
+    "number": "7.2",
+    "rf_channel": 7
+  },
+  {
+    "name": "Comet",
+    "frequency": 177000000,
+    "video_pid": 81,
+    "audio_pid": 84,
+    "service_id": 5,
+    "modulation": "VSB_8",
+    "id": "comet_7_3",
+    "number": "7.3",
+    "rf_channel": 7
+  },
+  {
+    "name": "ROAR",
+    "frequency": 177000000,
+    "video_pid": 97,
+    "audio_pid": 100,
+    "service_id": 6,
+    "modulation": "VSB_8",
+    "id": "roar_7_4",
+    "number": "7.4",
+    "rf_channel": 7
   },
   {
     "name": "Crime",
@@ -132,28 +341,6 @@
     "rf_channel": 9
   },
   {
-    "name": "WDCO",
-    "frequency": 533000000,
-    "video_pid": 49,
-    "audio_pid": 52,
-    "service_id": 3,
-    "modulation": "VSB_8",
-    "id": "wdco_10_1",
-    "number": "10.1",
-    "rf_channel": 24
-  },
-  {
-    "name": "Univision Washington D.C.",
-    "frequency": 479000000,
-    "video_pid": 49,
-    "audio_pid": 52,
-    "service_id": 1,
-    "modulation": "VSB_8",
-    "id": "univision_washington_d_c_14_1",
-    "number": "14.1",
-    "rf_channel": 15
-  },
-  {
     "name": "GREAT",
     "frequency": 479000000,
     "video_pid": 65,
@@ -185,17 +372,6 @@
     "id": "unimas_of_washington_d_c_14_4",
     "number": "14.4",
     "rf_channel": 15
-  },
-  {
-    "name": "WDCA",
-    "frequency": 605000000,
-    "video_pid": 65,
-    "audio_pid": 68,
-    "service_id": 4,
-    "modulation": "VSB_8",
-    "id": "wdca_20_1",
-    "number": "20.1",
-    "rf_channel": 36
   },
   {
     "name": "MOVIES",
@@ -231,17 +407,6 @@
     "rf_channel": 36
   },
   {
-    "name": "MPT-HD",
-    "frequency": 515000000,
-    "video_pid": 49,
-    "audio_pid": 52,
-    "service_id": 1,
-    "modulation": "VSB_8",
-    "id": "mpt_hd_22_1",
-    "number": "22.1",
-    "rf_channel": 21
-  },
-  {
     "name": "MPT-2",
     "frequency": 515000000,
     "video_pid": 65,
@@ -273,28 +438,6 @@
     "id": "nhk_wld_22_4",
     "number": "22.4",
     "rf_channel": 21
-  },
-  {
-    "name": "WDVM-SD",
-    "frequency": 479000000,
-    "video_pid": 337,
-    "audio_pid": 340,
-    "service_id": 7,
-    "modulation": "VSB_8",
-    "id": "wdvm_sd_25_1",
-    "number": "25.1",
-    "rf_channel": 15
-  },
-  {
-    "name": "WETA-HD",
-    "frequency": 575000000,
-    "video_pid": 49,
-    "audio_pid": 52,
-    "service_id": 1,
-    "modulation": "VSB_8",
-    "id": "weta_hd_26_1",
-    "number": "26.1",
-    "rf_channel": 31
   },
   {
     "name": "WETA UK",
@@ -341,17 +484,6 @@
     "rf_channel": 31
   },
   {
-    "name": "HSN2",
-    "frequency": 581000000,
-    "video_pid": 101,
-    "audio_pid": 102,
-    "service_id": 101,
-    "modulation": "VSB_8",
-    "id": "hsn2_31_1",
-    "number": "31.1",
-    "rf_channel": 32
-  },
-  {
     "name": "ShopLC",
     "frequency": 581000000,
     "video_pid": 201,
@@ -374,15 +506,26 @@
     "rf_channel": 32
   },
   {
-    "name": "WZDC",
-    "frequency": 593000000,
-    "video_pid": 81,
-    "audio_pid": 84,
-    "service_id": 5,
+    "name": "Newsmax",
+    "frequency": 581000000,
+    "video_pid": 401,
+    "audio_pid": 402,
+    "service_id": 401,
     "modulation": "VSB_8",
-    "id": "wzdc_44_1",
-    "number": "44.1",
-    "rf_channel": 34
+    "id": "newsmax_31_4",
+    "number": "31.4",
+    "rf_channel": 32
+  },
+  {
+    "name": "PBSKids",
+    "frequency": 177000000,
+    "video_pid": 129,
+    "audio_pid": 132,
+    "service_id": 2,
+    "modulation": "VSB_8",
+    "id": "pbskids_32_2",
+    "number": "32.2",
+    "rf_channel": 7
   },
   {
     "name": "XITOS",
@@ -394,28 +537,6 @@
     "id": "xitos_44_2",
     "number": "44.2",
     "rf_channel": 34
-  },
-  {
-    "name": "LATV",
-    "frequency": 473000000,
-    "video_pid": 193,
-    "audio_pid": 196,
-    "service_id": 20,
-    "modulation": "VSB_8",
-    "id": "latv_47_1",
-    "number": "47.1",
-    "rf_channel": 14
-  },
-  {
-    "name": "MeTV",
-    "frequency": 509000000,
-    "video_pid": 49,
-    "audio_pid": 52,
-    "service_id": 3,
-    "modulation": "VSB_8",
-    "id": "metv_48_1",
-    "number": "48.1",
-    "rf_channel": 20
   },
   {
     "name": "STORY",
@@ -550,17 +671,6 @@
     "rf_channel": 14
   },
   {
-    "name": "WDCW-DT",
-    "frequency": 479000000,
-    "video_pid": 305,
-    "audio_pid": 308,
-    "service_id": 5,
-    "modulation": "VSB_8",
-    "id": "wdcw_dt_50_1",
-    "number": "50.1",
-    "rf_channel": 15
-  },
-  {
     "name": "Antenna TV",
     "frequency": 479000000,
     "video_pid": 321,
@@ -570,28 +680,6 @@
     "id": "antenna_tv_50_2",
     "number": "50.2",
     "rf_channel": 15
-  },
-  {
-    "name": "CWWNUV",
-    "frequency": 515000000,
-    "video_pid": 113,
-    "audio_pid": 116,
-    "service_id": 5,
-    "modulation": "VSB_8",
-    "id": "cwwnuv_54_1",
-    "number": "54.1",
-    "rf_channel": 21
-  },
-  {
-    "name": "ION",
-    "frequency": 599000000,
-    "video_pid": 49,
-    "audio_pid": 52,
-    "service_id": 3,
-    "modulation": "VSB_8",
-    "id": "ion_66_1",
-    "number": "66.1",
-    "rf_channel": 35
   },
   {
     "name": "Bounce",
@@ -671,20 +759,9 @@
     "rf_channel": 35
   },
   {
-    "name": "AltaVsn",
-    "frequency": 189000000,
-    "video_pid": 113,
-    "audio_pid": 116,
-    "service_id": 6,
-    "modulation": "VSB_8",
-    "id": "altavsn_68_1",
-    "number": "68.1",
-    "rf_channel": 9
-  },
-  {
     "name": "DEFY",
     "frequency": 189000000,
-    "video_pid": 145,
+    "video_pid": 0,
     "audio_pid": 148,
     "service_id": 7,
     "modulation": "VSB_8",
