@@ -29,6 +29,9 @@ DEVICE=/dev/v4l/by-id/usb-AMBA_Hauppauge_HD_PVR_00A4E5AC-video-index0
 STAMP=$(date +%Y%m%d-%H%M%S)
 LOGDIR=/home/vivian/roku-migration-$STAMP
 STAGE=/home/vivian/tv_thing-candidate.roku-$STAMP
+# A name of its own each run: the server exits 1 when signalled, so systemd keeps a
+# stopped candidate loaded as failed, and a fixed name refused the second run.
+CANDIDATE=tv-thing-candidate-$STAMP
 CHECK_ONLY=0
 [ "${1:-}" = "--check" ] && CHECK_ONLY=1
 
@@ -103,7 +106,8 @@ start_vizelvision() {
 
 rollback() {
     say "ROLLING BACK"
-    systemctl stop tv-thing-candidate.service 2>/dev/null
+    journalctl -u "$CANDIDATE" --no-pager > "$LOGDIR/candidate.journal" 2>&1
+    systemctl stop "$CANDIDATE.service" 2>/dev/null
     if [ "$VV_PROMOTED" = 1 ]; then
         user_systemctl stop vizelvision-stack.target vizelvision-web.service vizelvision-master.service
         as_vivian git -C "$VV" reset -q --hard "$VV_BASE"
@@ -112,6 +116,7 @@ rollback() {
     if [ "$TV_PROMOTED" = 1 ]; then
         systemctl stop tv-thing.service
         as_vivian git -C "$TV" reset -q --hard "$TV_BASE"
+        rm -rf "$TV/roku_state"  # the calibration copy: untracked at $TV_BASE
         cp "$LOGDIR/tv-thing.service" /etc/systemd/system/tv-thing.service
         systemctl daemon-reload
     fi
@@ -179,7 +184,8 @@ systemctl stop tv-thing.service || fail "could not stop tv-thing"
 say "Staging the candidate in $STAGE"
 as_vivian mkdir -p "$STAGE/streams" "$STAGE/recordings"
 as_vivian rsync -a --exclude .git --exclude streams --exclude __pycache__ "$TV_WORKTREE/" "$STAGE/"
-systemd-run --unit=tv-thing-candidate --uid=vivian --gid=vivian \
+systemctl reset-failed 'tv-thing-candidate*' 2>/dev/null
+systemd-run --unit="$CANDIDATE" --collect --uid=vivian --gid=vivian \
     -p WorkingDirectory="$STAGE" -p MemoryMax=1800M -p CPUQuota=400% -p TasksMax=192 \
     -p LimitFSIZE=16M:16G -p OOMPolicy=continue -p RuntimeMaxSec=3600 \
     --setenv=PORT=8098 --setenv=TV_THING_BIND=127.0.0.1 --setenv=TV_THING_BIND_LOOPBACK=1 \
@@ -192,13 +198,13 @@ systemd-run --unit=tv-thing-candidate --uid=vivian --gid=vivian \
 wait_for 90 "The candidate's digital lane is ready" lane_ready http://127.0.0.1:8098 digital || fail "candidate digital lane"
 wait_for 60 "The candidate's Roku capture is ready" lane_ready http://127.0.0.1:8098 roku || fail "candidate Roku capture"
 sleep 20
-PID=$(systemctl show -p MainPID --value tv-thing-candidate)
+PID=$(systemctl show -p MainPID --value "$CANDIDATE")
 gate candidate-digital http://127.0.0.1:8098 "$PID" --retunes 3 || fail "candidate digital gate"
 gate candidate-roku http://127.0.0.1:8098 "$PID" "${ROKU_GATE[@]}" || fail "candidate Roku gate"
 recordings_test http://127.0.0.1:8098 "$STAGE/recordings" | tee "$LOGDIR/recordings.log"
 [ "${PIPESTATUS[0]}" = 0 ] || fail "candidate recordings"
-systemctl stop tv-thing-candidate.service
-journalctl -u tv-thing-candidate --no-pager > "$LOGDIR/candidate.journal" 2>&1
+journalctl -u "$CANDIDATE" --no-pager > "$LOGDIR/candidate.journal" 2>&1
+systemctl stop "$CANDIDATE.service"
 
 # --- 4. promote TV Thing and gate production -----------------------------------------------------
 say "Promoting TV Thing"
