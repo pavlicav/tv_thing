@@ -19,6 +19,7 @@ Each source is a **lane** with its own tuner, encoder, and playlist:
 | `digital` | S5H1409 ATSC demodulator (`/dev/dvb/adapter0`) | `/stream/digital.m3u8` | nothing |
 | `analog` | Analog tuner + CX23418 encoder (`/dev/video*`) | `/stream/analog.m3u8` | `fm` |
 | `fm` | Same analog tuner, radio demod mode (`/dev/radio0`) | `/stream/radio.m3u8` | `analog` |
+| `roku` | Source Roku via Hauppauge HD PVR (`roku.json`) | `/stream/roku.m3u8` | nothing |
 
 Because `digital` and `analog` sit on different front-ends, tuning one never
 disturbs the other. `/stream/live.m3u8` remains as an alias for the most
@@ -29,7 +30,20 @@ exposes the NTSC tuner as a frequency-ordered list of all US cable STD channel
 numbers 1–135; selecting a number maps it directly to its video-carrier
 frequency, with no cable scan.
 
-TV Thing drives the tuner card only. Generic V4L2 capture hardware -- USB
+**The Roku lane** (since 2026-10-06, moved from vizelVision) is the source Roku's
+HDMI through a component converter into a Hauppauge HD PVR. One ffmpeg reads the
+HD PVR and copies its own H.264 and AAC, without transcoding, to the lane's HLS
+and to a loopback tap. `roku_lane.py` puts YouTube TV channels, baseball games,
+Thursday Night Football or Sunday Ticket games on the Roku by navigating it with
+`roku_control/` (ECP keys, screen recognition on frames decoded from the tap only
+while needed, OCR and calibrated logo templates in `roku_state/`), and verifies
+each selection on screen. **Manual Roku** hands it to an on-screen remote on the
+Watch page's Roku tab. The Roku has its own lock (`lane: "roku"`), the VCR records
+it alongside the digital tuner, and `roku.html` shows its capture, signal and
+calibration. It is not a video lane for the legacy `live.m3u8` alias. See
+`API.md`, "The Roku lane".
+
+TV Thing drives the tuner card and that one Roku capture. Generic V4L2 capture hardware -- USB
 grabbers, webcams, composite/S-video dongles -- is deliberately **not**
 supported: tuner discovery keeps only nodes that expose a V4L2 *tuner* input,
 which excludes capture cards by construction rather than by name matching.

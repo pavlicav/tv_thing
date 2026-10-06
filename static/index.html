@@ -2347,6 +2347,8 @@
       loadGuideNow();
       resume();
       startSourcePolling();
+      // vizelVision links here as /tv/#roku to watch and drive the Roku.
+      if (location.hash === "#roku" && state.roku.available) selectSource("roku");
     });
   })();
   </script>
