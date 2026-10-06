@@ -7,3 +7,4 @@ epg.json
 .claude/
 .deploy-backups/
 *.orig
+roku_state/

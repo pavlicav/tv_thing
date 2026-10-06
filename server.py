@@ -28,6 +28,10 @@ import analog_tuner
 import atsc_scan
 import epg
 import recorder
+import roku_lane
+from roku_control.errors import (BaseballScheduleError, ChannelNotFoundError,
+                                 ConfigError, ControlBusyError, EcpError,
+                                 RokuStreamError)
 
 BASE_DIR = Path(__file__).parent
 PULSE_CLIENT_CONFIG = BASE_DIR / "pulse-client-no-shm.conf"
@@ -213,17 +217,26 @@ TV_HEALTH_POLL_SECONDS = float(os.environ.get(
 # radio, and forcing cx18 radio=1 reports an identical 50% signal and stereo
 # flag at every frequency from 65 to 108 MHz. FM support was removed rather
 # than left as a control that cannot work.
+#
+# The third lane is not on the HVR-1600 at all: the source Roku feeds a
+# Hauppauge HD PVR, whose own H.264/AAC is copied to HLS (see roku_lane.py).
+# It has its own lock, and it is not a "video lane" for the legacy
+# /stream/live.m3u8 alias: preparing the Roku for someone else must never
+# flip what the living-room Roku app is watching.
 # ---------------------------------------------------------------------------
 LANE_DIGITAL = "digital"
 LANE_ANALOG = "analog"
+LANE_ROKU = "roku"
 VIDEO_LANES = (LANE_DIGITAL, LANE_ANALOG)
-ALL_LANES = (LANE_DIGITAL, LANE_ANALOG)
+ALL_LANES = (LANE_DIGITAL, LANE_ANALOG, LANE_ROKU)
 
 FRONTEND_DIGITAL = "digital"
 FRONTEND_ANALOG = "analog"
+FRONTEND_ROKU = "roku"
 LANE_FRONTEND = {
     LANE_DIGITAL: FRONTEND_DIGITAL,
     LANE_ANALOG: FRONTEND_ANALOG,
+    LANE_ROKU: FRONTEND_ROKU,
 }
 
 # Each lane owns its own playlist and segment prefix so stopping or
@@ -231,15 +244,18 @@ LANE_FRONTEND = {
 LANE_PLAYLIST = {
     LANE_DIGITAL: "digital.m3u8",
     LANE_ANALOG: "analog.m3u8",
+    LANE_ROKU: "roku.m3u8",
 }
 LANE_SEGMENT_PREFIX = {
     LANE_DIGITAL: "digitalseg",
     LANE_ANALOG: "analogseg",
+    LANE_ROKU: "rokuseg",
 }
 # Files a lane owns, removed when that lane stops.
 LANE_FILES = {
     LANE_DIGITAL: ("digital", "digitalseg"),
     LANE_ANALOG: ("analog", "analogseg"),
+    LANE_ROKU: ("roku.m3u8", "rokuseg"),
 }
 # Legacy single-stream playlist. Older clients (the Roku app, cached web
 # pages) only know /stream/live.m3u8, so it is served as an alias for
@@ -271,6 +287,7 @@ procs = {
     "digital_source": None,
     "digital_packager": None,
     "analog_packager": None,
+    "roku_capture": None,
 }
 
 # The video lane whose playlist /stream/live.m3u8 currently mirrors.
@@ -518,6 +535,11 @@ def acquire_tuner_lock(body):
         until = body.get("until", "duration")
         program = None
         channel_id = body.get("channel_id")
+        if until == "program_end" and lane == LANE_ROKU:
+            return api_v1_error(
+                "the Roku has no programme guide; lock it for a duration",
+                400, "invalid_until",
+            )
         if until == "program_end":
             if not channel_id and lane == LANE_DIGITAL:
                 channel_id = (lanes[lane]["selection"] or {}).get("id")
@@ -945,10 +967,12 @@ def lane_stream_ready(lane):
 
 
 def lane_is_running(lane):
-    """Whether this lane's encoder process is alive."""
-    proc = procs[
-        "digital_packager" if lane == LANE_DIGITAL else "analog_packager"
-    ]
+    """Whether this lane's encoder (or, for the Roku, its capture) is alive."""
+    proc = procs[{
+        LANE_DIGITAL: "digital_packager",
+        LANE_ANALOG: "analog_packager",
+        LANE_ROKU: "roku_capture",
+    }[lane]]
     return proc is not None and proc.poll() is None
 
 
@@ -993,11 +1017,16 @@ def stop_lane(lane):
         stop_digital()
     elif lane == LANE_ANALOG:
         stop_analog()
+    elif lane == LANE_ROKU:
+        if roku is not None:
+            roku.cancel()
+        stop_roku()
 
 
 def stop_all():
     stop_analog()
     stop_digital()
+    stop_lane(LANE_ROKU)
 
 
 def _probe_video_encoder(config):
@@ -1593,6 +1622,410 @@ def always_on_worker():
             print(f"Always-on restart failed: {error}")
             always_on_wakeup.set()
             time.sleep(5)
+
+
+# ---------------------------------------------------------------------------
+# The Roku lane
+#
+# The source Roku's HDMI goes through a component converter into a Hauppauge
+# HD PVR, which encodes H.264 (CBR, 0.53 s GOP) and AAC itself. One ffmpeg is
+# the only reader of that device: it copies the transport stream -- no
+# transcode -- to the lane's HLS and to a private loopback UDP tap. The tap
+# feeds the on-demand verification decoder (roku_control/lane_feedback.py)
+# and nothing else. What the Roku is showing, and every navigation, is
+# roku_lane.py's business.
+#
+# The capture is always on while the lane is configured: the HD PVR stays
+# drained and the lane has a picture whatever the Roku shows, menus included.
+# Whether that picture is a *verified* selection is the lane's selection and
+# generation, not the stream's readiness.
+# ---------------------------------------------------------------------------
+ROKU_CONFIG_FILE = Path(os.environ.get(
+    "TV_THING_ROKU_CONFIG", str(BASE_DIR / "roku.json")
+))
+ROKU_TAP_PORT = int(os.environ.get("TV_THING_ROKU_TAP_PORT", "18370"))
+# One GOP per segment: the HD PVR keys every 0.533 s.
+ROKU_HLS_SEGMENT_TIME = float(os.environ.get(
+    "TV_THING_ROKU_HLS_SEGMENT_TIME", "0.5"
+))
+# How long a verified selection may be reused without any check.
+ROKU_REUSE_MAX_AGE = float(os.environ.get(
+    "TV_THING_ROKU_REUSE_MAX_AGE", "900"
+))
+ROKU_RESTART_BACKOFF = (2, 5, 10, 30)
+
+# Built in main() from roku.json; None when the lane is not configured.
+roku = None
+roku_wakeup = threading.Event()
+# Replaced wholesale, never mutated, so roku_lane can read it without the
+# server mutex (it calls back from threads that may already hold its own).
+roku_capture_state = {"running": False, "stream_id": None, "error": None,
+                      "tap_url": None}
+
+
+def roku_tap_input(port=ROKU_TAP_PORT):
+    return (f"udp://127.0.0.1:{port}?fifo_size=65536&buffer_size=1048576"
+            "&overrun_nonfatal=1&timeout=5000000")
+
+
+def roku_capture_source():
+    """The capture as roku_lane sees it. Lock-free on purpose (see above)."""
+    state = roku_capture_state
+    proc = procs.get("roku_capture")
+    running = bool(state["running"] and proc is not None
+                   and proc.poll() is None)
+    return {**state, "running": running}
+
+
+def roku_device():
+    return roku.config.feedback.device if roku is not None else None
+
+
+def build_roku_capture_command(device, stream_id, tap_port=ROKU_TAP_PORT):
+    """Copy the HD PVR's transport stream to HLS and to the verifier tap."""
+    playlist = str(lane_playlist_path(LANE_ROKU))
+    segment_pattern = str(
+        STREAMS_DIR / f"{LANE_SEGMENT_PREFIX[LANE_ROKU]}_{stream_id}_%09d.ts"
+    )
+    # A newly opened HD PVR can start before its codec headers; 32 KiB of
+    # probe exits with "unknown codec" (seen in vizelVision), so allow ~3 s.
+    copy_streams = ["-map", "0:v:0", "-map", "0:a:0?", "-c", "copy",
+                    # Parameter sets ahead of every keyframe: a player or
+                    # decoder joining mid-stream needs no out-of-band headers.
+                    "-bsf:v", "dump_extra=freq=keyframe"]
+    return [
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "warning",
+        "-probesize", "2097152", "-analyzeduration", "3000000",
+        "-f", "mpegts", "-i", device,
+        *copy_streams,
+        "-f", "hls",
+        "-hls_time", str(ROKU_HLS_SEGMENT_TIME),
+        "-hls_list_size", "20",
+        "-hls_allow_cache", "0",
+        "-hls_flags",
+        "delete_segments+omit_endlist+independent_segments+temp_file",
+        "-hls_segment_filename", segment_pattern,
+        playlist,
+        *copy_streams,
+        "-f", "mpegts", f"udp://127.0.0.1:{tap_port}?pkt_size=1316",
+    ]
+
+
+def select_roku_input(device, input_index):
+    """Pick the HD PVR's input before the reader opens it (component = 0)."""
+    if input_index is None:
+        return
+    try:
+        subprocess.run(
+            ["/usr/bin/v4l2-ctl", "--device", device,
+             f"--set-input={input_index}"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        print(f"Could not select the HD PVR input: {error}")
+
+
+def start_roku_capture():
+    """Start a fresh capture generation. Returns (ok, error)."""
+    global roku_capture_state
+    if roku is None:
+        return False, "The Roku lane is not configured"
+    device = roku_device()
+    STREAMS_DIR.mkdir(exist_ok=True)
+    with lock:
+        if lane_is_running(LANE_ROKU):
+            return True, None
+        stream_id = next_stream_id()
+        clear_streams(LANE_FILES[LANE_ROKU])
+        lanes[LANE_ROKU] = new_lane_state()
+        lanes[LANE_ROKU]["started_at"] = time.time()
+    select_roku_input(device, roku.config.feedback.input_index)
+    health = new_stream_health(stream_id)
+    try:
+        capture = subprocess.Popen(
+            build_roku_capture_command(device, stream_id),
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE, text=True,
+        )
+    except OSError as exc:
+        with lock:
+            reset_lane(LANE_ROKU)
+        return False, f"Could not start the Roku capture: {exc}"
+    with lock:
+        procs["roku_capture"] = capture
+        lanes[LANE_ROKU].update({
+            "active": True,
+            "quality": "source",
+            "stream_id": stream_id,
+            "health": health,
+            "video_encoder": "copy",
+            "tuner": {"device": device,
+                      "name": roku.config.feedback.source_name},
+        })
+        roku_capture_state = {"running": True, "stream_id": stream_id,
+                              "error": None,
+                              "tap_url": roku_tap_input(ROKU_TAP_PORT)}
+
+    def monitor():
+        global roku_capture_state
+        if capture.stderr:
+            for line in capture.stderr:
+                line = line.rstrip()
+                print(f"roku ffmpeg: {line}", flush=True)
+        capture.wait()
+        print(f"Roku capture exited with code {capture.returncode}")
+        if health["ok"] and capture.returncode not in (0, -9, -15, 255):
+            health["ok"] = False
+            health["reason"] = f"ffmpeg exited with code {capture.returncode}"
+        with lock:
+            if procs["roku_capture"] is capture:
+                procs["roku_capture"] = None
+                roku_capture_state = {
+                    "running": False, "stream_id": None,
+                    "error": health.get("reason"), "tap_url": None,
+                }
+                reset_lane(LANE_ROKU)
+        roku_wakeup.set()
+
+    threading.Thread(target=monitor, daemon=True).start()
+    threading.Thread(
+        target=watch_hls_packager,
+        args=(capture, {"codec": "copy"}, stream_id, health, LANE_ROKU),
+        daemon=True,
+    ).start()
+    return True, None
+
+
+def stop_roku():
+    """Stop the Roku capture. The keeper starts a fresh generation."""
+    global roku_capture_state
+    capture = procs["roku_capture"]
+    procs["roku_capture"] = None
+    roku_capture_state = {"running": False, "stream_id": None,
+                          "error": None, "tap_url": None}
+    kill_process(capture, timeout=TV_PACKAGER_STOP_TIMEOUT)
+    reset_lane(LANE_ROKU)
+    clear_streams(LANE_FILES[LANE_ROKU])
+    roku_wakeup.set()
+
+
+def roku_keeper():
+    """Keep the Roku capture running, backing off while it keeps failing."""
+    failures = 0
+    while True:
+        roku_wakeup.wait(timeout=5)
+        roku_wakeup.clear()
+        if roku is None:
+            continue
+        try:
+            if lane_is_running(LANE_ROKU):
+                started = lanes[LANE_ROKU].get("started_at") or time.time()
+                if time.time() - started > 60:
+                    failures = 0
+                continue
+            ok, error = start_roku_capture()
+        except Exception as failure:   # noqa: BLE001 - keeper must not die
+            ok, error = False, repr(failure)
+        if not ok:
+            failures += 1
+            print(f"Roku capture restart failed: {error}")
+        delay = ROKU_RESTART_BACKOFF[min(failures, len(ROKU_RESTART_BACKOFF) - 1)] \
+            if failures else 0
+        if failures:
+            time.sleep(delay)
+            roku_wakeup.set()
+
+
+def roku_unavailable():
+    return api_v1_error("The Roku lane is not configured", 503,
+                        "roku_unavailable")
+
+
+def roku_call(action):
+    """Run one roku_lane action and map its errors onto API responses."""
+    if roku is None:
+        return roku_unavailable()
+    try:
+        return action()
+    except ChannelNotFoundError as exc:
+        return api_v1_error(str(exc), 404, "unknown_channel",
+                            extra={"details": exc.details})
+    except ConfigError as exc:
+        return api_v1_error(str(exc), 400, exc.code)
+    except ControlBusyError as exc:
+        return api_v1_error(str(exc), 409, "roku_busy")
+    except BaseballScheduleError as exc:
+        return api_v1_error(str(exc), 502, exc.code)
+    except EcpError as exc:
+        return api_v1_error(str(exc), 502, "roku_unreachable")
+    except RokuStreamError as exc:
+        return api_v1_error(str(exc), 500, exc.code)
+
+
+def roku_change_refusal(body, action):
+    """The roku lock standing in the way of a change, as a response, or None.
+
+    An override revokes the lock, like a digital tune's override does.
+    """
+    body = body if isinstance(body, dict) else {}
+    token = body.get("token")
+    override = bool(body.get("override"))
+    with lock:
+        held = lock_holder(LANE_ROKU, token, override)
+        if held:
+            return api_v1_error(
+                f"roku is locked by {held['owner']}", 423, "locked",
+                extra={"lock": lock_view(held), "action": action},
+            )
+        if override:
+            override_tuner_lock(LANE_ROKU)
+    return None
+
+
+def perform_roku_tune(body):
+    request_started = time.monotonic()
+    if roku is None:
+        return roku_unavailable()
+    refusal = roku_change_refusal(body, "tune")
+    if refusal:
+        return refusal
+
+    def tune():
+        status, result = roku.tune(body)
+        if status == 409:
+            return api_v1_error(result["error"], 409, result["code"])
+        lane = lane_payload(LANE_ROKU)
+        return {
+            "api_version": API_VERSION,
+            "ok": True,
+            "lane": LANE_ROKU,
+            "source": {"id": body.get("source"), "kind": body.get("source"),
+                       "name": lane["name"]},
+            "selection": lane["selection"],
+            "quality": lane["quality"],
+            "stream": lane["stream"],
+            "encoder": lane["encoder"],
+            "reused": result.get("reused", False),
+            "resumed": result.get("resumed", False),
+            "stream_reused": result.get("reused", False),
+            "operation": result.get("operation") or lane["roku"]["operation"],
+            "active_lanes": [
+                name for name in ALL_LANES if lane_is_running(name)
+            ],
+            "request_ms": round((time.monotonic() - request_started) * 1000, 1),
+        }, status
+    return roku_call(tune)
+
+
+def roku_remote(body, action):
+    """A remote action (key, text, app), after the roku lock allows it."""
+    refusal = roku_change_refusal(body, action)
+    if refusal:
+        return refusal
+
+    def run():
+        if action == "keypress":
+            result = roku.keypress(body.get("key"))
+        elif action == "text":
+            result = roku.text(body.get("text"))
+        else:
+            result = roku.launch(body.get("app_id"))
+        return {"api_version": API_VERSION, "ok": True, **result,
+                "generation": roku.generation()}, 200
+    return roku_call(run)
+
+
+def roku_cancel(body):
+    refusal = roku_change_refusal(body, "cancel")
+    if refusal:
+        return refusal
+    return roku_call(lambda: (
+        {"api_version": API_VERSION, "ok": True, **roku.cancel()}, 200))
+
+
+def roku_check(_body):
+    # The check never presses a key, so it needs no lock.
+    return roku_call(lambda: (
+        {"api_version": API_VERSION, "ok": True, **roku.check(),
+         "generation": roku.generation()}, 200))
+
+
+def roku_sources_available():
+    if roku is None:
+        return False
+    try:
+        return Path(roku_device()).exists()
+    except (TypeError, OSError):
+        return False
+
+
+def api_v1_roku_source(source_id, requested_date=None):
+    def catalog():
+        listing = roku.catalog(source_id, requested_date)
+        source = next(item for item in roku.source_list(
+            roku_sources_available()) if item["id"] == source_id)
+        return {
+            "api_version": API_VERSION,
+            "source": dict(source, count=len(listing["items"]),
+                           stream_path=f"/stream/{LANE_PLAYLIST[LANE_ROKU]}"),
+            **listing,
+        }, 200
+    return roku_call(catalog)
+
+
+def api_v1_roku_payload():
+    """The Roku engineering view: capture, verifier, Roku and operations."""
+    if roku is None:
+        return {"api_version": API_VERSION, "configured": False}, 200
+    from roku_control.calibration import calibration_status
+    try:
+        calibration = calibration_status(roku.feedback)
+    except RokuStreamError as exc:
+        calibration = {"error": str(exc)}
+    return {
+        "api_version": API_VERSION,
+        "configured": True,
+        "lane": lane_payload(LANE_ROKU),
+        "roku_url": roku.ecp.base_url,
+        "calibration": calibration,
+        "remote_keys": list(roku_lane.REMOTE_KEYS),
+        "channels": [channel.name for channel in roku.config.channels],
+    }, 200
+
+
+def roku_calibrate(body):
+    """The controller's calibrations, which can move the Roku: lock-checked."""
+    refusal = roku_change_refusal(body, "calibrate")
+    if refusal:
+        return refusal
+    kind = body.get("kind")
+    channel = body.get("channel")
+    controller = roku.controller if roku is not None else None
+
+    def run():
+        if kind == "guide":
+            result = controller.calibrate(channel)
+        elif kind == "verify":
+            result = controller.verify_current_row(channel)
+        elif kind == "network":
+            result = controller.calibrate_network(channel)
+        elif kind == "current-network":
+            result = controller.calibrate_current_network(channel)
+        elif kind == "profile":
+            result = controller.calibrate_profile()
+        elif kind == "sunday-ticket":
+            _target, game = roku.normalize({
+                "source_id": roku_lane.SUNDAY_TICKET,
+                "channel_id": body.get("game_id"), "date": body.get("date"),
+            })
+            result = controller.calibrate_sunday_ticket(game)
+        else:
+            raise ConfigError(
+                "kind must be guide, verify, network, current-network, "
+                "profile or sunday-ticket")
+        return {"api_version": API_VERSION, "ok": True,
+                "result": json.loads(json.dumps(result, default=str))}, 200
+    return roku_call(run)
 
 
 # ---------------------------------------------------------------------------
@@ -2921,7 +3354,10 @@ def _lane_stream_payload(lane):
     failure = state.get("error") or health.get("reason")
     if health.get("ok") is False and not failure:
         failure = "Stream health check failed"
-    if lane in tuning_lanes:
+    navigating = (lane == LANE_ROKU and roku is not None
+                  and roku.operation_view() is not None
+                  and roku.operation_view()["active"])
+    if lane in tuning_lanes or navigating:
         phase = "tuning"
     elif failure:
         phase = "failed"
@@ -2929,11 +3365,15 @@ def _lane_stream_payload(lane):
         phase = "ready"
     else:
         phase = "buffering" if active else "idle"
-    ready = ready and not failure and lane not in tuning_lanes
+    ready = ready and not failure and lane not in tuning_lanes and not navigating
+    # A Roku lease must fail closed when the picture stops being the verified
+    # selection, not only when the reader restarts (see roku_lane.py).
+    generation = (roku.generation() if lane == LANE_ROKU and roku is not None
+                  else state["stream_id"])
     return {
         "state": phase,
         "error": {"code": "stream_failed", "message": failure} if failure else None,
-        "generation": state["stream_id"],
+        "generation": generation,
         "playback": [{"protocol": "hls", "url": f"stream/{LANE_PLAYLIST[lane]}",
                       "content_type": "application/vnd.apple.mpegurl"}],
         "shared": True,
@@ -2944,7 +3384,8 @@ def _lane_stream_payload(lane):
         "content_type": ("application/vnd.apple.mpegurl"),
         "kind": "video",
         "id": state["stream_id"],
-        "segment_duration_seconds": HLS_SEGMENT_TIME,
+        "segment_duration_seconds": (ROKU_HLS_SEGMENT_TIME if lane == LANE_ROKU
+                                     else HLS_SEGMENT_TIME),
         "health": state["health"],
         "started_at": state["started_at"],
     }
@@ -2963,12 +3404,14 @@ def _lane_payload(lane):
     descriptions = {
         LANE_DIGITAL: "ATSC digital television (S5H1409 demodulator)",
         LANE_ANALOG: "Analog NTSC cable television (CX23418 encoder)",
+        LANE_ROKU: "Source Roku via Hauppauge HD PVR (its own H.264, copied)",
     }
-    return {
+    payload = {
         "id": lane,
         "name": {
             LANE_DIGITAL: "Digital TV",
             LANE_ANALOG: "Analog TV",
+            LANE_ROKU: "Roku",
         }[lane],
         "description": descriptions[lane],
         "frontend": frontend,
@@ -2986,13 +3429,20 @@ def _lane_payload(lane):
                 state["video_encoder"] is not None
                 and state["video_encoder"] != "libx264"
             ),
-            "backend": (
-                TV_SOURCE_BACKEND if lane == LANE_DIGITAL else "analog-v4l2"
-            ),
+            "backend": {
+                LANE_DIGITAL: TV_SOURCE_BACKEND,
+                LANE_ANALOG: "analog-v4l2",
+                LANE_ROKU: "hdpvr-copy",
+            }[lane],
         },
         "tuner": state["tuner"],
         "stream": lane_stream_payload(lane),
     }
+    if lane == LANE_ROKU:
+        payload["available"] = roku is not None
+        payload["roku"] = roku.payload() if roku is not None else None
+        payload["selection"] = (payload["roku"] or {}).get("selection")
+    return payload
 
 
 def frontend_payload():
@@ -3003,6 +3453,8 @@ def frontend_payload():
          "Samsung S5H1409 ATSC/QAM demodulator via /dev/dvb/adapter0"),
         (FRONTEND_ANALOG, "Analog front-end",
          "CX23418 analog tuner and hardware MPEG encoder via /dev/video*"),
+        (FRONTEND_ROKU, "Roku capture",
+         "Source Roku through the Hauppauge HD PVR's H.264 encoder"),
     ):
         holders = [
             lane for lane in ALL_LANES
@@ -3180,11 +3632,16 @@ def api_v1_cable_source():
 def api_v1_source_catalog():
     digital = api_v1_digital_source()["source"]
     cable = api_v1_cable_source()["source"]
+    roku_sources = [
+        dict(source, stream_path=f"/stream/{LANE_PLAYLIST[LANE_ROKU]}")
+        for source in roku.source_list(roku_sources_available())
+    ] if roku is not None else []
     return {
         "api_version": API_VERSION,
         "sources": [
             dict(digital, items_path="/api/v1/sources/digital"),
             dict(cable, items_path="/api/v1/sources/cable"),
+            *roku_sources,
         ],
         "status_path": "/api/v1/status",
         "tune_path": "/api/v1/tune",
@@ -3450,6 +3907,8 @@ def api_v1_tune(body):
             "quality must be low, medium, or high", 400, "invalid_quality"
         )
 
+    if source_kind in roku_lane.SOURCES:
+        return perform_roku_tune(dict(body, source=source_kind))
     token = body.get("token")
     override = bool(body.get("override"))
     if source_kind == "digital":
@@ -3464,7 +3923,8 @@ def api_v1_tune(body):
         lane = LANE_ANALOG
     else:
         return api_v1_error(
-            "source must be digital or cable", 400, "invalid_source",
+            "source must be digital, cable, or a Roku source ("
+            + ", ".join(roku_lane.SOURCES) + ")", 400, "invalid_source",
         )
 
     if status != 200:
@@ -3615,7 +4075,7 @@ class TVHandler(SimpleHTTPRequestHandler):
                         "method": "GET | POST",
                         "path": "/api/v1/tuner/lock",
                         "body": {
-                            "lane": "digital | analog",
+                            "lane": "digital | analog | roku",
                             "owner": "recorder",
                             "until": "duration | program_end",
                             "duration_seconds": 3600,
@@ -3643,6 +4103,43 @@ class TVHandler(SimpleHTTPRequestHandler):
                                  "tuner, like a rescan"),
                     },
                     "health": {"method": "GET", "path": "/api/v1/health"},
+                    "roku_sources": {
+                        "method": "GET",
+                        "path": "/api/v1/sources/{" + "|".join(roku_lane.SOURCES) + "}",
+                        "query": {"date": "YYYY-MM-DD (games)"},
+                        "note": "YouTube TV channels, games, Manual Roku",
+                    },
+                    "roku_tune": {
+                        "method": "POST", "path": "/api/v1/tune",
+                        "body": {"source": "youtube-tv", "channel_id": "ESPN",
+                                 "token": "...", "force": False,
+                                 "navigate": True, "resume": True},
+                        "note": ("200 when the Roku already shows it, else 202 "
+                                 "and a navigation operation to poll in "
+                                 "/api/v1/status lanes.roku"),
+                    },
+                    "roku": {
+                        "method": "GET", "path": "/api/v1/roku",
+                        "note": "capture, verifier, calibration and Roku state",
+                    },
+                    "roku_remote": {
+                        "method": "POST",
+                        "paths": ["/api/v1/roku/keypress", "/api/v1/roku/text",
+                                  "/api/v1/roku/launch"],
+                        "body": {"key": "Select", "text": "news",
+                                 "app_id": "195316", "token": "..."},
+                        "keys": list(roku_lane.REMOTE_KEYS),
+                        "note": "switches the lane to Manual Roku",
+                    },
+                    "roku_check": {
+                        "method": "POST", "path": "/api/v1/roku/check",
+                        "note": ("is the verified selection still playing? "
+                                 "Renews it without pressing a key"),
+                    },
+                    "roku_cancel": {
+                        "method": "POST", "path": "/api/v1/roku/cancel",
+                        "body": {"token": "..."},
+                    },
                     "recordings": {
                         "method": "GET | POST",
                         "path": "/api/v1/recordings",
@@ -3769,6 +4266,44 @@ class TVHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/v1/sources/cable":
             self.send_json(api_v1_cable_source())
+            return
+
+        if (path.startswith("/api/v1/sources/")
+                and path[len("/api/v1/sources/"):] in roku_lane.SOURCES):
+            payload, status = api_v1_roku_source(
+                path[len("/api/v1/sources/"):],
+                parse_qs(parsed.query).get("date", [None])[0],
+            )
+            self.send_json(payload, status=status)
+            return
+
+        if path == "/api/v1/roku":
+            payload, status = api_v1_roku_payload()
+            self.send_json(payload, status=status)
+            return
+
+        if path == "/api/v1/roku/apps":
+            payload, status = roku_call(lambda: (
+                {"api_version": API_VERSION, "apps": roku.apps()}, 200))
+            self.send_json(payload, status=status)
+            return
+
+        if path.startswith("/api/v1/roku/operations/"):
+            operation_id = path[len("/api/v1/roku/operations/"):]
+            record = (roku.controller.get_operation(operation_id)
+                      if roku is not None
+                      and re.fullmatch(r"[0-9a-f]{32}", operation_id) else None)
+            if record is None:
+                payload, status = api_v1_error("No such operation", 404)
+                self.send_json(payload, status=status)
+            else:
+                self.send_json(json.loads(json.dumps(
+                    {"api_version": API_VERSION, "operation": record},
+                    default=str)))
+            return
+
+        if path == "/api/v1/roku/preview":
+            self.send_roku_preview()
             return
 
         if path == "/api/v1/status":
@@ -4023,6 +4558,29 @@ class TVHandler(SimpleHTTPRequestHandler):
                 body.get("channel"), body.get("quality", "medium"),
                 token=body.get("token"), override=bool(body.get("override")),
             )
+            self.send_json(payload, status=status)
+            return
+
+        roku_routes = {
+            "/api/v1/roku/cancel": roku_cancel,
+            "/api/v1/roku/check": roku_check,
+            "/api/v1/roku/keypress": lambda body: roku_remote(body, "keypress"),
+            "/api/v1/roku/text": lambda body: roku_remote(body, "text"),
+            "/api/v1/roku/launch": lambda body: roku_remote(body, "launch"),
+            "/api/v1/roku/calibrate": roku_calibrate,
+        }
+        if parsed.path in roku_routes:
+            try:
+                body = self.read_json_body()
+            except ValueError as error:
+                payload, status = api_v1_error(
+                    str(error), 400, "invalid_json"
+                )
+                self.send_json(payload, status=status)
+                return
+            if not isinstance(body, dict):
+                body = {}
+            payload, status = roku_routes[parsed.path](body)
             self.send_json(payload, status=status)
             return
 
@@ -4367,6 +4925,31 @@ class TVHandler(SimpleHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
+    def send_roku_preview(self):
+        """What the Roku verifier sees, as an MJPEG stream (engineering)."""
+        if roku is None:
+            payload, status = roku_unavailable()
+            self.send_json(payload, status=status)
+            return
+        boundary = "rokupreview"
+        self.send_response(200)
+        self.send_header("Content-Type",
+                         f"multipart/x-mixed-replace; boundary={boundary}")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        frames = roku.feedback.preview_frames()
+        try:
+            for jpeg in frames:
+                self.wfile.write(
+                    f"--{boundary}\r\nContent-Type: image/jpeg\r\n"
+                    f"Content-Length: {len(jpeg)}\r\n\r\n".encode()
+                    + jpeg + b"\r\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, RokuStreamError):
+            pass
+        finally:
+            frames.close()
+
     def send_json(self, data, status=200):
         if isinstance(data, dict):
             data = {key: value for key, value in data.items() if key != "_lane"}
@@ -4391,14 +4974,15 @@ class TVHandler(SimpleHTTPRequestHandler):
 def reap_orphaned_children():
     """Kill leftover media children from an unclean previous run.
 
-    Two kinds of orphan break a restarted service:
+    Three kinds of orphan break a restarted service:
 
     * ``dvb_source.py`` keeps /dev/dvb/adapter0/frontend0 open, so every
       later tune fails with EBUSY -- a permanently dead digital lane that
       survives service restarts.
     * an orphaned ``ffmpeg`` keeps writing into this project's streams
       directory, so two encoders fight over one playlist while burning a
-      core each.
+      core each. The Roku capture is one of these: it also holds the HD PVR.
+    * an orphaned Roku verifier keeps the lane's tap port bound.
 
     Matching is deliberately narrow: this project's own source script, or a
     process whose arguments name this server's streams directory, and in
@@ -4406,6 +4990,10 @@ def reap_orphaned_children():
     """
     script = str(BASE_DIR / "dvb_source.py")
     streams = str(STREAMS_DIR)
+    # The Roku verifier reads the lane's tap and writes to a pipe, so it
+    # names neither the source script nor the streams directory. An orphan
+    # would keep the tap port bound against every later verifier.
+    roku_tap = f"udp://127.0.0.1:{ROKU_TAP_PORT}?"
     recordings = str(RECORDINGS_DIR)
     own_uid = os.getuid()
     reaped = []
@@ -4444,7 +5032,8 @@ def reap_orphaned_children():
         records = any(part.startswith(recordings)
                       and part.endswith(recorder.PART_SUFFIX)
                       for part in parts[1:])
-        if not (owns_tuner or writes_streams or records):
+        reads_roku_tap = any(part.startswith(roku_tap) for part in parts[1:])
+        if not (owns_tuner or writes_streams or records or reads_roku_tap):
             continue
         try:
             os.kill(pid, signal.SIGKILL)
@@ -4556,6 +5145,25 @@ def open_listeners(server_factory, addresses, port):
     return servers, bound, failures
 
 
+def start_roku_lane():
+    """Build the Roku lane from roku.json and keep its capture running."""
+    global roku
+    try:
+        roku = roku_lane.load(ROKU_CONFIG_FILE,
+                              capture_source=roku_capture_source,
+                              reuse_max_age=ROKU_REUSE_MAX_AGE)
+    except RokuStreamError as error:
+        # A broken roku.json costs the Roku lane, never the television.
+        print(f"Roku lane disabled: {error}")
+        roku = None
+    if roku is None:
+        print(f"Roku lane not configured ({ROKU_CONFIG_FILE})")
+        return
+    print(f"Roku lane: {roku.ecp.base_url} via {roku_device()}")
+    threading.Thread(target=roku_keeper, daemon=True).start()
+    roku_wakeup.set()
+
+
 def main():
     shutdown_signal = None
 
@@ -4608,6 +5216,7 @@ def main():
               f"{max(0, round(_entry['expires_at'] - time.time()) // 60)} "
               "minutes left")
     recover_recordings()
+    start_roku_lane()
     threading.Thread(target=always_on_worker, daemon=True).start()
     threading.Thread(target=guide_worker, daemon=True).start()
     threading.Thread(target=recording_worker, daemon=True).start()
@@ -4626,6 +5235,8 @@ def main():
     finally:
         shutdown_recording()
         stop_all()
+        if roku is not None:
+            roku.feedback.close()
         for server in servers:
             server.shutdown() if server is not servers[0] else None
             server.server_close()

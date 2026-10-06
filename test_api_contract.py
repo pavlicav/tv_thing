@@ -106,3 +106,111 @@ def test_contract_discovery_and_legacy_response(api):
     code, locked = request("/api/v1/tuner/lock", {"lane": "digital", "owner": "owner"})
     code, public = request("/api/v1/tuner/lock")
     assert locked["token"] not in json.dumps(public)
+
+
+@pytest.fixture
+def roku_api(api, monkeypatch):
+    from test_roku_lane import GAME, NFL, Config, FakeController
+    from types import SimpleNamespace
+    import roku_lane
+
+    request, _ = api
+    capture = {"running": True, "stream_id": "cap-1", "tap_url": "udp://127.0.0.1:1"}
+    controller = FakeController(capture)
+    lane = roku_lane.RokuLane(
+        Config(), controller,
+        baseball=SimpleNamespace(game=lambda pk, day: dict(GAME),
+                                 games=lambda day: {"date": day, "games": [dict(GAME)]}),
+        sports=SimpleNamespace(game=lambda *a: dict(NFL),
+                               games=lambda league, day: {"date": day, "games": [dict(NFL)]}),
+        capture_source=lambda: dict(capture), playing_seconds=.2, sleep=lambda _: None)
+
+    class Process:
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(server, "roku", lane)
+    monkeypatch.setattr(server, "roku_sources_available", lambda: True)
+    server.procs["roku_capture"] = Process()
+    server.lanes["roku"] = dict(server.new_lane_state(), stream_id="cap-1", quality="source",
+                                health={"ok": True}, video_encoder="copy")
+    return request, lane
+
+
+def wait_for(request, predicate):
+    import time
+    deadline = time.monotonic() + 5
+    while True:
+        _, status = request("/api/v1/status")
+        if predicate(status["lanes"]["roku"]):
+            return status["lanes"]["roku"]
+        assert time.monotonic() < deadline, status["lanes"]["roku"]
+        time.sleep(.02)
+
+
+def test_roku_lane_lock_tune_and_reuse_over_http(roku_api):
+    request, lane = roku_api
+    code, sources = request("/api/v1/sources")
+    roku_ids = [s["id"] for s in sources["sources"] if s.get("lane") == "roku"]
+    assert roku_ids == ["youtube-tv", "mlb", "thursday-night-football", "sunday-ticket", "roku-manual"]
+    code, channels = request("/api/v1/sources/youtube-tv")
+    assert code == 200 and [i["id"] for i in channels["items"]] == ["NBC", "ESPN"]
+    code, games = request("/api/v1/sources/mlb?date=2026-10-01")
+    assert code == 200 and games["date"] == "2026-10-01" and games["items"][0]["id"] == "823254"
+
+    code, claim = request("/api/v1/tuner/lock", {"lane": "roku", "owner": "VizelVision master", "duration_seconds": 90})
+    assert code == 200
+    token = claim["token"]
+    code, refusal = request("/api/v1/tune", {"source": "youtube-tv", "channel_id": "ESPN"})
+    assert code == 423 and refusal["lock"]["owner"] == "VizelVision master"
+    code, refusal = request("/api/v1/roku/keypress", {"key": "Home"})
+    assert code == 423 and lane.controller.ecp.keys == []
+
+    code, tune = request("/api/v1/tune", {"source": "youtube-tv", "channel_id": "espn", "token": token})
+    assert code == 202 and tune["lane"] == "roku"
+    assert tune["operation"]["target"] == {"source_id": "youtube-tv", "channel_id": "ESPN"}
+    roku = wait_for(request, lambda l: l["selection"] and l["selection"].get("channel_id") == "ESPN")
+    assert roku["stream"]["state"] == "ready" and roku["stream"]["ready"]
+    assert roku["stream"]["playback"][0]["url"] == "stream/roku.m3u8"
+    assert roku["stream"]["generation"] == lane.generation()
+    assert roku["roku"]["operation"]["state"] == "succeeded"
+
+    code, again = request("/api/v1/tune", {"source": "youtube-tv", "channel_id": "ESPN", "token": token})
+    assert code == 200 and again["reused"] is True
+    assert again["stream"]["generation"] == roku["stream"]["generation"]
+    code, absent = request("/api/v1/tune", {"source": "youtube-tv", "channel_id": "NBC", "token": token,
+                                            "navigate": False})
+    assert code == 409 and absent["error"]["code"] == "not_prepared"
+    code, bad = request("/api/v1/tune", {"source": "youtube-tv", "channel_id": "HBO", "token": token})
+    assert code == 404 and bad["error"]["code"] == "unknown_channel"
+
+
+def test_roku_remote_and_check_over_http(roku_api):
+    request, lane = roku_api
+    code, _ = request("/api/v1/tune", {"source": "youtube-tv", "channel_id": "ESPN"})
+    assert code == 202
+    verified = wait_for(request, lambda l: l["selection"] and l["selection"].get("channel_id") == "ESPN")
+    code, check = request("/api/v1/roku/check", {})
+    assert code == 200 and check["playing"] is True
+    code, pressed = request("/api/v1/roku/keypress", {"key": "Down"})
+    assert code == 200 and pressed["selection"]["manual"] is True
+    assert pressed["generation"] != verified["stream"]["generation"]
+    code, bad = request("/api/v1/roku/keypress", {"key": "PowerOff"})
+    assert code == 400
+    code, check = request("/api/v1/roku/check", {})
+    assert code == 200 and check["playing"] is False
+    code, apps = request("/api/v1/roku/apps")
+    assert code == 200 and {"id": "14", "name": "MLB"} in apps["apps"]
+
+
+def test_roku_routes_answer_503_when_unconfigured(api, monkeypatch):
+    request, _ = api
+    monkeypatch.setattr(server, "roku", None)
+    code, body = request("/api/v1/tune", {"source": "youtube-tv", "channel_id": "ESPN"})
+    assert code == 503 and body["error"]["code"] == "roku_unavailable"
+    code, body = request("/api/v1/roku/keypress", {"key": "Home"})
+    assert code == 503
+    code, status = request("/api/v1/status")
+    assert code == 200 and status["lanes"]["roku"]["available"] is False
+    code, roku = request("/api/v1/roku")
+    assert code == 200 and roku["configured"] is False

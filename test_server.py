@@ -368,10 +368,12 @@ def test_channel_scan_releases_the_tuner_even_on_failure(monkeypatch):
 
 
 def test_lanes_on_separate_frontends_do_not_conflict():
-    """Digital and analog use different RF front-ends, so both can run."""
-    assert server.ALL_LANES == (server.LANE_DIGITAL, server.LANE_ANALOG)
-    assert server.LANE_FRONTEND[server.LANE_DIGITAL] != \
-        server.LANE_FRONTEND[server.LANE_ANALOG]
+    """Digital, analog and the Roku capture each have their own front-end."""
+    assert server.ALL_LANES == (server.LANE_DIGITAL, server.LANE_ANALOG,
+                                server.LANE_ROKU)
+    assert len({server.LANE_FRONTEND[lane] for lane in server.ALL_LANES}) == 3
+    # The Roku is not a video lane: it never drives the legacy alias.
+    assert server.LANE_ROKU not in server.VIDEO_LANES
 
     # One lane per front-end, so neither can displace the other.
     for lane in server.ALL_LANES:
@@ -1414,3 +1416,54 @@ def test_recording_file_refuses_anything_outside_the_library(tmp_path, monkeypat
         handler.send_json = lambda data, status=200: handler.sent.update(status=status)
         handler.send_recording_file(name)
         assert handler.sent["status"] == 404, name
+
+
+def test_roku_capture_copies_the_hd_pvr_and_feeds_the_verifier_tap():
+    command = server.build_roku_capture_command(
+        "/dev/v4l/by-id/hdpvr", "gen-1", tap_port=18999)
+    assert command[command.index("-i") + 1] == "/dev/v4l/by-id/hdpvr"
+    assert command.count("-i") == 1  # One reader of the device, ever.
+    # No transcode: the HD PVR's own H.264 and AAC are copied, twice.
+    assert command.count("-c") == 2 and command.count("copy") == 2
+    assert "libx264" not in command and "-vf" not in command
+    assert command[command.index("-hls_time") + 1] == str(
+        server.ROKU_HLS_SEGMENT_TIME)
+    assert str(server.STREAMS_DIR / "rokuseg_gen-1_%09d.ts") in command
+    assert command[-1] == "udp://127.0.0.1:18999?pkt_size=1316"
+    assert str(server.lane_playlist_path(server.LANE_ROKU)) in command
+
+
+def test_roku_lock_cannot_follow_a_programme(clean_locks):
+    payload, status = server.acquire_tuner_lock(
+        {"lane": "roku", "owner": "x", "until": "program_end"})
+    assert status == 400 and payload["error"]["code"] == "invalid_until"
+    payload, status = server.acquire_tuner_lock(
+        {"lane": "roku", "owner": "Web remote", "duration_seconds": 3600})
+    assert status == 200 and payload["lock"]["lane"] == "roku"
+    # The Roku's lock leaves the tuners alone, and the other way round.
+    assert server.lock_holder(server.LANE_DIGITAL) is None
+    assert server.lock_holder(server.LANE_ROKU)["owner"] == "Web remote"
+
+
+def test_roku_capture_source_is_read_without_the_server_mutex(monkeypatch):
+    class Running:
+        def poll(self):
+            return None
+
+    monkeypatch.setitem(server.procs, "roku_capture", Running())
+    monkeypatch.setattr(server, "roku_capture_state", {
+        "running": True, "stream_id": "gen-1", "error": None,
+        "tap_url": server.roku_tap_input(18999)})
+    import threading
+    with server.lock:
+        # Another thread reading it while the mutex is held must not block.
+        result = {}
+        reader = threading.Thread(
+            target=lambda: result.update(server.roku_capture_source()))
+        reader.start()
+        reader.join(timeout=1)
+        assert not reader.is_alive()
+    assert result["running"] and result["stream_id"] == "gen-1"
+    assert result["tap_url"].startswith("udp://127.0.0.1:18999?")
+    monkeypatch.setitem(server.procs, "roku_capture", None)
+    assert server.roku_capture_source()["running"] is False
