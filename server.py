@@ -1657,6 +1657,10 @@ ROKU_RESTART_BACKOFF = (2, 5, 10, 30)
 # Built in main() from roku.json; None when the lane is not configured.
 roku = None
 roku_wakeup = threading.Event()
+# Set on the way out: stopping the lane wakes the keeper, which must not then
+# start a capture that outlives the server and holds the HD PVR (it did, in
+# the 2026-10-06 rehearsal, against vizelVision's own capture).
+roku_shutting_down = threading.Event()
 # Replaced wholesale, never mutated, so roku_lane can read it without the
 # server mutex (it calls back from threads that may already hold its own).
 roku_capture_state = {"running": False, "stream_id": None, "error": None,
@@ -1733,6 +1737,8 @@ def start_roku_capture():
     global roku_capture_state
     if roku is None:
         return False, "The Roku lane is not configured"
+    if roku_shutting_down.is_set():
+        return False, "The server is shutting down"
     device = roku_device()
     STREAMS_DIR.mkdir(exist_ok=True)
     with lock:
@@ -1818,6 +1824,8 @@ def roku_keeper():
     while True:
         roku_wakeup.wait(timeout=5)
         roku_wakeup.clear()
+        if roku_shutting_down.is_set():
+            return
         if roku is None:
             continue
         try:
@@ -5514,6 +5522,7 @@ def main():
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:
+        roku_shutting_down.set()
         shutdown_recording()
         stop_all()
         if roku is not None:

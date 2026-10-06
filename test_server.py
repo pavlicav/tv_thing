@@ -1467,3 +1467,17 @@ def test_roku_capture_source_is_read_without_the_server_mutex(monkeypatch):
     assert result["tap_url"].startswith("udp://127.0.0.1:18999?")
     monkeypatch.setitem(server.procs, "roku_capture", None)
     assert server.roku_capture_source()["running"] is False
+
+
+def test_a_stopping_server_never_restarts_the_roku_capture(monkeypatch):
+    started = []
+    monkeypatch.setattr(server, "roku", object())
+    monkeypatch.setattr(server.subprocess, "Popen",
+                        lambda *a, **k: started.append(a) or (_ for _ in ()).throw(OSError("no")))
+    monkeypatch.setattr(server, "roku_shutting_down", __import__("threading").Event())
+    server.roku_shutting_down.set()
+    ok, error = server.start_roku_capture()
+    assert not ok and "shutting down" in error and started == []
+    # The keeper returns instead of looping on.
+    server.roku_wakeup.set()
+    server.roku_keeper()
