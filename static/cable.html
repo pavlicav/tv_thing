@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Analog Cable · TV Thing</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="app.css">
+  <style>
+    .cable-app {
+      display: grid;
+      grid-template-columns: 1fr 350px;
+      grid-template-rows: var(--header-h) 1fr;
+      grid-template-areas: "top top" "stage channels";
+      height: 100vh;
+    }
+    .topbar { grid-area: top; }
+    .stage {
+      grid-area: stage;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: #000;
+    }
+    .viewport {
+      position: relative;
+      min-height: 0;
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+    .placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      color: var(--text-mute);
+      background: radial-gradient(ellipse at center, #131519 0%, #000 75%);
+    }
+    .placeholder.hidden { display: none; }
+    .placeholder strong {
+      color: var(--text-dim);
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .transport {
+      min-height: var(--transport-h);
+      padding: 9px 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+    }
+    .now-playing { min-width: 0; }
+    .np-title { font-size: 13px; font-weight: 600; }
+    .np-sub { font-size: 11px; color: var(--text-mute); }
+    .channel-panel {
+      grid-area: channels;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+    }
+    .panel-head {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .panel-head-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .plan-note { margin-top: 5px; color: var(--text-mute); font-size: 11px; }
+    .channel-list {
+      flex: 1;
+      min-height: 0;
+    }
+    .channel-list .item-key {
+      min-width: 5.2em;
+      font-family: var(--mono);
+      font-size: 15px;
+      color: var(--text-dim);
+    }
+    .channel-list .item-tag {
+      min-width: 5.6em;
+      text-align: right;
+    }
+    .panel-foot {
+      padding: 9px 14px;
+      color: var(--text-mute);
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+    }
+    @media (max-width: 850px) {
+      html, body { height: auto; }
+      .cable-app {
+        height: auto;
+        min-height: 100vh;
+        grid-template-columns: 1fr;
+        grid-template-rows: var(--header-h) auto auto;
+        grid-template-areas: "top" "stage" "channels";
+      }
+      .viewport { aspect-ratio: 4 / 3; flex: none; }
+      .channel-panel { border-left: 0; border-top: 1px solid var(--border); }
+      .channel-list { max-height: 55vh; }
+    }
+  </style>
+</head>
+<body>
+  <div class="cable-app">
+    <header class="topbar">
+      <a class="brand" href="./"><span class="brand-mark"></span><span>TV Thing</span></a>
+      <nav class="nav" aria-label="Pages">
+        <a class="navlink" href="./">Watch</a>
+        <a class="navlink" href="guide.html">Guide</a>
+        <a class="navlink" href="vcr.html">VCR</a>
+        <a class="navlink" href="cable.html" aria-current="page">Cable</a>
+        <a class="navlink" href="rescan.html">Scan</a>
+        <a class="navlink" href="dx.html">DX</a>
+        <a class="navlink" href="about.html">About</a>
+      </nav>
+      <div class="topbar-tools">
+        <div class="status-pill">
+          <span class="dot" id="status-dot"></span>
+          <span id="status-text">Loading…</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="stage">
+      <div class="viewport">
+        <video id="player" controls playsinline></video>
+        <div class="placeholder" id="placeholder">
+          <strong id="placeholder-title">Analog Cable</strong>
+          <span id="placeholder-sub">Choose a channel number</span>
+        </div>
+      </div>
+      <div class="transport">
+        <div class="now-playing">
+          <div class="np-title" id="np-title">Nothing playing</div>
+          <div class="np-sub" id="np-sub">US cable STD · NTSC-M</div>
+        </div>
+        <div class="spacer"></div>
+        <div class="segmented" id="quality-group" aria-label="Quality">
+          <button data-quality="low" aria-selected="false">480p</button>
+          <button data-quality="medium" aria-selected="true">720p</button>
+          <button data-quality="high" aria-selected="false">Native</button>
+        </div>
+      </div>
+    </main>
+
+    <aside class="channel-panel">
+      <div class="panel-head">
+        <div class="panel-head-row">
+          <span class="section-label">Cable Channels</span>
+          <span class="section-label num" id="channel-count">—</span>
+        </div>
+        <div class="plan-note">Fixed channel list · frequency order · no scan</div>
+      </div>
+      <div class="channel-list list scroll" id="channel-list"></div>
+      <div class="panel-foot" id="tuner-name">Looking for an analog tuner…</div>
+    </aside>
+  </div>
+
+  <script src="hls.min.js"></script>
+  <script>
+  (() => {
+    "use strict";
+    const $ = id => document.getElementById(id);
+    const els = {
+      video: $("player"), placeholder: $("placeholder"),
+      phTitle: $("placeholder-title"), phSub: $("placeholder-sub"),
+      statusDot: $("status-dot"), statusText: $("status-text"),
+      npTitle: $("np-title"), npSub: $("np-sub"),
+      quality: $("quality-group"), list: $("channel-list"),
+      count: $("channel-count"), tunerName: $("tuner-name"),
+    };
+    const state = {
+      channels: [], quality: "medium", currentChannel: null,
+      streamId: null, tuneSerial: 0, playing: false,
+    };
+    let hls = null;
+
+    function setStatus(text, kind) {
+      els.statusText.textContent = text;
+      els.statusDot.className = "dot" + (kind ? " " + kind : "");
+    }
+
+    function setNowPlaying(title, sub) {
+      els.npTitle.textContent = title;
+      els.npSub.textContent = sub;
+    }
+
+    function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+    async function waitForStream(streamId) {
+      const deadline = Date.now() + 15000;
+      while (Date.now() < deadline) {
+        const res = await fetch(`api/status?_=${Date.now()}`, { cache: "no-store" });
+        if (res.ok) {
+          const status = await res.json();
+          if (status.mode === "cable" && status.stream_id === streamId) {
+            if (status.stream_health && !status.stream_health.ok) {
+              throw new Error(status.stream_health.reason || "Stream safety check failed");
+            }
+            if (status.stream_ready) return status;
+          }
+        }
+        await delay(200);
+      }
+      throw new Error("Cable stream did not become ready");
+    }
+
+    function destroyHls() {
+      if (hls) { hls.destroy(); hls = null; }
+    }
+
+    function startPlayback(streamId, attempt) {
+      attempt = attempt || 0;
+      destroyHls();
+      const url = `stream/live.m3u8?v=${encodeURIComponent(streamId)}`;
+      if (window.Hls && Hls.isSupported()) {
+        const instance = new Hls({
+          backBufferLength: 8, maxBufferLength: 12,
+          liveSyncDurationCount: 4, liveMaxLatencyDurationCount: 8,
+        });
+        hls = instance;
+        instance.loadSource(url);
+        instance.attachMedia(els.video);
+        instance.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (instance !== hls || streamId !== state.streamId) return;
+          els.video.play().catch(() => {});
+          setStatus(`Cable ${state.currentChannel}`, "live");
+          setNowPlaying(`Cable channel ${state.currentChannel}`,
+                        `${state.quality} · NTSC-M`);
+        });
+        instance.on(Hls.Events.ERROR, (_event, data) => {
+          if (instance !== hls || !data.fatal) return;
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            instance.recoverMediaError();
+          } else if (attempt < 5 && streamId === state.streamId) {
+            setTimeout(() => startPlayback(streamId, attempt + 1), 1000);
+          } else {
+            setStatus("Stream unavailable", "error");
+          }
+        });
+      } else if (els.video.canPlayType("application/vnd.apple.mpegurl")) {
+        els.video.src = url;
+        els.video.play().catch(() => {});
+      }
+    }
+
+    function renderChannels() {
+      els.list.innerHTML = "";
+      els.count.textContent = String(state.channels.length);
+      const channels = [...state.channels].sort((left, right) =>
+        left.frequency_hz - right.frequency_hz || left.number - right.number);
+      for (const item of channels) {
+        const button = document.createElement("button");
+        const exactMhz = item.frequency_hz / 1_000_000;
+        const displayMhz = Math.ceil(exactMhz);
+        button.className = "list-item";
+        button.innerHTML =
+          `<span class="item-key">RF ${item.number}</span>` +
+          `<span class="item-body"></span>` +
+          `<span class="item-tag">${displayMhz} MHz</span>`;
+        button.title = `${exactMhz.toFixed(2)} MHz video carrier`;
+        button.setAttribute("aria-label",
+          `Cable RF ${item.number}, ${displayMhz} MHz`);
+        button.setAttribute("aria-current",
+                            String(item.number === state.currentChannel));
+        button.addEventListener("click", () => tune(item.number));
+        els.list.appendChild(button);
+      }
+    }
+
+    async function tune(channel) {
+      const tuneSerial = ++state.tuneSerial;
+      state.currentChannel = channel;
+      renderChannels();
+      setStatus(`Tuning cable ${channel}…`, "busy");
+      setNowPlaying(`Cable channel ${channel}`, "Acquiring analog signal");
+      if (hls) hls.stopLoad();
+      els.video.pause();
+      try {
+        const res = await fetch("api/cable/tune", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channel, quality: state.quality }),
+        });
+        const data = await res.json();
+        if (tuneSerial !== state.tuneSerial) return;
+        if (!data.ok) throw new Error(data.error || "Cable tune failed");
+        state.streamId = data.stream_id;
+        state.playing = true;
+        els.placeholder.classList.add("hidden");
+        await waitForStream(state.streamId);
+        if (tuneSerial !== state.tuneSerial) return;
+        els.video.removeAttribute("src");
+        els.video.load();
+        startPlayback(state.streamId, 0);
+      } catch (error) {
+        if (tuneSerial !== state.tuneSerial) return;
+        state.playing = false;
+        els.placeholder.classList.remove("hidden");
+        els.phTitle.textContent = "Cable Tune Failed";
+        els.phSub.textContent = error.message || "Could not open analog tuner";
+        setStatus(error.message || "Cable tune failed", "error");
+      }
+    }
+
+    async function loadChannels() {
+      try {
+        const res = await fetch("api/cable/channels", { cache: "no-store" });
+        const data = await res.json();
+        state.channels = data.channels || [];
+        els.tunerName.textContent = data.available
+          ? `${data.tuner.name} · ${data.tuner.input_name}`
+          : "Analog tuner is not currently accessible";
+        setStatus(data.available ? "Analog tuner ready" : "Tuner unavailable",
+                  data.available ? "" : "error");
+        renderChannels();
+      } catch (error) {
+        setStatus("Server unreachable", "error");
+      }
+    }
+
+    async function resume() {
+      try {
+        const res = await fetch("api/status", { cache: "no-store" });
+        const status = await res.json();
+        if (status.mode !== "cable" || !status.streaming
+            || !status.cable_channel) return;
+        state.currentChannel = status.cable_channel;
+        state.streamId = status.stream_id;
+        state.quality = status.quality || "medium";
+        state.playing = true;
+        els.quality.querySelectorAll("button").forEach(button =>
+          button.setAttribute("aria-selected",
+            String(button.dataset.quality === state.quality)));
+        renderChannels();
+        els.placeholder.classList.add("hidden");
+        setStatus(`Cable ${state.currentChannel}`, "busy");
+        setNowPlaying(`Cable channel ${state.currentChannel}`, "Buffering");
+        await waitForStream(state.streamId);
+        if (!state.tuneSerial) startPlayback(state.streamId, 0);
+      } catch (error) {
+        setStatus("Cable stream unavailable", "error");
+      }
+    }
+
+    els.quality.querySelectorAll("button").forEach(button => {
+      button.addEventListener("click", () => {
+        state.quality = button.dataset.quality;
+        els.quality.querySelectorAll("button").forEach(item =>
+          item.setAttribute("aria-selected", String(item === button)));
+        if (state.currentChannel !== null) tune(state.currentChannel);
+      });
+    });
+
+    loadChannels().then(resume);
+  })();
+  </script>
+</body>
+</html>

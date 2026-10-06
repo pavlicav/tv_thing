@@ -11,7 +11,7 @@ Edit [`source/main.brs`](source/main.brs) and change `SERVER_URL` to match your
 TV Thing server's LAN IP:
 
 ```brightscript
-const SERVER_URL = "http://192.168.86.31:8080"
+const SERVER_URL = "http://192.168.86.230:8080"
 ```
 
 Run `python3 server.py` on the host machine first (or make sure the systemd
@@ -39,13 +39,16 @@ and upload `tv_thing.zip` via the Development Application Installer.
 |---|---|
 | Up / Down | Navigate channel list |
 | OK | Tune to selected channel |
-| Back (while playing) | Stop stream, return to channel list |
+| Back (while playing) | Show or hide the channel list overlay |
 | Back (idle) | Exit app |
 
 - All `.1` primary channels appear first, then subchannels grouped by station
   (matching the web UI order).
 - The channel list stays focused while video plays — you can browse and switch
   channels without any extra steps.
+- Channel changes replace the Roku Video content with a cache-busted URL for
+  the server's fresh encoder generation. Expect a short freeze while the tuner
+  locks; timestamps from different stations are never mixed.
 - Video plays on the right half of the screen (letterboxed 16:9).
 
 ## Quality

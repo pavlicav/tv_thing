@@ -1,0 +1,704 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "TV Thing core integration API",
+    "version": "1.0.0",
+    "description": "Core control contract. API.md defines ownership, retry, addressing, and trusted-LAN rules. Additional discovery and diagnostic endpoints are listed by GET /api/v1."
+  },
+  "servers": [
+    {
+      "url": "./",
+      "description": "Served at /api/v1/openapi.json; resolves to the current API base, including /tv/."
+    }
+  ],
+  "paths": {
+    "/status": {
+      "get": {
+        "summary": "Lane status; poll the requested lane and generation",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/streams": {
+      "get": {
+        "summary": "Active stream descriptors",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources": {
+      "get": {
+        "summary": "Discover source capabilities",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources/digital": {
+      "get": {
+        "summary": "Digital channel list",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources/cable": {
+      "get": {
+        "summary": "Analog channel list",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Server health",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/guide": {
+      "get": {
+        "summary": "Broadcast programme guide",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tuner/lock": {
+      "get": {
+        "summary": "Public lock summaries (no tokens)",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Acquire or renew a bounded tuner lease",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LockResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LockRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tune": {
+      "post": {
+        "summary": "Tune a shared lane; acquire ownership first for uninterrupted use",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TuneResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Tune"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tuner/lock/release": {
+      "post": {
+        "summary": "Release ownership while leaving playback running",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Invalid request, missing selection, busy, locked, or unavailable; inspect error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the lock owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Release"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Stream": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "generation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "tuning",
+              "buffering",
+              "ready",
+              "failed"
+            ]
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "playlist_path": {
+            "type": "string"
+          },
+          "playback": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "protocol": {
+                  "const": "hls"
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Resolve against configured application base ending in /, not the API endpoint."
+                },
+                "content_type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "protocol",
+                "url"
+              ]
+            }
+          },
+          "shared": {
+            "const": true
+          }
+        },
+        "required": [
+          "id",
+          "generation",
+          "active",
+          "ready",
+          "state",
+          "playback"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "Failure": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "const": "v1"
+          },
+          "ok": {
+            "const": false
+          },
+          "error": {
+            "$ref": "#/components/schemas/Error"
+          },
+          "lock": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "ok",
+          "error"
+        ]
+      },
+      "Tune": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "enum": [
+              "digital",
+              "cable"
+            ]
+          },
+          "channel_id": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 135
+          },
+          "quality": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "default": "medium"
+          },
+          "token": {
+            "type": "string"
+          },
+          "override": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "source"
+        ]
+      },
+      "TuneResult": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "const": "v1"
+          },
+          "ok": {
+            "const": true
+          },
+          "lane": {
+            "enum": [
+              "digital",
+              "analog"
+            ]
+          },
+          "selection": {
+            "type": "object"
+          },
+          "quality": {
+            "type": "string"
+          },
+          "stream": {
+            "$ref": "#/components/schemas/Stream"
+          },
+          "stream_reused": {
+            "type": "boolean"
+          },
+          "encoder": {
+            "type": "object"
+          },
+          "request_ms": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "ok",
+          "lane",
+          "stream",
+          "stream_reused"
+        ]
+      },
+      "LockRequest": {
+        "type": "object",
+        "properties": {
+          "lane": {
+            "enum": [
+              "digital",
+              "analog"
+            ]
+          },
+          "owner": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "until": {
+            "enum": [
+              "duration",
+              "program_end"
+            ]
+          },
+          "duration_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "channel_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "override": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "owner"
+        ]
+      },
+      "Release": {
+        "type": "object",
+        "properties": {
+          "lane": {
+            "enum": [
+              "digital",
+              "analog"
+            ]
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "lane",
+          "token"
+        ]
+      },
+      "LockResult": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "token": {
+            "type": "string"
+          },
+          "lock": {
+            "type": "object"
+          },
+          "renewed": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "max_seconds": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "ok",
+          "token",
+          "lock"
+        ]
+      }
+    }
+  }
+}

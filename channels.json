@@ -1,23 +1,23 @@
 [
   {
-    "name": "WRC-HD NBC 4 Washington",
+    "name": "WRC-HD",
     "frequency": 593000000,
     "video_pid": 49,
     "audio_pid": 52,
     "service_id": 3,
     "modulation": "VSB_8",
-    "id": "wrc_hd_nbc_4_washington_4_1",
+    "id": "wrc_hd_4_1",
     "number": "4.1",
     "rf_channel": 34
   },
   {
-    "name": "WTTG-DT",
+    "name": "WTTG",
     "frequency": 605000000,
     "video_pid": 49,
     "audio_pid": 52,
     "service_id": 3,
     "modulation": "VSB_8",
-    "id": "wttg_dt_5_1",
+    "id": "wttg_5_1",
     "number": "5.1",
     "rf_channel": 36
   },
@@ -55,13 +55,13 @@
     "rf_channel": 24
   },
   {
-    "name": "Univision Washington D.C.",
+    "name": "WFDC-DT",
     "frequency": 479000000,
     "video_pid": 49,
     "audio_pid": 52,
     "service_id": 1,
     "modulation": "VSB_8",
-    "id": "univision_washington_d_c_14_1",
+    "id": "wfdc_dt_14_1",
     "number": "14.1",
     "rf_channel": 15
   },
@@ -209,13 +209,13 @@
     "rf_channel": 9
   },
   {
-    "name": "COZI TV on WRC-TV",
+    "name": "COZI",
     "frequency": 593000000,
     "video_pid": 65,
     "audio_pid": 68,
     "service_id": 4,
     "modulation": "VSB_8",
-    "id": "cozi_tv_on_wrc_tv_4_2",
+    "id": "cozi_4_2",
     "number": "4.2",
     "rf_channel": 34
   },
@@ -242,7 +242,7 @@
     "rf_channel": 34
   },
   {
-    "name": "BUZZR",
+    "name": "Buzzr",
     "frequency": 605000000,
     "video_pid": 81,
     "audio_pid": 84,
@@ -253,7 +253,7 @@
     "rf_channel": 36
   },
   {
-    "name": "START",
+    "name": "Start",
     "frequency": 605000000,
     "video_pid": 97,
     "audio_pid": 100,
@@ -363,18 +363,18 @@
     "rf_channel": 15
   },
   {
-    "name": "UNIMAS of Washington D.C.",
+    "name": "UniMas",
     "frequency": 479000000,
     "video_pid": 97,
     "audio_pid": 100,
     "service_id": 4,
     "modulation": "VSB_8",
-    "id": "unimas_of_washington_d_c_14_4",
+    "id": "unimas_14_4",
     "number": "14.4",
     "rf_channel": 15
   },
   {
-    "name": "MOVIES",
+    "name": "Movies",
     "frequency": 605000000,
     "video_pid": 113,
     "audio_pid": 116,
@@ -385,18 +385,18 @@
     "rf_channel": 36
   },
   {
-    "name": "HEROES",
+    "name": "Heros",
     "frequency": 605000000,
     "video_pid": 129,
     "audio_pid": 132,
     "service_id": 8,
     "modulation": "VSB_8",
-    "id": "heroes_20_3",
+    "id": "heros_20_3",
     "number": "20.3",
     "rf_channel": 36
   },
   {
-    "name": "FOXWX",
+    "name": "FoxWx",
     "frequency": 605000000,
     "video_pid": 145,
     "audio_pid": 148,
@@ -671,13 +671,13 @@
     "rf_channel": 14
   },
   {
-    "name": "Antenna TV",
+    "name": "Antenna",
     "frequency": 479000000,
     "video_pid": 321,
     "audio_pid": 324,
     "service_id": 6,
     "modulation": "VSB_8",
-    "id": "antenna_tv_50_2",
+    "id": "antenna_50_2",
     "number": "50.2",
     "rf_channel": 15
   },
@@ -761,7 +761,7 @@
   {
     "name": "DEFY",
     "frequency": 189000000,
-    "video_pid": 0,
+    "video_pid": 145,
     "audio_pid": 148,
     "service_id": 7,
     "modulation": "VSB_8",

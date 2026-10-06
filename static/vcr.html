@@ -1,0 +1,1276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TV Thing — VCR</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="app.css">
+  <style>
+    :root {
+      --vfd: #7df9e4;
+      --vfd-dim: rgba(125, 249, 228, 0.08);
+      --vfd-glow: rgba(125, 249, 228, 0.55);
+      --vfd-red: #ff4d5e;
+      --vfd-amber: #ffc56b;
+      --plastic-hi: #3a3c42;
+      --plastic: #232429;
+      --plastic-lo: #141518;
+      --osd-blue: #1b2fd6;
+      --osd-blue-lo: #0d1a8f;
+      --osd-text: #ffffff;
+      --osd-hi: #ffe95a;
+      --osd-font: "Courier New", ui-monospace, Menlo, Consolas, monospace;
+    }
+
+    body { background: #0b0c0e; }
+
+    .room {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 28px 16px 64px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    /* ---------- The deck ---------- */
+
+    .deck {
+      position: relative;
+      border-radius: 10px 10px 6px 6px;
+      padding: 18px 20px 14px;
+      background:
+        repeating-linear-gradient(90deg, rgba(255,255,255,.018) 0 1px, transparent 1px 3px),
+        linear-gradient(180deg, var(--plastic-hi) 0%, var(--plastic) 18%, var(--plastic) 70%, var(--plastic-lo) 100%);
+      border: 1px solid #000;
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.12),
+        inset 0 -2px 0 rgba(0,0,0,.5),
+        0 22px 40px -18px rgba(0,0,0,.9),
+        0 2px 0 #050506;
+    }
+    .deck::after {             /* the feet */
+      content: "";
+      position: absolute;
+      left: 36px; right: 36px; bottom: -7px; height: 7px;
+      background:
+        linear-gradient(#050506, #050506) left / 70px 100% no-repeat,
+        linear-gradient(#050506, #050506) right / 70px 100% no-repeat;
+      border-radius: 0 0 4px 4px;
+    }
+
+    .deck-top {
+      display: grid;
+      grid-template-columns: minmax(150px, 1fr) minmax(200px, 1.25fr) minmax(290px, 1.6fr);
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .badge { display: flex; flex-direction: column; justify-content: space-between; gap: 10px; }
+    .chrome {
+      font: italic 800 22px/1 var(--font);
+      letter-spacing: .06em;
+      background: linear-gradient(180deg, #fdfdfd 0%, #b9bec7 45%, #6b7078 52%, #d9dde3 100%);
+      -webkit-background-clip: text; background-clip: text;
+      color: transparent;
+      filter: drop-shadow(0 1px 0 #000);
+    }
+    .model {
+      font: 700 10px/1.4 var(--font);
+      letter-spacing: .22em;
+      color: #9aa0a8;
+      text-transform: uppercase;
+    }
+    .model b { color: #d44; font-weight: 800; }
+    .stripes { display: flex; gap: 3px; }
+    .stripes i { display: block; height: 3px; flex: 1; border-radius: 2px; }
+    .stripes i:nth-child(1) { background: #d33b3b; }
+    .stripes i:nth-child(2) { background: #e98a2a; }
+    .stripes i:nth-child(3) { background: #e8cf3a; }
+    .stripes i:nth-child(4) { background: #3aa0e8; }
+
+    .door {
+      position: relative;
+      border-radius: 4px;
+      background: linear-gradient(180deg, #0c0d0f, #1b1c20 60%, #0f1012);
+      border: 1px solid #000;
+      box-shadow: inset 0 2px 6px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.07);
+      min-height: 96px;
+      display: flex; align-items: flex-end; justify-content: space-between;
+      padding: 8px 12px;
+      overflow: hidden;
+    }
+    .door::before {           /* the flap */
+      content: "";
+      position: absolute; left: 10px; right: 10px; top: 16px; height: 34px;
+      border-radius: 3px;
+      background: linear-gradient(180deg, #2a2b31, #16171a);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 3px 6px rgba(0,0,0,.6);
+    }
+    .door.loaded::before { background: linear-gradient(180deg, #33262a, #1a1315); }
+    .door-label {
+      position: relative;
+      font: 800 italic 12px/1 var(--font);
+      letter-spacing: .12em; color: #6c717a;
+    }
+    .door-label.vhs { font-size: 15px; letter-spacing: .02em; color: #8a8f98; }
+
+    /* ---------- VFD ---------- */
+
+    .vfd {
+      border-radius: 5px;
+      padding: 10px 14px 9px;
+      background:
+        radial-gradient(120% 90% at 50% 0%, rgba(125,249,228,.06), transparent 60%),
+        linear-gradient(180deg, #06100f, #030707);
+      border: 1px solid #000;
+      box-shadow: inset 0 0 18px rgba(0,0,0,.9), 0 1px 0 rgba(255,255,255,.08);
+      display: flex; flex-direction: column; gap: 6px;
+      min-width: 0;
+      position: relative;
+      overflow: hidden;
+    }
+    .vfd::after {             /* the mesh over the glass */
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      background:
+        repeating-linear-gradient(0deg, rgba(0,0,0,.28) 0 1px, transparent 1px 3px),
+        repeating-linear-gradient(90deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px);
+    }
+    .vfd-icons {
+      display: flex; gap: 10px; flex-wrap: wrap;
+      font: 800 10px/1 var(--font); letter-spacing: .14em;
+    }
+    .ico { color: var(--vfd-dim); transition: color .2s, text-shadow .2s; }
+    .ico.lit { color: var(--vfd); text-shadow: 0 0 6px var(--vfd-glow); }
+    .ico.rec.lit { color: var(--vfd-red); text-shadow: 0 0 8px rgba(255,77,94,.7); }
+    .ico.amber.lit { color: var(--vfd-amber); text-shadow: 0 0 8px rgba(255,197,107,.6); }
+
+    .vfd-main { display: flex; align-items: flex-end; gap: 14px; }
+    .vfd-cell { display: flex; flex-direction: column; gap: 3px; }
+    .vfd-cell small {
+      font: 800 9px/1 var(--font); letter-spacing: .2em; color: var(--vfd);
+      opacity: .75; text-shadow: 0 0 5px var(--vfd-glow);
+    }
+    .vfd-clock { margin-left: auto; align-items: flex-end; }
+    svg.seg { display: block; height: 42px; overflow: visible; }
+    svg.seg.small { height: 30px; }
+    svg.seg .on  { fill: var(--vfd); filter: drop-shadow(0 0 3px var(--vfd-glow)); }
+    svg.seg .off { fill: var(--vfd-dim); }
+    svg.seg.red .on { fill: var(--vfd-red); filter: drop-shadow(0 0 3px rgba(255,77,94,.7)); }
+    .vfd-text {
+      font: 700 13px/1.2 var(--mono); letter-spacing: .16em;
+      color: var(--vfd); text-shadow: 0 0 6px var(--vfd-glow);
+      text-transform: uppercase;
+      white-space: nowrap; overflow: hidden;
+      min-height: 16px;
+    }
+    .vfd-text span { display: inline-block; }
+    .vfd-text.scroll span { animation: marquee 12s linear infinite; padding-left: 100%; }
+    @keyframes marquee { to { transform: translateX(-100%); } }
+    .blink { animation: blink 1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* ---------- Keys ---------- */
+
+    .deck-bottom {
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+      margin-top: 14px; padding-top: 12px;
+      border-top: 1px solid rgba(0,0,0,.6);
+      box-shadow: 0 -1px 0 rgba(255,255,255,.05);
+    }
+    .keys { display: flex; gap: 8px; flex-wrap: wrap; }
+    .key {
+      font: 800 11px/1 var(--font); letter-spacing: .12em; text-transform: uppercase;
+      color: #d7dae0;
+      min-width: 70px; height: 40px; padding: 0 12px;
+      display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+      border-radius: 4px;
+      border: 1px solid #000;
+      background: linear-gradient(180deg, #4a4d55 0%, #2d2f35 55%, #222328 100%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 3px 0 #0a0a0c, 0 4px 6px rgba(0,0,0,.5);
+      cursor: pointer;
+      transition: transform .06s, box-shadow .06s;
+    }
+    .key:hover:not(:disabled) { color: #fff; }
+    .key:active:not(:disabled) {
+      transform: translateY(3px);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 #0a0a0c, 0 1px 2px rgba(0,0,0,.5);
+    }
+    .key:disabled { opacity: .45; cursor: not-allowed; }
+    .key .glyph { font-size: 13px; }
+    .key-rec .glyph { color: #ff3b4e; text-shadow: 0 0 6px rgba(255,59,78,.6); }
+    .key-rec { background: linear-gradient(180deg, #5a2f35 0%, #3a1d22 55%, #2c1519 100%); }
+    .key.on { color: var(--osd-hi); }
+
+    .leds {
+      margin-left: auto;
+      display: flex; gap: 16px; align-items: center;
+      font: 800 9px/1 var(--font); letter-spacing: .2em; color: #8a8f98;
+    }
+    .led {
+      display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+      background: #2a1a1c; margin-right: 6px; vertical-align: -1px;
+      box-shadow: inset 0 1px 1px rgba(0,0,0,.6);
+    }
+    .led.on.red { background: #ff3b4e; box-shadow: 0 0 8px #ff3b4e; }
+    .led.on.green { background: #5cff8a; box-shadow: 0 0 8px #5cff8a; }
+    .led.on.amber { background: #ffb13b; box-shadow: 0 0 8px #ffb13b; }
+
+    /* ---------- The TV and its on-screen display ---------- */
+
+    .tv {
+      border-radius: 22px;
+      padding: 22px 22px 14px;
+      background: linear-gradient(180deg, #2b2c30, #1a1b1e);
+      border: 1px solid #000;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 30px 50px -24px rgba(0,0,0,.9);
+    }
+    .crt {
+      position: relative;
+      border-radius: 28px / 22px;
+      overflow: hidden;
+      background: radial-gradient(130% 110% at 50% 45%, var(--osd-blue) 0%, var(--osd-blue) 55%, var(--osd-blue-lo) 100%);
+      box-shadow: inset 0 0 60px rgba(0,0,0,.65), inset 0 0 0 3px #08090b, 0 0 0 6px #111215;
+      min-height: 420px;
+    }
+    .crt::before {             /* scanlines */
+      content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 2;
+      background: repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px);
+    }
+    .crt::after {              /* glass glare */
+      content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 3;
+      background: radial-gradient(60% 40% at 30% 12%, rgba(255,255,255,.10), transparent 70%);
+    }
+
+    .osd {
+      position: relative; z-index: 1;
+      padding: 22px clamp(14px, 4vw, 36px) 26px;
+      font: 700 clamp(13px, 1.9vw, 16px)/1.55 var(--osd-font);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--osd-text);
+      text-shadow: 2px 2px 0 #000;
+    }
+    .osd button, .osd input, .osd select, .osd output {
+      font: inherit; letter-spacing: inherit; text-transform: inherit;
+      color: inherit; text-shadow: inherit;
+    }
+
+    .osd-menu { display: flex; gap: 6px 14px; flex-wrap: wrap; margin-bottom: 18px; }
+    .osd-menu button {
+      background: none; border: 0; padding: 2px 6px; cursor: pointer;
+    }
+    .osd-menu button[aria-selected="true"] {
+      background: var(--osd-text); color: var(--osd-blue); text-shadow: none;
+    }
+    .osd-menu button:focus-visible, .osd-btn:focus-visible, .osd-field:focus-visible {
+      outline: 2px dashed var(--osd-hi); outline-offset: 2px; border-radius: 0;
+    }
+    .osd-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .osd-head .hint { color: #c9d1ff; font-size: .85em; }
+
+    .osd-grid { display: grid; grid-template-columns: max-content 1fr; gap: 10px 18px; align-items: center; }
+    .osd-grid .k { color: var(--osd-hi); }
+    .osd-field-row { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+    .osd-field {
+      background: rgba(0,0,0,.22);
+      border: 0; border-bottom: 2px solid rgba(255,255,255,.8);
+      padding: 2px 6px; min-width: 0;
+      border-radius: 0;
+    }
+    .osd-field:focus { background: rgba(255,255,255,.14); outline: none; }
+    select.osd-field { max-width: 100%; appearance: none; -webkit-appearance: none; padding-right: 14px; }
+    select.osd-field option { background: var(--osd-blue-lo); color: #fff; }
+    input.osd-field[type="time"] { color-scheme: dark; width: 9.5em; }
+    input.osd-field::placeholder { color: rgba(255,255,255,.45); }
+    .osd-field.wide { flex: 1; min-width: 10em; }
+
+    .osd-btn {
+      background: none; border: 2px solid var(--osd-text);
+      padding: 1px 10px; cursor: pointer; white-space: nowrap;
+      box-shadow: 2px 2px 0 #000;
+    }
+    .osd-btn:hover:not(:disabled), .osd-btn:focus-visible { background: var(--osd-text); color: var(--osd-blue); text-shadow: none; }
+    .osd-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .osd-btn.primary { border-color: var(--osd-hi); color: var(--osd-hi); }
+    .osd-btn.primary:hover:not(:disabled), .osd-btn.primary:focus-visible { background: var(--osd-hi); color: var(--osd-blue); }
+    .osd-btn.danger { border-color: #ff9aa4; color: #ffc9ce; }
+    .osd-step { padding: 1px 7px; }
+
+    .osd-foot { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 18px; }
+    .osd-note { color: #c9d1ff; font-size: .85em; }
+
+    .osd-msg { min-height: 1.6em; margin-top: 16px; color: var(--osd-hi); }
+    .osd-msg.err { color: #ffb3ba; }
+
+    .osd-sub { color: var(--osd-hi); margin: 22px 0 8px; }
+    .osd-list { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+    .osd-list li {
+      display: grid;
+      grid-template-columns: 8em 11em minmax(0, 1fr) auto;
+      gap: 4px 12px; align-items: center;
+      padding: 3px 4px;
+      border-bottom: 1px dotted rgba(255,255,255,.25);
+    }
+    .osd-list li .t, .osd-list li .ch { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .osd-list li .acts { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+    .osd-list li .sub { grid-column: 1 / -1; color: #c9d1ff; font-size: .8em; text-transform: none; letter-spacing: .02em; }
+    .osd-list li.live { background: rgba(255, 60, 80, .18); }
+    .osd-list li.has-copy { border-bottom: 0; }
+    .osd-list li.ad-free .t { color: #9dffb8; }
+    .osd-list .empty { display: block; border: 0; color: #c9d1ff; }
+    .tag { font-size: .8em; padding: 0 5px; border: 1px solid currentColor; white-space: nowrap; }
+    .tag.rec { color: #ff9aa4; }
+    .tag.ok { color: #9dffb8; }
+    .tag.warn { color: var(--osd-hi); }
+    .tag.bad { color: #ffb3ba; }
+
+    .osd-problem {
+      border: 2px solid #ffb3ba; padding: 10px 12px; margin-bottom: 14px;
+      text-transform: none; letter-spacing: .02em;
+    }
+    .osd-problem b { color: #ffb3ba; text-transform: uppercase; letter-spacing: .06em; }
+    .osd-problem code {
+      display: block; margin-top: 6px; padding: 6px 8px; background: rgba(0,0,0,.35);
+      font: 700 .85em/1.4 var(--mono); text-shadow: none; overflow-wrap: anywhere;
+      user-select: all;
+    }
+
+    .osd-confirm {
+      position: absolute; inset: 0; z-index: 4;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(4, 10, 70, .72);
+    }
+    .osd-confirm[hidden] { display: none; }
+    .osd-confirm .box {
+      border: 2px solid var(--osd-text); background: var(--osd-blue);
+      box-shadow: 4px 4px 0 #000; padding: 18px 22px; max-width: min(92%, 520px);
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .osd-confirm .name { color: var(--osd-hi); overflow-wrap: anywhere; text-transform: none; }
+    .osd-confirm .row { display: flex; gap: 12px; justify-content: flex-end; }
+
+    /* ---------- Playback: the tape on the TV ---------- */
+
+    .osd-player {
+      position: absolute; inset: 0; z-index: 1;
+      display: flex; flex-direction: column;
+      background: #000;
+    }
+    .osd-player[hidden] { display: none; }
+    .osd-player video { flex: 1; min-height: 0; width: 100%; background: #000; display: block; }
+    .osd-player-bar {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      padding: 10px clamp(14px, 4vw, 30px);
+      background: var(--osd-blue);
+    }
+    .osd-player-bar .name {
+      flex: 1; min-width: 8em; color: var(--osd-hi);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      text-transform: none;
+    }
+    .play-ind {
+      position: absolute; top: 64px; left: clamp(18px, 5vw, 44px); z-index: 1;
+      font: 700 clamp(18px, 3vw, 26px)/1 var(--osd-font); letter-spacing: .08em;
+      color: #fff; text-shadow: 2px 2px 0 #000;
+      pointer-events: none;
+      animation: play-ind 4s steps(1) forwards;
+    }
+    @keyframes play-ind { to { visibility: hidden; } }
+    a.osd-btn { text-decoration: none; display: inline-block; color: var(--osd-text); }
+
+    .tv-chin {
+      display: flex; align-items: center; gap: 12px; margin-top: 12px;
+      font: 800 10px/1 var(--font); letter-spacing: .25em; color: #6c717a;
+    }
+    .tv-chin .grille { flex: 1; height: 10px; background: repeating-linear-gradient(90deg, #0d0e10 0 3px, transparent 3px 6px); border-radius: 2px; }
+
+    [hidden] { display: none !important; }
+
+    /* ---------- Narrow screens ---------- */
+
+    @media (max-width: 860px) {
+      .deck-top { grid-template-columns: 1fr 1fr; }
+      .vfd { grid-column: 1 / -1; }
+    }
+    @media (max-width: 560px) {
+      .room { padding: 16px 16px 48px; gap: 20px; }
+      .deck { padding: 14px 12px 12px; }
+      .deck-top { grid-template-columns: 1fr; }
+      .door { min-height: 70px; }
+      .leds { margin-left: 0; }
+      .key { min-width: 0; flex: 1 1 28%; }
+      .keys { width: 100%; }
+      svg.seg { height: 34px; }
+      svg.seg.small { height: 24px; }
+      .tv { padding: 12px 10px 10px; border-radius: 14px; }
+      .crt { border-radius: 16px / 12px; min-height: 360px; }
+      .osd-grid { grid-template-columns: 1fr; gap: 4px; }
+      .osd-grid .k { margin-top: 8px; }
+      .osd-list li { grid-template-columns: 1fr auto; }
+      .osd-list li .when, .osd-list li .ch { grid-column: auto; }
+      .osd-list li .t { grid-column: 1 / -1; white-space: normal; }
+      .osd-list li .acts { grid-column: 1 / -1; justify-content: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./"><span class="brand-mark"></span><span>TV Thing</span></a>
+    <nav class="nav" aria-label="Pages">
+      <a class="navlink" href="./">Watch</a>
+      <a class="navlink" href="guide.html">Guide</a>
+      <a class="navlink" href="vcr.html" aria-current="page">VCR</a>
+      <a class="navlink" href="cable.html">Cable</a>
+      <a class="navlink" href="rescan.html">Scan</a>
+      <a class="navlink" href="dx.html">DX</a>
+      <a class="navlink" href="about.html">About</a>
+    </nav>
+  </header>
+
+  <main class="room">
+    <section class="deck" aria-label="Video recorder">
+      <div class="deck-top">
+        <div class="badge">
+          <div>
+            <div class="chrome">TV THING</div>
+            <div class="model">VR-1996 · <b>4</b>-HEAD HI-FI</div>
+          </div>
+          <div class="stripes" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+        </div>
+
+        <div class="door" id="door" aria-hidden="true">
+          <span class="door-label vhs">VHS</span>
+          <span class="door-label">DIGITAL TUNER</span>
+        </div>
+
+        <div class="vfd" role="status" aria-live="polite" aria-label="Recorder display">
+          <div class="vfd-icons" aria-hidden="true">
+            <span class="ico rec" id="i-rec">● REC</span>
+            <span class="ico amber" id="i-timer">⏲ TIMER</span>
+            <span class="ico" id="i-otr">OTR</span>
+            <span class="ico" id="i-prog">PROG</span>
+            <span class="ico" id="i-play">▶ PLAY</span>
+            <span class="ico" id="i-hifi">HI-FI</span>
+          </div>
+          <div class="vfd-main">
+            <div class="vfd-cell">
+              <small>CH</small>
+              <svg class="seg small" id="seg-ch" aria-hidden="true"></svg>
+            </div>
+            <div class="vfd-cell vfd-clock">
+              <small id="clock-label">CLOCK</small>
+              <svg class="seg" id="seg-clock" aria-hidden="true"></svg>
+            </div>
+          </div>
+          <div class="vfd-text" id="vfd-text"><span id="vfd-text-inner">— —</span></div>
+        </div>
+      </div>
+
+      <div class="deck-bottom">
+        <div class="keys">
+          <button class="key key-rec" id="k-rec" title="One Touch Recording: tape the digital channel now, until the programme ends">
+            <span class="glyph">●</span>REC
+          </button>
+          <button class="key" id="k-stop" title="Stop the recording in progress">
+            <span class="glyph">■</span>STOP
+          </button>
+          <button class="key" id="k-prog" title="Program a timer by channel and time">PROG</button>
+          <button class="key" id="k-name" title="Find a programme by its guide name">NAME</button>
+          <button class="key" id="k-timers" title="Timers set">TIMER</button>
+          <button class="key" id="k-tapes" title="Recordings in the media library">TAPES</button>
+        </div>
+        <div class="leds" aria-hidden="true">
+          <span><span class="led green" id="led-power"></span>POWER</span>
+          <span><span class="led amber" id="led-timer"></span>TIMER</span>
+          <span><span class="led red" id="led-rec"></span>REC</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="tv" aria-label="On-screen programming">
+      <div class="crt">
+        <div class="osd">
+          <nav class="osd-menu" role="tablist" aria-label="Menu">
+            <button role="tab" id="tab-ctime" aria-controls="panel-ctime" aria-selected="true">1 CH/TIME</button>
+            <button role="tab" id="tab-name" aria-controls="panel-name" aria-selected="false">2 GUIDE NAME</button>
+            <button role="tab" id="tab-timers" aria-controls="panel-timers" aria-selected="false">3 TIMER LIST</button>
+            <button role="tab" id="tab-tapes" aria-controls="panel-tapes" aria-selected="false">4 TAPES</button>
+          </nav>
+
+          <div id="problems"></div>
+
+          <!-- 1: channel and time, like the deck's own timer menu -->
+          <section id="panel-ctime" role="tabpanel" aria-labelledby="tab-ctime">
+            <div class="osd-head">
+              <span>TIMER PROGRAMMING</span>
+              <span class="hint">OFF BEFORE ON = NEXT DAY</span>
+            </div>
+            <form id="f-manual" class="osd-grid" autocomplete="off">
+              <label class="k" for="m-ch">CH</label>
+              <div class="osd-field-row">
+                <button type="button" class="osd-btn osd-step" id="m-ch-down" aria-label="Previous channel">◀</button>
+                <select class="osd-field wide" id="m-ch" required></select>
+                <button type="button" class="osd-btn osd-step" id="m-ch-up" aria-label="Next channel">▶</button>
+              </div>
+
+              <span class="k" id="m-date-label">DATE</span>
+              <div class="osd-field-row" role="group" aria-labelledby="m-date-label">
+                <button type="button" class="osd-btn osd-step" id="m-day-down" aria-label="Previous day">◀</button>
+                <output class="osd-field" id="m-date" aria-live="polite">--/--</output>
+                <button type="button" class="osd-btn osd-step" id="m-day-up" aria-label="Next day">▶</button>
+              </div>
+
+              <label class="k" for="m-on">ON</label>
+              <div class="osd-field-row"><input class="osd-field" type="time" id="m-on" required></div>
+
+              <label class="k" for="m-off">OFF</label>
+              <div class="osd-field-row"><input class="osd-field" type="time" id="m-off" required></div>
+
+              <label class="k" for="m-title">NAME</label>
+              <div class="osd-field-row"><input class="osd-field wide" id="m-title" maxlength="60" placeholder="(OPTIONAL)"></div>
+            </form>
+            <div class="osd-foot">
+              <button class="osd-btn primary" id="m-enter" type="submit" form="f-manual">ENTER</button>
+              <span class="osd-note" id="m-summary">—</span>
+            </div>
+          </section>
+
+          <!-- 2: by guide name -->
+          <section id="panel-name" role="tabpanel" aria-labelledby="tab-name" hidden>
+            <div class="osd-head">
+              <span>RECORD BY GUIDE NAME</span>
+              <span class="hint" id="q-hint">SEARCHES THE BROADCAST GUIDE</span>
+            </div>
+            <form id="f-search" class="osd-field-row" autocomplete="off" role="search">
+              <label class="k" for="q" style="color: var(--osd-hi)">NAME</label>
+              <input class="osd-field wide" id="q" maxlength="80" placeholder="E.G. JEOPARDY">
+              <button class="osd-btn primary" type="submit">SEARCH</button>
+            </form>
+            <ul class="osd-list" id="results" style="margin-top: 14px"></ul>
+            <div class="osd-sub">EVERY-TIME PROGRAMS</div>
+            <ul class="osd-list" id="rules"></ul>
+          </section>
+
+          <!-- 3: timers set, and what they did -->
+          <section id="panel-timers" role="tabpanel" aria-labelledby="tab-timers" hidden>
+            <div class="osd-head">
+              <span>TIMER LIST</span>
+              <span class="hint" id="timers-hint"></span>
+            </div>
+            <ul class="osd-list" id="timers"></ul>
+            <div class="osd-sub">HISTORY</div>
+            <ul class="osd-list" id="history"></ul>
+          </section>
+
+          <!-- 4: the library -->
+          <section id="panel-tapes" role="tabpanel" aria-labelledby="tab-tapes" hidden>
+            <div class="osd-head">
+              <span>TAPES IN MEDIA LIBRARY</span>
+              <span class="hint" id="tapes-hint"></span>
+            </div>
+            <ul class="osd-list" id="tapes"></ul>
+            <p class="osd-note" id="tapes-note" style="margin-top: 14px; text-transform: none; letter-spacing: .02em"></p>
+          </section>
+
+          <div class="osd-msg" id="osd-msg" role="status" aria-live="polite"></div>
+        </div>
+
+        <div class="osd-confirm" id="confirm" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-q">
+          <div class="box osd">
+            <div id="confirm-q">ERASE THIS TAPE?</div>
+            <div class="name" id="confirm-name"></div>
+            <div class="row">
+              <button class="osd-btn" id="confirm-no">NO</button>
+              <button class="osd-btn danger" id="confirm-yes">YES, ERASE</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="osd-player" id="player" hidden role="dialog" aria-labelledby="player-name">
+          <div class="osd osd-player-bar">
+            <span>▶ PLAY</span>
+            <span class="name" id="player-name"></span>
+            <a class="osd-btn" id="player-save" download title="Save this recording to this computer">SAVE</a>
+            <button class="osd-btn primary" id="player-stop" type="button">■ STOP</button>
+          </div>
+          <video id="tape-video" controls playsinline preload="metadata"></video>
+          <div class="play-ind" id="play-ind" aria-hidden="true">▶ PLAY</div>
+        </div>
+      </div>
+      <div class="tv-chin" aria-hidden="true"><span>COLOR TV</span><span class="grille"></span><span>● POWER</span></div>
+    </section>
+  </main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const API = "api/v1/recordings";
+
+let state = null;          // last GET api/v1/recordings
+let channels = [];
+let clockSkew = 0;         // server clock minus browser clock, seconds
+let reachable = false;
+let dayOffset = 0;         // manual timer: days from today
+let lastQuery = "";
+
+// ---------- helpers ----------
+
+async function api(path, body) {
+  const options = body === undefined ? { cache: "no-store" } : {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
+  const response = await fetch(path, options);
+  let data = null;
+  try { data = await response.json(); } catch (_) { /* not JSON */ }
+  if (!response.ok) {
+    const error = data && data.error;
+    throw new Error((error && (error.message || error)) || `HTTP ${response.status}`);
+  }
+  return data;
+}
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+}
+
+function button(label, className, onClick, title) {
+  const node = el("button", `osd-btn ${className || ""}`, label);
+  node.type = "button";
+  if (title) node.title = title;
+  node.addEventListener("click", onClick);
+  return node;
+}
+
+const serverNow = () => Date.now() / 1000 + clockSkew;
+const pad = (n) => String(n).padStart(2, "0");
+
+function fmtClock(unix) {
+  return new Date(unix * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    .replace(/\s?([AP])M/i, "$1").toUpperCase();
+}
+function fmtDay(unix) {
+  const d = new Date(unix * 1000);
+  return `${d.toLocaleDateString([], { weekday: "short" }).toUpperCase()} ${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+}
+function fmtLength(seconds) {
+  const m = Math.round(seconds / 60);
+  return m >= 60 ? `${Math.floor(m / 60)}H${pad(m % 60)}` : `${m}M`;
+}
+function fmtBytes(bytes) {
+  if (bytes == null) return "";
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  return `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
+}
+const chLabel = (number) => String(number || "--").replace(".", "-");
+
+function say(message, isError = false) {
+  const node = $("osd-msg");
+  node.textContent = message || "";
+  node.classList.toggle("err", isError);
+  node.classList.toggle("blink", Boolean(message) && !isError);
+  clearTimeout(say.timer);
+  if (message) say.timer = setTimeout(() => {
+    node.textContent = ""; node.classList.remove("blink");
+  }, isError ? 9000 : 4000);
+}
+
+// ---------- seven-segment glass ----------
+// Segments a-g on a 12x22 cell, slanted like the real thing. Unlit segments
+// are drawn faintly, because on a VFD you can always see them.
+
+const SEGMENTS = {
+  a: [2.6, 0.4, 6.8, 1.8], b: [9.8, 2.4, 1.8, 7.8], c: [9.8, 11.8, 1.8, 7.8],
+  d: [2.6, 19.8, 6.8, 1.8], e: [0.4, 11.8, 1.8, 7.8], f: [0.4, 2.4, 1.8, 7.8],
+  g: [2.6, 10.1, 6.8, 1.8],
+};
+const GLYPHS = {
+  "0": "abcdef", "1": "bc", "2": "abged", "3": "abgcd", "4": "fgbc",
+  "5": "afgcd", "6": "afgedc", "7": "abc", "8": "abcdefg", "9": "abcdfg",
+  "-": "g", " ": "", "_": "d", A: "abcefg", b: "cdefg", C: "adef", c: "deg",
+  d: "bcdeg", E: "adefg", F: "aefg", H: "bcefg", h: "cefg", L: "def",
+  n: "ceg", o: "cdeg", P: "abefg", r: "eg", t: "defg", U: "bcdef", u: "cde",
+  y: "bcdfg", S: "afgcd", O: "abcdef",
+};
+
+function drawSegments(svg, text) {
+  const ns = "http://www.w3.org/2000/svg";
+  svg.replaceChildren();
+  let x = 0;
+  for (const ch of text) {
+    const group = document.createElementNS(ns, "g");
+    group.setAttribute("transform", `translate(${x} 0) skewX(-7)`);
+    if (ch === ":" || ch === ".") {
+      const dots = ch === ":" ? [7, 15] : [20.5];
+      for (const cy of dots) {
+        const dot = document.createElementNS(ns, "rect");
+        Object.entries({ x: 1.4, y: cy - 0.9, width: 1.8, height: 1.8 })
+          .forEach(([k, v]) => dot.setAttribute(k, v));
+        dot.setAttribute("class", "on");
+        group.appendChild(dot);
+      }
+      svg.appendChild(group);
+      x += 5;
+      continue;
+    }
+    const lit = GLYPHS[ch] ?? GLYPHS[ch.toUpperCase()] ?? "";
+    for (const [name, [sx, sy, w, h]] of Object.entries(SEGMENTS)) {
+      const seg = document.createElementNS(ns, "rect");
+      seg.setAttribute("x", sx); seg.setAttribute("y", sy);
+      seg.setAttribute("width", w); seg.setAttribute("height", h);
+      seg.setAttribute("rx", 0.8);
+      seg.setAttribute("class", lit.includes(name) ? "on" : "off");
+      group.appendChild(seg);
+    }
+    svg.appendChild(group);
+    x += 14;
+  }
+  svg.setAttribute("viewBox", `-1 0 ${Math.max(x, 1) + 1} 22.4`);
+}
+
+function setMarquee(text) {
+  const box = $("vfd-text");
+  const inner = $("vfd-text-inner");
+  if (inner.textContent === text) return;
+  inner.textContent = text;
+  box.classList.remove("scroll");
+  requestAnimationFrame(() => {
+    box.classList.toggle("scroll", inner.scrollWidth > box.clientWidth);
+  });
+}
+
+function renderDeck() {
+  const now = serverNow();
+  const active = state && state.active;
+  const armed = state ? state.timers.filter((t) => t.status === "scheduled") : [];
+
+  $("i-rec").classList.toggle("lit", Boolean(active));
+  $("i-rec").classList.toggle("blink", Boolean(active));
+  $("led-rec").classList.toggle("on", Boolean(active));
+  $("i-timer").classList.toggle("lit", armed.length > 0);
+  $("led-timer").classList.toggle("on", armed.length > 0);
+  $("i-otr").classList.toggle("lit", Boolean(active && active.kind === "otr"));
+  $("i-prog").classList.toggle("lit", armed.length > 0 && !active);
+  $("i-hifi").classList.toggle("lit", Boolean(active));
+  $("led-power").classList.toggle("on", reachable);
+  $("door").classList.toggle("loaded", Boolean(active));
+  $("k-stop").disabled = !active;
+
+  const clock = $("seg-clock");
+  if (!reachable) {
+    // The one thing everyone remembers about a VCR.
+    drawSegments(clock, "12:00");
+    clock.classList.add("blink");
+    drawSegments($("seg-ch"), "--");
+    $("clock-label").textContent = "CLOCK";
+    setMarquee("NO SIGNAL FROM SERVER");
+    return;
+  }
+  clock.classList.remove("blink");
+
+  if (active) {
+    const elapsed = Math.max(0, Math.floor(now - (active.started_at || now)));
+    const h = Math.floor(elapsed / 3600), m = Math.floor(elapsed / 60) % 60, s = elapsed % 60;
+    drawSegments(clock, `${h}:${pad(m)}:${pad(s)}`);
+    clock.classList.add("red");
+    $("clock-label").textContent = "COUNTER";
+    drawSegments($("seg-ch"), chLabel(active.channel_number));
+    const left = fmtLength(Math.max(0, active.end - now));
+    const signal = active.signal === "lost" ? " · NO SIGNAL" : "";
+    setMarquee(`REC ${active.title || active.channel_name || ""} · ${left} LEFT${signal}`);
+    return;
+  }
+  clock.classList.remove("red");
+
+  const d = new Date(now * 1000);
+  const hours = d.getHours() % 12 || 12;
+  drawSegments(clock, `${String(hours).padStart(2, " ")}:${pad(d.getMinutes())}`);
+  $("clock-label").textContent = d.getHours() < 12 ? "CLOCK  AM" : "CLOCK  PM";
+  const next = armed[0];
+  drawSegments($("seg-ch"), next ? chLabel(next.channel_number) : "--");
+  if (next) {
+    setMarquee(`NEXT ${fmtDay(next.start)} ${fmtClock(next.start)} · ${next.title || next.channel_name || ""}`);
+  } else if (state && !state.storage.ready) {
+    setMarquee("CHECK SETUP · SEE SCREEN");
+  } else {
+    setMarquee("STANDBY · NO TIMERS SET");
+  }
+}
+
+// ---------- tabs ----------
+
+const TABS = ["ctime", "name", "timers", "tapes"];
+function showTab(name) {
+  stopTape();                  // any menu key ejects to the OSD, as on the deck
+  for (const tab of TABS) {
+    $(`tab-${tab}`).setAttribute("aria-selected", String(tab === name));
+    $(`panel-${tab}`).hidden = tab !== name;
+  }
+  try { localStorage.setItem("vcr-tab", name); } catch (_) { /* private mode */ }
+}
+TABS.forEach((tab) => $(`tab-${tab}`).addEventListener("click", () => showTab(tab)));
+$("k-prog").addEventListener("click", () => { showTab("ctime"); $("m-ch").focus(); });
+$("k-name").addEventListener("click", () => { showTab("name"); $("q").focus(); });
+$("k-timers").addEventListener("click", () => showTab("timers"));
+$("k-tapes").addEventListener("click", () => showTab("tapes"));
+
+document.addEventListener("keydown", (event) => {
+  if (event.target.closest("input, select, textarea") || event.metaKey || event.ctrlKey) return;
+  const index = "1234".indexOf(event.key);
+  if (index >= 0 && $("confirm").hidden) showTab(TABS[index]);
+});
+
+// ---------- 1: channel and time ----------
+
+function fillChannels() {
+  const select = $("m-ch");
+  const previous = select.value;
+  select.replaceChildren(...channels.map((channel) => {
+    const option = el("option", null, `${chLabel(channel.number)}  ${channel.name}`);
+    option.value = channel.id;
+    return option;
+  }));
+  if (previous && channels.some((c) => c.id === previous)) select.value = previous;
+  updateManualSummary();
+}
+
+function stepChannel(delta) {
+  const select = $("m-ch");
+  if (!select.options.length) return;
+  select.selectedIndex = (select.selectedIndex + delta + select.options.length) % select.options.length;
+  updateManualSummary();
+}
+$("m-ch-down").addEventListener("click", () => stepChannel(-1));
+$("m-ch-up").addEventListener("click", () => stepChannel(1));
+$("m-day-down").addEventListener("click", () => { dayOffset = Math.max(0, dayOffset - 1); updateManualSummary(); });
+$("m-day-up").addEventListener("click", () => { dayOffset = Math.min(13, dayOffset + 1); updateManualSummary(); });
+["m-ch", "m-on", "m-off"].forEach((id) => $(id).addEventListener("input", updateManualSummary));
+
+function manualWindow() {
+  const on = $("m-on").value, off = $("m-off").value;
+  if (!on || !off) return null;
+  const base = new Date(serverNow() * 1000);
+  base.setHours(0, 0, 0, 0);
+  base.setDate(base.getDate() + dayOffset);
+  const at = (hhmm, extraDays = 0) => {
+    const [h, m] = hhmm.split(":").map(Number);
+    const d = new Date(base);
+    d.setDate(d.getDate() + extraDays);
+    d.setHours(h, m, 0, 0);
+    return d.getTime() / 1000;
+  };
+  const start = at(on);
+  let end = at(off);
+  if (end <= start) end = at(off, 1);     // OFF before ON: past midnight
+  return { start, end };
+}
+
+function updateManualSummary() {
+  const base = new Date(serverNow() * 1000);
+  base.setDate(base.getDate() + dayOffset);
+  const d = base.getTime() / 1000;
+  $("m-date").textContent = dayOffset === 0 ? `${fmtDay(d)} TODAY` : fmtDay(d);
+  const span = manualWindow();
+  if (!span) { $("m-summary").textContent = "SET ON AND OFF TIMES"; return; }
+  const channel = channels.find((c) => c.id === $("m-ch").value);
+  $("m-summary").textContent =
+    `CH ${chLabel(channel && channel.number)} · ${fmtDay(span.start)} ${fmtClock(span.start)}–${fmtClock(span.end)} · ${fmtLength(span.end - span.start)}`;
+}
+
+$("f-manual").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const span = manualWindow();
+  if (!span) { say("SET ON AND OFF TIMES", true); return; }
+  $("m-enter").disabled = true;
+  try {
+    const result = await api(API, {
+      mode: "manual", channel_id: $("m-ch").value,
+      start: span.start, end: span.end, title: $("m-title").value.trim() || null,
+    });
+    say(`PROGRAM SET · ${fmtDay(result.timer.start)} ${fmtClock(result.timer.start)}`);
+    $("m-title").value = "";
+    await load();
+  } catch (error) {
+    say(error.message, true);
+  } finally {
+    $("m-enter").disabled = false;
+  }
+});
+
+function presetManualTimes() {
+  // Default to the next half hour, for half an hour, the way a person
+  // usually programs a deck.
+  const d = new Date(serverNow() * 1000);
+  d.setMinutes(d.getMinutes() < 30 ? 30 : 60, 0, 0);
+  const on = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  d.setMinutes(d.getMinutes() + 30);
+  $("m-on").value = on;
+  $("m-off").value = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// ---------- 2: guide name ----------
+
+$("f-search").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  lastQuery = $("q").value.trim();
+  await search();
+});
+
+async function search() {
+  const list = $("results");
+  if (!lastQuery) { list.replaceChildren(el("li", "empty", "TYPE A PROGRAMME NAME")); return; }
+  list.replaceChildren(el("li", "empty blink", "SEARCHING…"));
+  try {
+    const data = await api(`${API}/search?q=${encodeURIComponent(lastQuery)}`);
+    if (!data.guide_available) {
+      list.replaceChildren(el("li", "empty", "NO GUIDE YET · REFRESH IT ON THE GUIDE PAGE"));
+      return;
+    }
+    if (!data.results.length) {
+      list.replaceChildren(el("li", "empty", `NOTHING CALLED “${lastQuery.toUpperCase()}” IN THE GUIDE`));
+      return;
+    }
+    list.replaceChildren(...data.results.map(resultRow));
+  } catch (error) {
+    list.replaceChildren(el("li", "empty", error.message));
+  }
+}
+
+function resultRow(result) {
+  const row = el("li");
+  row.append(
+    el("span", "when", `${fmtDay(result.start).split(" ")[0]} ${fmtClock(result.start)}`),
+    el("span", "ch", `${chLabel(result.channel_number)} ${result.channel_name || ""}`),
+    el("span", "t", `${result.title}  ${fmtLength(result.duration)}${result.airing ? " · ON NOW" : ""}`),
+  );
+  const acts = el("span", "acts");
+  if (result.scheduled) {
+    acts.append(el("span", "tag ok", "SET"));
+  } else {
+    if (result.conflict) {
+      const tag = el("span", "tag warn", "CONFLICT");
+      tag.title = `Clashes with ${result.conflict}`;
+      acts.append(tag);
+    }
+    acts.append(button("ONCE", "primary", async () => {
+      try {
+        await api(API, { mode: "guide", channel_number: result.channel_number, event_start: result.start });
+        say(`PROGRAM SET · ${result.title}`);
+        await Promise.all([load(), search()]);
+      } catch (error) { say(error.message, true); }
+    }, "Record this airing"));
+  }
+  acts.append(button("EVERY", "", async () => {
+    try {
+      const data = await api(`${API}/rules`, { title: result.title, channel_number: result.channel_number });
+      const added = (data.timers_added || []).length;
+      say(data.existing ? "ALREADY SET TO RECORD EVERY TIME"
+        : `EVERY TIME ON CH ${chLabel(result.channel_number)} · ${added} SET NOW`);
+      await Promise.all([load(), search()]);
+    } catch (error) { say(error.message, true); }
+  }, `Record every airing of ${result.title} on ${chLabel(result.channel_number)}`));
+  row.append(acts);
+  return row;
+}
+
+function renderRules() {
+  const list = $("rules");
+  if (!state.rules.length) {
+    list.replaceChildren(el("li", "empty", "NONE · USE “EVERY” ON A SEARCH RESULT"));
+    return;
+  }
+  list.replaceChildren(...state.rules.map((rule) => {
+    const row = el("li");
+    const upcoming = state.timers.filter((t) => t.rule_id === rule.id).length;
+    row.append(
+      el("span", "when", "EVERY"),
+      el("span", "ch", rule.channel_number ? `CH ${chLabel(rule.channel_number)}` : "ANY CH"),
+      el("span", "t", `${rule.title} · ${upcoming} SET`),
+    );
+    const acts = el("span", "acts");
+    acts.append(button("DEL", "danger", async () => {
+      try {
+        await api(`${API}/rules/delete`, { id: rule.id });
+        say("EVERY-TIME PROGRAM DELETED");
+        await load();
+      } catch (error) { say(error.message, true); }
+    }, "Stop recording this programme every time"));
+    row.append(acts);
+    return row;
+  }));
+}
+
+// ---------- 3: timers ----------
+
+const STATUS_TAGS = {
+  scheduled: ["tag ok", "SET"], recording: ["tag rec blink", "● REC"],
+  finishing: ["tag warn", "FILING"], done: ["tag ok", "DONE"],
+  partial: ["tag warn", "PARTIAL"], failed: ["tag bad", "FAILED"],
+  missed: ["tag bad", "MISSED"], cancelled: ["tag", "CLEARED"],
+  conflict: ["tag warn", "CONFLICT"],
+};
+
+function timerRow(timer, live) {
+  const row = el("li", timer.status === "recording" ? "live" : "");
+  row.append(
+    el("span", "when", `${fmtDay(timer.start)}`),
+    el("span", "ch", `${fmtClock(timer.start)}–${fmtClock(timer.end)}`),
+    el("span", "t", `${chLabel(timer.channel_number)} ${timer.title || timer.channel_name || ""}`),
+  );
+  const acts = el("span", "acts");
+  const [cls, label] = STATUS_TAGS[timer.status] || ["tag", timer.status.toUpperCase()];
+  acts.append(el("span", cls, label));
+  if (live) {
+    const stopping = timer.status === "recording";
+    acts.append(button(stopping ? "STOP" : "CLR", "danger", async () => {
+      try {
+        await api(`${API}/cancel`, { id: timer.id });
+        say(stopping ? "STOPPING · FILING TAPE" : "TIMER CLEARED");
+        await load();
+      } catch (error) { say(error.message, true); }
+    }, stopping ? "Stop recording and keep what was taped" : "Clear this timer"));
+  }
+  row.append(acts);
+  const notes = [];
+  if (timer.note) notes.push(timer.note);
+  if (timer.status === "recording" && timer.bytes) notes.push(`${fmtBytes(timer.bytes)} so far`);
+  if (!live && timer.file) notes.push(`${timer.file} · ${fmtBytes(timer.bytes)}`);
+  if (notes.length) row.append(el("span", "sub", notes.join(" · ")));
+  return row;
+}
+
+function renderTimers() {
+  const live = state.timers;
+  $("timers").replaceChildren(...(live.length ? live.map((t) => timerRow(t, true))
+    : [el("li", "empty", "NO TIMERS SET · PRESS PROG OR NAME")]));
+  const history = state.history.slice(0, 20);
+  $("history").replaceChildren(...(history.length ? history.map((t) => timerRow(t, false))
+    : [el("li", "empty", "NOTHING RECORDED YET")]));
+  $("timers-hint").textContent =
+    `GUIDE TIMERS START ${state.padding.before_seconds / 60}M EARLY, RUN ${state.padding.after_seconds / 60}M LATE`;
+}
+
+// ---------- 4: tapes ----------
+
+let pendingErase = null;
+
+// The ad stripper (ad_detection/strip_watch.py) files "<tape> (no ads).mp4"
+// beside the original; the server adds ad_strip, what it cut, when it can.
+const AD_FREE = " (no ads)";
+const tapeStem = (name) => name.replace(/\.(mp4|ts)$/i, "");
+const isAdFree = (tape) => tapeStem(tape.name).endsWith(AD_FREE);
+const adFreeSource = (tape) =>
+  tape.ad_strip?.source || `${tapeStem(tape.name).slice(0, -AD_FREE.length)}.mp4`;
+
+function adStripNote(tape) {
+  const cut = tape.ad_strip;
+  if (!cut) return "Ads stripped automatically.";
+  const min = (seconds) => (seconds / 60).toFixed(1);
+  const breaks = cut.breaks === 1 ? "1 break" : `${cut.breaks} breaks`;
+  return `Ads stripped automatically: ${min(cut.kept_seconds)} of ${min(cut.recorded_seconds)} min kept, ` +
+    `${breaks} cut plus the padding before and after.`;
+}
+
+function renderTapes() {
+  const list = $("tapes");
+  const tapes = state.library;
+  // An ad-free copy is listed right under its original, not by its own date.
+  const names = new Set(tapes.map((tape) => tape.name));
+  const copies = new Map(tapes.filter((tape) => isAdFree(tape) && names.has(adFreeSource(tape)))
+    .map((tape) => [adFreeSource(tape), tape]));
+  const paired = new Set([...copies.values()].map((tape) => tape.name));
+  const rows = [];
+  for (const tape of tapes) {
+    if (paired.has(tape.name)) continue;
+    rows.push(tapeRow(tape, false, copies.has(tape.name)));
+    if (copies.has(tape.name)) rows.push(tapeRow(copies.get(tape.name), true, false));
+  }
+  list.replaceChildren(...(rows.length ? rows : [el("li", "empty", "NO TAPES YET")]));
+  const storage = state.storage;
+  $("tapes-hint").textContent = storage.free_bytes != null ? `${fmtBytes(storage.free_bytes)} FREE` : "";
+  $("tapes-note").textContent =
+    `Play or save a tape here, or find it in the Media Library (DLNA) under Video › Folders › ${storage.directory.split("/").pop()}. ` +
+    `Encoded as ${state.encoding.video}, ${state.encoding.audio}, in ${state.encoding.container}. ` +
+    "Jeopardy! tapes get an AD-FREE copy a few minutes after they finish, cut at the station's black frames " +
+    "between show and break; the original, ads and all, is kept.";
+}
+
+function tapeRow(tape, underOriginal, hasCopy) {
+  const row = el("li", underOriginal ? "ad-free" : hasCopy ? "has-copy" : "");
+  const name = tapeStem(tape.name);
+  row.append(
+    el("span", "when", fmtDay(tape.modified)),
+    el("span", "ch", fmtBytes(tape.bytes)),
+    el("span", "t", underOriginal ? "↳ AD-FREE COPY" : name),
+  );
+  const acts = el("span", "acts");
+  if (isAdFree(tape) && !underOriginal) acts.append(el("span", "tag ok", "AD-FREE"));
+  const save = el("a", "osd-btn", "SAVE");
+  save.href = tapeUrl(tape.name, true);
+  save.download = tape.name;
+  save.title = "Download this recording to this computer";
+  acts.append(
+    button("▶ PLAY", "primary", () => playTape(tape.name), "Play this recording here"),
+    save,
+    button("ERASE", "danger", () => askErase(tape.name), "Delete this recording from the media library"),
+  );
+  row.append(acts);
+  if (isAdFree(tape)) row.append(el("span", "sub", adStripNote(tape)));
+  return row;
+}
+
+// ---------- playback ----------
+
+function tapeUrl(name, download) {
+  return `${API}/file?name=${encodeURIComponent(name)}${download ? "&download=1" : ""}`;
+}
+
+function playTape(name) {
+  const video = $("tape-video");
+  $("player-name").textContent = name.replace(/\.(mp4|ts)$/i, "");
+  $("player-save").href = tapeUrl(name, true);
+  $("player-save").download = name;
+  // Restart the corner "PLAY" caption, as the deck flashes it on each load.
+  const caption = $("play-ind");
+  caption.style.animation = "none";
+  void caption.offsetWidth;
+  caption.style.animation = "";
+  $("player").hidden = false;
+  $("i-play").classList.add("lit");
+  video.src = tapeUrl(name, false);
+  video.play().catch(() => {});
+  $("player-stop").focus();
+  say(`PLAY · ${name.replace(/\.(mp4|ts)$/i, "")}`);
+}
+
+function stopTape() {
+  if ($("player").hidden) return;
+  const video = $("tape-video");
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+  $("player").hidden = true;
+  $("i-play").classList.remove("lit");
+  say("STOP");
+}
+
+$("player-stop").addEventListener("click", stopTape);
+$("tape-video").addEventListener("error", () => {
+  if ($("player").hidden || !$("tape-video").getAttribute("src")) return;
+  stopTape();
+  say("TAPE WILL NOT PLAY · TRY SAVE", true);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("player").hidden) stopTape();
+});
+
+function askErase(name) {
+  pendingErase = name;
+  $("confirm-name").textContent = name;
+  $("confirm").hidden = false;
+  $("confirm-no").focus();     // the safe choice holds focus
+}
+function closeErase() {
+  pendingErase = null;
+  $("confirm").hidden = true;
+}
+$("confirm-no").addEventListener("click", closeErase);
+$("confirm").addEventListener("click", (event) => { if (event.target === $("confirm")) closeErase(); });
+document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !$("confirm").hidden) closeErase(); });
+$("confirm-yes").addEventListener("click", async () => {
+  const name = pendingErase;
+  closeErase();
+  stopTape();
+  if (!name) return;
+  try {
+    await api(`${API}/erase`, { name });
+    say("TAPE ERASED");
+    await load();
+  } catch (error) { say(error.message, true); }
+});
+
+// ---------- setup problems ----------
+
+function renderProblems() {
+  const box = $("problems");
+  box.replaceChildren(...state.storage.problems.map((problem) => {
+    const node = el("div", "osd-problem");
+    node.append(el("b", null, "CANNOT RECORD · "), document.createTextNode(problem.message));
+    if (problem.fix) node.append(el("code", null, problem.fix));
+    return node;
+  }));
+}
+
+// ---------- deck keys ----------
+
+$("k-rec").addEventListener("click", async () => {
+  try {
+    const data = await api(API, { mode: "otr" });
+    const timer = data.timer;
+    say(`ONE TOUCH REC · CH ${chLabel(timer.channel_number)} UNTIL ${fmtClock(timer.end)}`);
+    await load();
+  } catch (error) { say(error.message, true); }
+});
+
+$("k-stop").addEventListener("click", async () => {
+  if (!state || !state.active) return;
+  try {
+    await api(`${API}/cancel`, { id: state.active.id });
+    say("STOPPING · FILING TAPE");
+    await load();
+  } catch (error) { say(error.message, true); }
+});
+
+// ---------- loading ----------
+
+async function load() {
+  try {
+    state = await api(API);
+    clockSkew = state.now - Date.now() / 1000;
+    reachable = true;
+    renderProblems();
+    renderTimers();
+    renderRules();
+    renderTapes();
+  } catch (error) {
+    reachable = false;
+  }
+  renderDeck();
+}
+
+async function loadChannels() {
+  try {
+    const data = await api("api/v1/sources/digital");
+    channels = data.items || [];
+  } catch (_) {
+    try { channels = await api("api/channels"); } catch (__) { channels = []; }
+  }
+  fillChannels();
+}
+
+(async function start() {
+  let saved = null;
+  try { saved = localStorage.getItem("vcr-tab"); } catch (_) { /* private mode */ }
+  // A link can open a screen directly: vcr.html#timers, vcr.html#tapes.
+  const linked = location.hash.slice(1);
+  showTab(TABS.includes(linked) ? linked : TABS.includes(saved) ? saved : "ctime");
+  presetManualTimes();
+  await loadChannels();
+  await load();
+  const params = new URLSearchParams(location.search);
+  if (params.get("q")) {
+    $("q").value = params.get("q");
+    lastQuery = params.get("q");
+    showTab("name");
+    search();
+  }
+  setInterval(renderDeck, 1000);
+  setInterval(load, 4000);
+})();
+</script>
+</body>
+</html>

@@ -14,6 +14,7 @@ sub init()
     m.pretuneState = "idle"
     m.quality      = "medium"
     m.browseIdx    = -1
+    m.streamGeneration = 0
 
     m.video       = m.top.findNode("videoPlayer")
     m.panel       = m.top.findNode("channelPanel")
@@ -30,7 +31,7 @@ sub init()
 
     ' Debounce timer for channel browsing with up/down
     m.tuneTimer = CreateObject("roSGNode", "Timer")
-    m.tuneTimer.duration = 1.0
+    m.tuneTimer.duration = 0.4
     m.tuneTimer.repeat = false
     m.tuneTimer.observeField("fire", "OnTuneTimerFire")
 
@@ -153,11 +154,9 @@ sub TuneToIndex(idx as Integer)
     m.tuneOverlay.visible = true
     m.channelInfo.visible = false
 
-    if m.state = "playing" or m.state = "overlay"
-        m.video.control = "stop"
-        m.video.content = invalid
-        SendStop()
-    end if
+    ' The server gives every station a fresh encoder timestamp domain. The
+    ' player is replaced after the tune request succeeds so Roku cannot retain
+    ' the previous HLS timeline.
 
     m.state = "tuning"
 
@@ -176,6 +175,8 @@ sub OnTuneResult()
 
     if r <> invalid and r.ok = true
         m.curIdx = m.pendingIdx
+        m.video.control = "stop"
+        m.video.content = invalid
         StartVideo()
         SetState("playing")
     else
@@ -188,17 +189,12 @@ sub OnTuneResult()
     end if
 end sub
 
-sub SendStop()
-    t = CreateObject("roSGNode", "StopTask")
-    t.serverUrl = m.serverUrl
-    t.control = "run"
-end sub
-
 ' ── Video playback ───────────────────────────────────────────────
 
 sub StartVideo()
+    m.streamGeneration = m.streamGeneration + 1
     content = CreateObject("roSGNode", "ContentNode")
-    content.url          = m.serverUrl + "/stream/live.m3u8"
+    content.url          = m.serverUrl + "/stream/live.m3u8?v=" + m.streamGeneration.toStr()
     content.streamFormat = "hls"
     content.live         = true
     m.video.content = content
@@ -209,6 +205,9 @@ sub OnVideoState()
     s = m.video.state
     print "[TV] Video state: " s
     if s = "error" or s = "finished"
+        ' A retune briefly interrupts tuner input. OnTuneResult either keeps
+        ' this player attached if it recovered or reattaches it if it did not.
+        if m.state = "tuning" then return
         m.video.control = "stop"
         m.video.content = invalid
         m.video.visible = false

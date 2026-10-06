@@ -19,33 +19,8 @@ sub RunTune()
         return
     end if
 
-    ' Step 2: Poll /api/status until streaming=true
-    statusXfer = CreateObject("roUrlTransfer")
-    statusXfer.SetUrl(serverUrl + "/api/status")
-    for attempt = 0 to 14
-        sleep(1000)
-        raw = statusXfer.GetToString()
-        status = ParseJSON(raw)
-        print "[TV] TuneTask status poll " attempt.toStr() ": streaming=" raw
-        if status <> invalid and status.streaming = true
-            ' Step 3: Poll /stream/live.m3u8 until it has .ts segments
-            ' Fresh roUrlTransfer + cache-busting param each attempt to avoid cached 404
-            for segAttempt = 0 to 9
-                m3u8Xfer = CreateObject("roUrlTransfer")
-                m3u8Xfer.AddHeader("Cache-Control", "no-cache")
-                m3u8Xfer.SetUrl(serverUrl + "/stream/live.m3u8?_=" + segAttempt.toStr())
-                playlist = m3u8Xfer.GetToString()
-                print "[TV] TuneTask m3u8 poll " segAttempt.toStr() ": " playlist.Len().toStr() " bytes"
-                if playlist <> invalid and playlist.Instr(0, ".ts") >= 0
-                    m.top.result = {ok: true}
-                    return
-                end if
-                sleep(1000)
-            end for
-            ' streaming=true but no segments after 5s — try anyway
-            m.top.result = {ok: true}
-            return
-        end if
-    end for
-    m.top.result = {ok: false, error: "Timed out waiting for stream"}
+    ' A successful tune response means VLC has started. Return immediately so
+    ' the Video node can attach (or stay attached) while the first new segment
+    ' is being produced instead of adding a one-second status-poll delay.
+    m.top.result = {ok: true}
 end sub

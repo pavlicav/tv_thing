@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Guide — TV Thing</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="app.css">
+  <style>
+    /* A mid-2000s set-top box: navy glass, steel channel tabs, blue cells,
+       one gold highlight you drive with the arrow keys, and live TV in a
+       little picture-in-picture window up top. */
+    :root {
+      --stb-font: Tiresias, "Tiresias Screenfont", Verdana, Tahoma, "DejaVu Sans", sans-serif;
+      --stb-bg-hi: #13306f;
+      --stb-bg: #0a1d4a;
+      --stb-bg-lo: #050f2b;
+      --stb-line: #030a1f;
+      --stb-text: #ffffff;
+      --stb-dim: #aebfe8;
+      --stb-mute: #7086bd;
+      --stb-cell-hi: #2c56b0;
+      --stb-cell: #1d3f8c;
+      --stb-cell-lo: #16326f;
+      --stb-chan-hi: #56688f;
+      --stb-chan: #36476d;
+      --stb-chan-lo: #26344f;
+      --stb-gold-hi: #fff1a8;
+      --stb-gold: #ffd23f;
+      --stb-gold-lo: #e5a312;
+      --stb-ink: #14120a;
+      --stb-bevel: #8aa4dc;
+    }
+
+    body {
+      display: flex; flex-direction: column; height: 100%; overflow: hidden;
+      background: var(--stb-bg-lo);
+    }
+
+    .screen {
+      flex: 1; min-height: 0;
+      display: flex; flex-direction: column;
+      font-family: var(--stb-font);
+      color: var(--stb-text);
+      background:
+        radial-gradient(120% 70% at 50% -10%, var(--stb-bg-hi), transparent 60%),
+        linear-gradient(180deg, var(--stb-bg) 0%, var(--stb-bg-lo) 100%);
+    }
+
+    /* ---------- Top strip: preview · info · clock ---------- */
+
+    .top {
+      flex-shrink: 0;
+      display: grid;
+      grid-template-columns: clamp(220px, 26vw, 340px) minmax(0, 1fr) auto;
+      gap: 18px;
+      padding: 16px 18px 14px;
+      align-items: stretch;
+    }
+
+    .pip {
+      position: relative;
+      aspect-ratio: 16 / 9;
+      align-self: start;
+      background: #000;
+      border: 2px solid var(--stb-bevel);
+      box-shadow:
+        0 0 0 2px var(--stb-line),
+        inset 0 0 0 1px rgba(0, 0, 0, .6),
+        0 8px 20px rgba(0, 0, 0, .55);
+      overflow: hidden;
+      cursor: pointer;
+    }
+    .pip video { width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
+    .pip-slate {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+      background:
+        repeating-linear-gradient(0deg, rgba(255,255,255,.035) 0 1px, transparent 1px 3px),
+        linear-gradient(180deg, #1a3a8a, #0b1c4d);
+      font: 700 13px/1.2 var(--stb-font); letter-spacing: .08em; text-transform: uppercase;
+      color: var(--stb-dim); text-align: center; padding: 10px;
+    }
+    .pip-slate[hidden] { display: none; }
+    .pip-bug {
+      position: absolute; left: 0; right: 0; bottom: 0;
+      display: flex; justify-content: space-between; align-items: center; gap: 8px;
+      padding: 14px 8px 5px;
+      background: linear-gradient(180deg, transparent, rgba(0, 0, 0, .78));
+      font: 700 11.5px/1 var(--stb-font); letter-spacing: .03em;
+      text-shadow: 1px 1px 0 #000;
+      pointer-events: none;
+    }
+    .pip-bug .mute { color: var(--stb-gold); font-size: 10.5px; letter-spacing: .08em; }
+
+    .info {
+      min-width: 0;
+      display: flex; flex-direction: column; gap: 5px;
+      padding: 12px 16px;
+      background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.02));
+      border: 1px solid rgba(138, 164, 220, .35);
+      border-radius: 6px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+    }
+    .info-chan {
+      font: 700 13px/1.2 var(--stb-font); color: var(--stb-gold);
+      letter-spacing: .02em;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .info h2 {
+      font: 700 21px/1.2 var(--stb-font); letter-spacing: -.005em;
+      text-shadow: 1px 1px 0 #000;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .detail-sub {
+      display: flex; gap: 6px 12px; flex-wrap: wrap; align-items: center;
+      font: 700 12.5px/1.3 var(--stb-font); color: var(--stb-dim);
+    }
+    .info p {
+      font: 13px/1.45 var(--stb-font); color: var(--stb-dim);
+      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+      max-width: 80ch;
+    }
+    .info-actions { display: flex; gap: 10px; margin-top: auto; padding-top: 6px; flex-wrap: wrap; }
+
+    .badge {
+      display: inline-block; padding: 1px 5px 0;
+      font: 700 10.5px/1.4 var(--stb-font); letter-spacing: .04em;
+      color: var(--stb-text); border: 1px solid rgba(255,255,255,.55); border-radius: 2px;
+    }
+    .badge.live { color: var(--stb-ink); background: var(--stb-gold); border-color: var(--stb-gold); }
+
+    .stb-btn {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 6px 14px;
+      font: 700 12.5px/1 var(--stb-font); letter-spacing: .03em;
+      color: var(--stb-text);
+      background: linear-gradient(180deg, #4a6fc4 0%, #2a4d9e 50%, #1f3c80 51%, #2a4d9e 100%);
+      border: 1px solid #0b1a44; border-radius: 12px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 1px 2px rgba(0,0,0,.5);
+      text-shadow: 0 1px 0 rgba(0,0,0,.6);
+      cursor: pointer; white-space: nowrap;
+    }
+    .stb-btn:hover:not(:disabled) { filter: brightness(1.15); }
+    .stb-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .stb-btn.gold {
+      color: var(--stb-ink); text-shadow: 0 1px 0 rgba(255,255,255,.45);
+      background: linear-gradient(180deg, var(--stb-gold-hi) 0%, var(--stb-gold) 50%, var(--stb-gold-lo) 51%, var(--stb-gold) 100%);
+      border-color: #7a5608;
+    }
+    .stb-btn .rec { color: #ff3b3b; text-shadow: 0 0 4px rgba(255,59,59,.6); }
+    .stb-btn[hidden] { display: none; }
+
+    .clockbox {
+      display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
+      padding-top: 2px; text-align: right;
+    }
+    .logo {
+      font: italic 700 13px/1 var(--stb-font); letter-spacing: .22em;
+      color: var(--stb-dim); text-transform: uppercase;
+    }
+    .clock {
+      font: 700 34px/1.05 var(--stb-font); letter-spacing: -.01em;
+      text-shadow: 2px 2px 0 #000;
+      font-variant-numeric: tabular-nums;
+    }
+    .clock small { font-size: 14px; margin-left: 3px; color: var(--stb-dim); }
+    .clock-date { font: 700 13px/1.2 var(--stb-font); color: var(--stb-dim); }
+
+    /* ---------- Grid ---------- */
+
+    .guide-wrap {
+      flex: 1; min-height: 0; position: relative;
+      margin: 0 18px;
+      border: 2px solid var(--stb-line);
+      background: var(--stb-line);
+      box-shadow: 0 0 0 1px rgba(138, 164, 220, .25);
+    }
+    .guide {
+      position: absolute; inset: 0; overflow-x: hidden; overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: var(--stb-chan-hi) var(--stb-line);
+    }
+    .canvas { position: relative; }
+
+    .ruler {
+      position: sticky; top: 0; z-index: 4; display: flex;
+      height: 30px;
+      background: linear-gradient(180deg, #7d9bdc 0%, #4466b4 48%, #2f4f99 52%, #3a5ba8 100%);
+      border-bottom: 2px solid var(--stb-line);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.4);
+    }
+    .ruler-pad {
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: space-between; gap: 4px;
+      padding: 0 4px 0 10px;
+      border-right: 2px solid var(--stb-line);
+      font: 700 12.5px/1 var(--stb-font); text-shadow: 1px 1px 0 rgba(0,0,0,.6);
+      white-space: nowrap; overflow: hidden;
+    }
+    .ruler-track { position: relative; flex: 1; overflow: hidden; }
+    .tick {
+      position: absolute; top: 0; bottom: 0;
+      padding: 8px 0 0 8px;
+      border-left: 2px solid var(--stb-line);
+      font: 700 12.5px/1 var(--stb-font);
+      text-shadow: 1px 1px 0 rgba(0,0,0,.6);
+      white-space: nowrap;
+    }
+    .tick:first-child { border-left: 0; }
+    .page-btn {
+      flex-shrink: 0;
+      width: 22px; height: 22px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font: 700 11px/1 var(--stb-font); color: var(--stb-text);
+      background: rgba(3, 10, 31, .45); border: 1px solid rgba(255,255,255,.35);
+      border-radius: 50%; cursor: pointer;
+    }
+    .page-btn:hover:not(:disabled) { background: rgba(3, 10, 31, .75); }
+    .page-btn:disabled { opacity: .3; cursor: default; }
+    .page-next { position: absolute; right: 4px; top: 4px; z-index: 1; }
+
+    .row { display: flex; border-bottom: 2px solid var(--stb-line); }
+
+    .chan {
+      flex-shrink: 0;
+      display: flex; align-items: center; gap: 8px;
+      padding: 0 10px;
+      background: linear-gradient(180deg, var(--stb-chan-hi) 0%, var(--stb-chan) 50%, var(--stb-chan-lo) 100%);
+      border-right: 2px solid var(--stb-line);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.15);
+      cursor: pointer; overflow: hidden;
+    }
+    .chan:hover { filter: brightness(1.15); }
+    .chan.tuned { box-shadow: inset 3px 0 0 var(--stb-gold), inset 0 1px 0 rgba(255,255,255,.15); }
+    .row.focus .chan { background: linear-gradient(180deg, #7488b3 0%, #4f6391 50%, #3a4b70 100%); }
+    .chan-num {
+      font: 700 14px/1 var(--stb-font); flex-shrink: 0; min-width: 38px;
+      text-shadow: 1px 1px 0 #000;
+      font-variant-numeric: tabular-nums;
+    }
+    .chan-name {
+      font: 700 11.5px/1 var(--stb-font); color: var(--stb-dim); letter-spacing: .02em;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .chan.stale .chan-num { color: var(--stb-mute); }
+
+    .track { position: relative; flex: 1; overflow: hidden; }
+
+    .prog, .gap {
+      position: absolute; top: 0; bottom: 0;
+      display: flex; align-items: center; gap: 5px;
+      padding: 0 8px;
+      overflow: hidden; white-space: nowrap;
+    }
+    .prog {
+      font: 700 13px/1 var(--stb-font); color: var(--stb-text);
+      text-align: left; text-shadow: 1px 1px 0 rgba(0,0,0,.55);
+      background: linear-gradient(180deg, var(--stb-cell-hi) 0%, var(--stb-cell) 45%, var(--stb-cell-lo) 100%);
+      border: 0; border-radius: 0;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.16);
+      cursor: pointer;
+    }
+    .prog:hover { filter: brightness(1.18); }
+    .prog:focus-visible { outline: none; }
+    .prog[aria-current="true"] {
+      color: var(--stb-ink); text-shadow: none;
+      background: linear-gradient(180deg, var(--stb-gold-hi) 0%, var(--stb-gold) 45%, var(--stb-gold-lo) 100%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.7), inset 0 0 0 1px #8a6208;
+      filter: none;
+      z-index: 1;
+    }
+    .prog-title { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .prog .arrow { flex-shrink: 0; font-size: 9px; opacity: .8; }
+    .prog .cc { flex-shrink: 0; font-size: 9.5px; padding: 1px 3px 0; border: 1px solid currentColor; border-radius: 2px; opacity: .75; }
+    .prog.narrow { padding: 0 4px; }
+    .prog.narrow .cc, .prog.narrow .arrow { display: none; }
+    .prog.sliver .prog-title { display: none; }
+
+    .gap {
+      font: italic 700 12px/1 var(--stb-font); color: var(--stb-mute);
+      background: linear-gradient(180deg, #16295a, #102149);
+    }
+
+    /* A notch on the time bar rather than a line through the titles. */
+    .nowline {
+      position: absolute; top: 22px; width: 0; height: 0; margin-left: -6px;
+      border: 6px solid transparent; border-top: 0; border-bottom: 8px solid var(--stb-gold);
+      filter: drop-shadow(0 -1px 0 rgba(0,0,0,.6));
+      z-index: 5; pointer-events: none;
+    }
+
+    /* ---------- Remote legend ---------- */
+
+    .legend {
+      flex-shrink: 0;
+      display: flex; align-items: center; gap: 6px 18px; flex-wrap: wrap;
+      padding: 9px 18px 11px;
+      font: 700 12px/1.2 var(--stb-font); color: var(--stb-dim);
+    }
+    .legend .k { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+    .legend button.k { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; padding: 2px 0; }
+    .legend button.k:hover:not(:disabled) { color: var(--stb-text); }
+    .legend button.k:disabled { opacity: .5; cursor: not-allowed; }
+    .key {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 20px; height: 18px; padding: 0 5px;
+      font: 700 10px/1 var(--stb-font); color: var(--stb-text);
+      background: linear-gradient(180deg, #5a6d98, #2b3a5c);
+      border: 1px solid #0b1430; border-radius: 9px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.3);
+    }
+    .shape { font-size: 13px; line-height: 1; }
+    .shape.a { color: #ffd23f; }
+    .shape.b { color: #4f8bff; }
+    .shape.c { color: #ff4040; }
+    .guide-meta {
+      margin-left: auto;
+      display: flex; gap: 4px 14px; flex-wrap: wrap; justify-content: flex-end;
+      font: 11.5px/1.3 var(--stb-font); color: var(--stb-mute);
+    }
+    .guide-meta b { color: var(--stb-dim); font-weight: 700; }
+    .opt {
+      display: inline-flex; align-items: center; gap: 6px;
+      cursor: pointer; white-space: nowrap;
+    }
+    .opt input { accent-color: var(--stb-gold); }
+
+    /* ---------- States ---------- */
+
+    .state {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 12px;
+      padding: 30px 20px; text-align: center;
+      background: linear-gradient(180deg, #13306f, #0a1d4a);
+      font-family: var(--stb-font);
+    }
+    .state[hidden] { display: none; }
+    .state h2 { font: 700 18px/1.3 var(--stb-font); text-shadow: 1px 1px 0 #000; }
+    .state p { font-size: 13px; color: var(--stb-dim); max-width: 56ch; }
+    .state .err { color: #ffb3b3; }
+
+    .progress-log {
+      font: 11.5px/1.6 var(--mono); color: var(--stb-dim);
+      max-height: 180px; overflow: auto; text-align: left;
+      background: rgba(3, 10, 31, .6); border: 1px solid rgba(138, 164, 220, .35);
+      padding: 10px 12px; min-width: min(420px, 90%);
+    }
+    .progress-log div:last-child { color: var(--stb-text); }
+
+    /* ---------- Narrow screens ---------- */
+
+    @media (max-width: 900px) {
+      .top { grid-template-columns: clamp(180px, 38vw, 300px) minmax(0, 1fr); }
+      .clockbox { display: none; }
+    }
+    @media (max-width: 620px) {
+      .top { grid-template-columns: 1fr; gap: 10px; padding: 10px; }
+      .pip { width: 62%; max-width: 300px; justify-self: center; }
+      .chan { flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; padding: 0 8px; }
+      .chan-name { font-size: 10.5px; max-width: 100%; }
+      .info { padding: 10px 12px; }
+      .info h2 { font-size: 17px; }
+      .guide-wrap { margin: 0 10px; }
+      .legend { padding: 8px 10px 10px; gap: 6px 12px; }
+      .legend .hide-narrow { display: none; }
+      .guide-meta { margin-left: 0; justify-content: flex-start; }
+    }
+    @media (max-height: 640px) and (min-width: 621px) {
+      .top { grid-template-columns: clamp(180px, 20vw, 260px) minmax(0, 1fr) auto; padding: 10px 18px; }
+      .info p { -webkit-line-clamp: 2; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./"><span class="brand-mark"></span><span>TV Thing</span></a>
+    <nav class="nav" aria-label="Pages">
+      <a class="navlink" href="./">Watch</a>
+      <a class="navlink" href="guide.html" aria-current="page">Guide</a>
+      <a class="navlink" href="vcr.html">VCR</a>
+      <a class="navlink" href="cable.html">Cable</a>
+      <a class="navlink" href="rescan.html">Scan</a>
+      <a class="navlink" href="dx.html">DX</a>
+      <a class="navlink" href="about.html">About</a>
+    </nav>
+  </header>
+
+  <main class="screen">
+    <section class="top">
+      <div class="pip" id="pip" title="Live now — click for sound">
+        <video id="pip-video" muted playsinline></video>
+        <div class="pip-slate" id="pip-slate"><span>Please wait…</span></div>
+        <div class="pip-bug"><span id="pip-label"></span><span class="mute" id="pip-mute">MUTED</span></div>
+      </div>
+
+      <div class="info" id="detail" aria-live="polite">
+        <div class="info-chan" id="d-chan">&nbsp;</div>
+        <h2 id="d-title">Program Guide</h2>
+        <div class="detail-sub" id="d-sub"></div>
+        <p id="d-desc">Use the arrow keys to move around the grid; OK tunes the channel.</p>
+        <div class="info-actions">
+          <button class="stb-btn gold" id="d-watch" hidden>Watch</button>
+          <button class="stb-btn" id="d-record" hidden title="Tape this airing to the media library"><span class="rec">●</span> Record</button>
+        </div>
+      </div>
+
+      <div class="clockbox" aria-hidden="true">
+        <div class="logo">Guide</div>
+        <div class="clock" id="clock">--:--</div>
+        <div class="clock-date" id="clock-date"></div>
+      </div>
+    </section>
+
+    <div class="guide-wrap" id="wrap">
+      <div class="guide" id="scroller" hidden>
+        <div class="canvas" id="canvas">
+          <div class="ruler">
+            <div class="ruler-pad" id="ruler-pad">
+              <span id="grid-day"></span>
+              <button class="page-btn" id="btn-prev" aria-label="Earlier">&#9664;</button>
+            </div>
+            <div class="ruler-track" id="ruler-track"></div>
+            <button class="page-btn page-next" id="btn-next" aria-label="Later">&#9654;</button>
+            <div class="nowline" id="nowline" hidden></div>
+          </div>
+          <div id="rows"></div>
+        </div>
+      </div>
+      <div class="state" id="state">
+        <h2>Loading…</h2>
+      </div>
+    </div>
+
+    <footer class="legend">
+      <span class="k hide-narrow"><span class="key">&#9650;&#9660;&#9664;&#9654;</span> Move</span>
+      <span class="k hide-narrow"><span class="key">OK</span> Watch</span>
+      <button class="k" id="btn-now"><span class="shape a">&#9650;</span> Now</button>
+      <button class="k" id="btn-refresh"><span class="shape b">&#9632;</span> Read guide</button>
+      <button class="k" id="btn-record-key"><span class="shape c">&#9679;</span> Record</button>
+      <label class="k opt" title="Programme descriptions ride in a separate table that only repeats once a minute, so this turns a one-minute refresh into a long one.">
+        <input type="checkbox" id="opt-desc"> Descriptions
+      </label>
+      <div class="guide-meta" id="meta"></div>
+    </footer>
+  </main>
+
+<script src="hls.min.js"></script>
+<script>
+// The grid is drawn against wall-clock minutes: one minute is PPM pixels, and
+// everything -- ticks, programme blocks, the now line -- is positioned from
+// the same window start, so nothing can drift out of alignment. Like a real
+// set-top box the window is a fixed page of time that fits the screen; the
+// arrow keys (or the paging buttons) move it in half-hour steps.
+let PPM = 6;                // pixels per minute; recomputed to fit the screen
+let CHAN_W = 170;           // channel column width
+let WINDOW_MIN = 120;       // minutes on screen
+const ROW_H = 40;
+const STEP = 1800;          // paging step, seconds
+
+const $ = (id) => document.getElementById(id);
+let guide = null;
+let channels = [];
+let windowStart = 0;
+let selected = null;        // { channel, event }
+let focusTime = 0;          // the time up/down moves keep to, as a real box does
+let tunedNumber = null;
+let userMoved = false;     // until then, follow the tuned channel
+
+const fmtTime = (unix) => new Date(unix * 1000)
+  .toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+const fmtDay = (unix) => new Date(unix * 1000)
+  .toLocaleDateString([], { weekday: 'short' });
+const fmtDate = (unix) => new Date(unix * 1000)
+  .toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+const nowUnix = () => Math.floor(Date.now() / 1000);
+
+function fmtAge(seconds) {
+  if (seconds < 90) return 'just now';
+  const mins = Math.round(seconds / 60);
+  if (mins < 90) return `${mins} min ago`;
+  return `${(mins / 60).toFixed(1)} h ago`;
+}
+
+async function load() {
+  try {
+    const response = await fetch('api/guide');
+    guide = await response.json();
+  } catch (error) {
+    $('state').hidden = false;
+    $('state').innerHTML =
+      `<h2>Could not load the guide</h2><p class="err">${escape(error.message)}</p>`;
+    return;
+  }
+  render();
+}
+
+// The earliest page is the half hour in progress: the grid is for choosing
+// what to watch, and nothing to the left of now can be tuned.
+function minStart() {
+  return Math.floor(nowUnix() / STEP) * STEP;
+}
+
+function render() {
+  renderMeta();
+  channels = Object.values(guide.channels || {})
+    .filter((channel) => channel.events.length)
+    .sort(compareChannels);
+
+  if (!channels.length) {
+    $('scroller').hidden = true;
+    $('nowline').hidden = true;
+    showEmptyState();
+    return;
+  }
+
+  $('state').hidden = true;
+  $('scroller').hidden = false;
+  windowStart = minStart();
+  fitWindow();
+  if (!selected) selectInitial();
+  else drawGrid();
+}
+
+// Size the time window to the screen: two hours when there is room, less
+// on a phone, and never so few pixels a half-hour title cannot fit.
+function fitWindow() {
+  const full = $('scroller').clientWidth || $('wrap').clientWidth;
+  CHAN_W = full < 520 ? 104 : full < 800 ? 140 : 170;
+  const track = Math.max(120, full - CHAN_W);
+  WINDOW_MIN = track < 380 ? 60 : track < 640 ? 90 : 120;
+  PPM = track / WINDOW_MIN;
+}
+
+function horizon() {
+  return Math.max(...channels.flatMap(
+    (channel) => channel.events.map((event) => event.start + event.duration)
+  ));
+}
+
+function drawGrid() {
+  const width = WINDOW_MIN * PPM;
+  const span = WINDOW_MIN * 60;
+  const now = nowUnix();
+  $('ruler-pad').style.width = `${CHAN_W}px`;
+  $('grid-day').textContent = fmtDate(windowStart);
+  $('btn-prev').disabled = windowStart <= minStart();
+  $('btn-next').disabled = windowStart + span >= horizon();
+  drawRuler(width, span);
+  drawRows(channels, width, now);
+  drawNowLine(now);
+}
+
+// The same order the channel list uses: every primary first by major number,
+// then the subchannels grouped under their major. server.py's
+// channel_sort_key is the reference -- the two must not drift apart.
+function channelSortKey(number) {
+  const [major, minor] = String(number).split('.').map(Number);
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return [2, 0, 0];
+  return minor === 1 ? [0, major, 0] : [1, major, minor];
+}
+
+function compareChannels(a, b) {
+  const left = channelSortKey(a.number);
+  const right = channelSortKey(b.number);
+  return left[0] - right[0] || left[1] - right[1] || left[2] - right[2];
+}
+
+function renderMeta() {
+  const meta = $('meta');
+  if (!guide.available) {
+    meta.innerHTML = `<span>Refreshes at <b>${
+      (guide.refresh_times || []).join('</b>, <b>')}</b></span>`;
+    return;
+  }
+  const parts = [
+    `<span><b>${guide.event_count}</b> programmes · <b>${
+      guide.channels_with_events}</b> channels</span>`,
+    `<span><b>${guide.coverage_hours} h</b> ahead</span>`,
+    `<span>read <b>${fmtAge(guide.age_seconds)}</b></span>`,
+    `<span>next <b>${guide.next_refresh
+      ? fmtTime(guide.next_refresh) : 'off'}</b></span>`,
+  ];
+  if (guide.compressed_strings) {
+    parts.push(`<span title="ATSC A/65 Annex C Huffman tables are not implemented"><b>${
+      guide.compressed_strings}</b> compressed titles skipped</span>`);
+  }
+  meta.innerHTML = parts.join('');
+}
+
+function drawRuler(width, span) {
+  const track = $('ruler-track');
+  track.innerHTML = '';
+  for (let offset = 0; offset < span; offset += STEP) {
+    const at = windowStart + offset;
+    const tick = document.createElement('div');
+    tick.className = 'tick';
+    tick.style.left = `${(offset / 60) * PPM}px`;
+    tick.textContent = fmtTime(at);
+    track.appendChild(tick);
+  }
+}
+
+function drawRows(list, width, now) {
+  const rows = $('rows');
+  rows.innerHTML = '';
+  for (const channel of list) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.height = `${ROW_H}px`;
+    row.dataset.number = channel.number;
+    if (selected && selected.channel.number === channel.number) row.classList.add('focus');
+
+    const chan = document.createElement('div');
+    chan.className = channel.stale ? 'chan stale' : 'chan';
+    if (channel.number === tunedNumber) chan.classList.add('tuned');
+    chan.style.width = `${CHAN_W}px`;
+    chan.innerHTML =
+      `<span class="chan-num">${escape(channel.number)}</span>` +
+      `<span class="chan-name">${escape(channel.name)}</span>`;
+    chan.title = channel.stale
+      ? `${channel.name} — from an earlier refresh; this frequency did not read this time`
+      : `Watch ${channel.number} ${channel.name}`;
+    chan.onclick = () => watch(channel);
+    row.appendChild(chan);
+
+    const track = document.createElement('div');
+    track.className = 'track';
+    let cursor = windowStart;
+    const windowEnd = windowStart + WINDOW_MIN * 60;
+    for (const event of channel.events) {
+      const end = event.start + event.duration;
+      if (end <= windowStart || event.start >= windowEnd) continue;
+      if (event.start > cursor) track.appendChild(gap(cursor, event.start));
+      track.appendChild(block(channel, event, now));
+      cursor = Math.max(cursor, end);
+    }
+    if (cursor < windowEnd) track.appendChild(gap(cursor, windowEnd));
+    row.appendChild(track);
+    rows.appendChild(row);
+  }
+}
+
+function gap(from, to) {
+  const node = document.createElement('div');
+  node.className = 'gap';
+  const left = ((from - windowStart) / 60) * PPM;
+  const right = Math.min(WINDOW_MIN * PPM, ((to - windowStart) / 60) * PPM);
+  node.style.left = `${left}px`;
+  node.style.width = `${Math.max(0, right - left - 2)}px`;
+  if (right - left > 110) node.textContent = 'No information';
+  return node;
+}
+
+function block(channel, event, now) {
+  const end = event.start + event.duration;
+  const windowEnd = windowStart + WINDOW_MIN * 60;
+  // An event already under way is clipped at the window edge rather than
+  // hung off the left of the grid; one running past the page is clipped on
+  // the right. Arrows mark the side it continues on, as the old boxes did.
+  const left = Math.max(0, ((event.start - windowStart) / 60) * PPM);
+  const right = Math.min(WINDOW_MIN * PPM, ((end - windowStart) / 60) * PPM);
+  const node = document.createElement('button');
+  node.type = 'button';
+  node.tabIndex = -1;
+  node.className = 'prog';
+  if (event.start <= now && now < end) node.classList.add('live');
+  if (right - left < 70) node.classList.add('narrow');
+  if (right - left < 22) node.classList.add('sliver');
+  node.style.left = `${left}px`;
+  node.style.width = `${Math.max(2, right - left - 2)}px`;
+  node.dataset.start = event.start;
+  const title = escape(event.title || 'No title');
+  node.innerHTML =
+    (event.start < windowStart ? '<span class="arrow">&#9664;</span>' : '') +
+    `<span class="prog-title">${title}</span>` +
+    (event.captions ? '<span class="cc">CC</span>' : '') +
+    (end > windowEnd ? '<span class="arrow" style="margin-left:auto">&#9654;</span>' : '');
+  node.title = `${event.title || 'No title'} · ${fmtTime(event.start)}–${fmtTime(end)}`;
+  node.onclick = () => { userMoved = true; select(channel, event, { keepTime: false }); };
+  node.ondblclick = () => watch(channel);
+  if (selected && selected.channel.number === channel.number
+      && selected.event.start === event.start) {
+    node.setAttribute('aria-current', 'true');
+    node.tabIndex = 0;
+  }
+  return node;
+}
+
+function drawNowLine(now) {
+  const line = $('nowline');
+  const offset = ((now - windowStart) / 60) * PPM;
+  line.style.left = `${CHAN_W + offset}px`;
+  line.hidden = offset < 0 || offset > WINDOW_MIN * PPM;
+}
+
+function jumpToNow() {
+  windowStart = minStart();
+  const current = selected && eventAt(selected.channel, nowUnix());
+  if (current) select(selected.channel, current, { keepTime: false });
+  else drawGrid();
+}
+
+// ---------- Selection and the remote ----------
+
+function eventAt(channel, time) {
+  return channel.events.find((e) => e.start <= time && time < e.start + e.duration)
+    || channel.events.find((e) => e.start >= time)
+    || null;
+}
+
+function selectInitial() {
+  const now = nowUnix();
+  windowStart = minStart();
+  const channel = channels.find((c) => c.number === tunedNumber) || channels[0];
+  const event = eventAt(channel, now);
+  if (event) select(channel, event, { keepTime: false, scroll: true });
+  else drawGrid();
+}
+
+// Page the window so the selected airing is on screen.
+function reveal(event) {
+  const span = WINDOW_MIN * 60;
+  const end = event.start + event.duration;
+  while (event.start >= windowStart + span) windowStart += STEP;
+  while (end <= windowStart && windowStart - STEP >= minStart()) windowStart -= STEP;
+}
+
+function select(channel, event, { keepTime = true, scroll = true } = {}) {
+  selected = { channel, event };
+  if (!keepTime) focusTime = Math.max(event.start, windowStart);
+  reveal(event);
+  drawGrid();
+
+  const row = document.querySelector(`.row[data-number="${CSS.escape(channel.number)}"]`);
+  if (row && scroll) row.scrollIntoView({ block: 'nearest' });
+
+  const end = event.start + event.duration;
+  const now = nowUnix();
+  const parts = [
+    `<span>${fmtDay(event.start)} ${fmtTime(event.start)} – ${fmtTime(end)}</span>`,
+    `<span>${Math.round(event.duration / 60)} min</span>`,
+  ];
+  if (event.start <= now && now < end) parts.push('<span class="badge live">ON NOW</span>');
+  if (event.captions) parts.push('<span class="badge">CC</span>');
+  if (channel.stale) parts.push('<span class="badge">EARLIER REFRESH</span>');
+
+  $('d-chan').textContent = `${channel.number}  ${channel.name || ''}`;
+  $('d-title').textContent = event.title || 'No title';
+  $('d-sub').innerHTML = parts.join('');
+  $('d-desc').textContent = event.description
+    || 'No description — this station sends titles only.';
+  $('d-watch').hidden = false;
+  $('d-watch').textContent = `Watch ${channel.number}`;
+  $('d-record').hidden = end <= now;
+  $('btn-record-key').disabled = end <= now;
+  $('d-record').disabled = false;
+  $('d-record').innerHTML = '<span class="rec">●</span> Record';
+}
+
+// Up/down keep to the same time slot. A row with nothing airing on this
+// page is skipped rather than allowed to drag the whole grid hours ahead.
+function moveRow(delta) {
+  if (!selected) return;
+  const index = channels.findIndex((c) => c.number === selected.channel.number);
+  const windowEnd = windowStart + WINDOW_MIN * 60;
+  const time = Math.max(focusTime, windowStart);
+  const step = Math.sign(delta);
+  let at = Math.max(0, Math.min(channels.length - 1, index + delta));
+  for (; at >= 0 && at < channels.length && at !== index; at += step) {
+    const event = eventAt(channels[at], time);
+    if (event && event.start < windowEnd) {
+      select(channels[at], event);
+      return;
+    }
+  }
+}
+
+function moveColumn(delta) {
+  if (!selected) return;
+  const events = selected.channel.events;
+  const index = events.indexOf(selected.event);
+  const target = events[index + delta];
+  if (!target) return;
+  if (delta < 0 && target.start + target.duration <= minStart()) return;
+  select(selected.channel, target, { keepTime: false });
+}
+
+function page(delta) {
+  const span = WINDOW_MIN * 60;
+  const next = windowStart + delta * STEP * (WINDOW_MIN / 30);
+  if (next < minStart() || next >= horizon()) return;
+  windowStart = Math.max(minStart(), next);
+  focusTime = windowStart;
+  if (selected) {
+    const event = eventAt(selected.channel, windowStart);
+    if (event && event.start < windowStart + span) {
+      select(selected.channel, event, { keepTime: true, scroll: false });
+      return;
+    }
+  }
+  drawGrid();
+}
+
+async function watch(channel) {
+  if (!channel.id) {
+    alert(`${channel.number} is in the guide but not in the channel list. `
+        + 'Run a band scan.');
+    return;
+  }
+  const response = await fetch('api/tune', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channel_id: channel.id, quality: 'medium' }),
+  });
+  if (response.ok) { location.href = './'; return; }
+  const body = await response.json().catch(() => ({}));
+  alert(body.error || 'Could not tune that channel.');
+}
+
+// Hand the airing to the VCR. It pads the guide times itself, and refuses
+// with the clashing timer named if the one digital tuner is already booked.
+async function record(channel, event) {
+  const button = $('d-record');
+  button.disabled = true;
+  const response = await fetch('api/v1/recordings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'guide', channel_number: channel.number,
+                           event_start: event.start }),
+  });
+  if (response.ok) { button.innerHTML = '<span class="rec">●</span> Timer set'; return; }
+  button.disabled = false;
+  const body = await response.json().catch(() => ({}));
+  alert((body.error && body.error.message) || 'Could not set that timer.');
+}
+
+function showEmptyState() {
+  const state = $('state');
+  state.hidden = false;
+  state.innerHTML = `
+    <h2>No guide yet</h2>
+    <p>The schedule is carried in the broadcast itself, so reading it means
+       tuning each frequency in turn — which interrupts live TV. It runs
+       automatically at ${(guide.refresh_times || ['03:00']).join(' and ')}.</p>
+    ${guide.last_error ? `<p class="err">${escape(guide.last_error)}</p>` : ''}
+    <button class="stb-btn gold" id="state-refresh">Read the guide now</button>`;
+  $('state-refresh').onclick = refresh;
+}
+
+// ---------- Refresh ----------
+
+function refresh() {
+  const state = $('state');
+  $('scroller').hidden = true;
+  $('nowline').hidden = true;
+  state.hidden = false;
+  state.innerHTML = `
+    <h2>Reading the guide…</h2>
+    <p>Each frequency is tuned in turn. Live TV resumes when this finishes;
+       tuning a channel yourself stops it early.</p>
+    <div class="progress-log" id="log"></div>`;
+
+  const log = $('log');
+  const line = (text) => {
+    const row = document.createElement('div');
+    row.textContent = text;
+    log.appendChild(row);
+    log.scrollTop = log.scrollHeight;
+  };
+
+  $('btn-refresh').disabled = true;
+  const descriptions = $('opt-desc').checked;
+  if (descriptions) {
+    line('Descriptions requested — expect minutes per frequency, not seconds.');
+  }
+  const source = new EventSource(
+    `api/guide/refresh/stream?descriptions=${descriptions ? 1 : 0}`
+  );
+
+  source.addEventListener('status', (message) => {
+    line(JSON.parse(message.data).message);
+  });
+  source.addEventListener('frequency', (message) => {
+    const item = JSON.parse(message.data);
+    line(`[${item.index}/${item.total}] RF ${item.rf_channel} — ${
+      (item.frequency / 1e6).toFixed(0)} MHz`);
+  });
+  source.addEventListener('result', (message) => {
+    const item = JSON.parse(message.data);
+    line(item.error
+      ? `    ${item.error}`
+      : `    ${item.services} services, ${item.events} programmes`);
+  });
+  source.addEventListener('saved', (message) => {
+    const item = JSON.parse(message.data);
+    line(`Done: ${item.event_count} programmes, ${item.coverage_hours} h ahead,`
+       + ` in ${item.elapsed_seconds}s${item.aborted ? ' (stopped early)' : ''}`);
+    source.close();
+    $('btn-refresh').disabled = false;
+    setTimeout(load, 800);
+  });
+  source.addEventListener('failed', (message) => {
+    line(`Failed: ${JSON.parse(message.data).error}`);
+    source.close();
+    $('btn-refresh').disabled = false;
+  });
+  source.onerror = () => {
+    source.close();
+    $('btn-refresh').disabled = false;
+  };
+}
+
+function escape(text) {
+  const node = document.createElement('div');
+  node.textContent = text == null ? '' : text;
+  return node.innerHTML;
+}
+
+// ---------- Picture-in-picture preview ----------
+// Plays whatever the tuner is already sending. It never tunes: browsing the
+// grid must not take the channel away from whoever else is watching.
+
+const pip = { hls: null, id: null, failedAt: 0 };
+const pipVideo = $('pip-video');
+
+function pipSlate(text) {
+  $('pip-slate').hidden = false;
+  $('pip-slate').innerHTML = `<span>${escape(text)}</span>`;
+}
+
+function stopPreview() {
+  if (pip.hls) { pip.hls.destroy(); pip.hls = null; }
+  pipVideo.pause();
+  pipVideo.removeAttribute('src');
+  pipVideo.load();
+  pip.id = null;
+}
+
+function startPreview(url, id) {
+  stopPreview();
+  pip.id = id;
+  pipSlate('Please wait…');
+  const fail = () => {
+    if (pip.id !== id) return;
+    stopPreview();
+    pip.failedAt = Date.now();
+    pipSlate('No signal');
+  };
+  pipVideo.onplaying = () => { if (pip.id === id) $('pip-slate').hidden = true; };
+  if (window.Hls && Hls.isSupported()) {
+    const instance = new Hls({
+      liveDurationInfinity: true,
+      backBufferLength: 4,
+      maxBufferLength: 8,
+      maxMaxBufferLength: 12,
+      liveSyncDurationCount: 3,
+    });
+    pip.hls = instance;
+    instance.on(Hls.Events.MANIFEST_PARSED, () => {
+      if (pip.hls === instance) pipVideo.play().catch(() => {});
+    });
+    instance.on(Hls.Events.ERROR, (_e, data) => {
+      if (pip.hls === instance && data.fatal) fail();
+    });
+    instance.loadSource(url);
+    instance.attachMedia(pipVideo);
+  } else if (pipVideo.canPlayType('application/vnd.apple.mpegurl')) {
+    pipVideo.onerror = fail;
+    pipVideo.src = url;
+    pipVideo.play().catch(() => {});
+  } else {
+    pipSlate('Preview unsupported');
+  }
+}
+
+async function pollPreview() {
+  if (document.hidden) return;
+  let lane = null;
+  try {
+    const response = await fetch('api/v1/status', { cache: 'no-store' });
+    if (response.ok) {
+      const status = await response.json();
+      const lanes = status.lanes || {};
+      lane = lanes[status.primary_video_lane];
+      if (!lane || !lane.stream || !lane.stream.active) lane = lanes.digital;
+    }
+  } catch (_) {
+    return;   // a missed poll must not blank a healthy preview
+  }
+  const stream = lane && lane.stream;
+  const selection = (lane && lane.selection) || {};
+  const label = lane && lane.id === 'analog'
+    ? `Cable ${selection.channel || ''}`
+    : [selection.number, selection.name].filter(Boolean).join(' ');
+  $('pip-label').textContent = label;
+
+  const number = lane && lane.id === 'digital' ? selection.number || null : null;
+  if (number !== tunedNumber) {
+    tunedNumber = number;
+    if (channels.length && !userMoved) selectInitial();
+    else if (channels.length && selected) drawGrid();
+  }
+
+  if (!stream || !stream.ready) {
+    if (pip.id) stopPreview();
+    pipSlate(stream && stream.state === 'tuning' ? 'Tuning…' : 'No signal');
+    return;
+  }
+  if (stream.id === pip.id) return;
+  if (pip.failedAt && Date.now() - pip.failedAt < 10000) return;
+  pip.failedAt = 0;
+  const base = (stream.playback && stream.playback[0] && stream.playback[0].url)
+    || `stream/${lane.id === 'analog' ? 'analog' : 'digital'}.m3u8`;
+  startPreview(`${base}?v=${encodeURIComponent(stream.id)}`, stream.id);
+}
+
+$('pip').onclick = () => {
+  pipVideo.muted = !pipVideo.muted;
+  $('pip-mute').hidden = !pipVideo.muted;
+  if (pipVideo.paused && pip.id) pipVideo.play().catch(() => {});
+};
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopPreview();
+  else pollPreview();
+});
+
+// ---------- Clock ----------
+
+function tickClock() {
+  const date = new Date();
+  const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const match = time.match(/^(.*?)\s*([AP]\.?M\.?)$/i);
+  $('clock').innerHTML = match
+    ? `${escape(match[1])}<small>${escape(match[2])}</small>` : escape(time);
+  $('clock-date').textContent = date.toLocaleDateString([],
+    { weekday: 'long', month: 'short', day: 'numeric' });
+}
+
+// ---------- Wiring ----------
+
+$('btn-now').onclick = () => jumpToNow();
+$('btn-prev').onclick = () => page(-1);
+$('btn-next').onclick = () => page(1);
+$('btn-refresh').onclick = refresh;
+$('d-watch').onclick = () => selected && watch(selected.channel);
+$('d-record').onclick = () => selected && record(selected.channel, selected.event);
+$('btn-record-key').onclick = () => selected && !$('d-record').hidden
+  && record(selected.channel, selected.event);
+
+document.addEventListener('keydown', (event) => {
+  if (event.target.tagName === 'INPUT' || event.altKey || event.ctrlKey || event.metaKey) return;
+  if ($('scroller').hidden) return;
+  const rowsPerPage = Math.max(1, Math.floor($('scroller').clientHeight / ROW_H) - 1);
+  const keys = {
+    ArrowUp: () => moveRow(-1),
+    ArrowDown: () => moveRow(1),
+    ArrowLeft: () => moveColumn(-1),
+    ArrowRight: () => moveColumn(1),
+    PageUp: () => moveRow(-rowsPerPage),
+    PageDown: () => moveRow(rowsPerPage),
+    Enter: () => selected && watch(selected.channel),
+    Home: () => jumpToNow(),
+  };
+  if (event.key === 'Enter' && event.target.tagName === 'BUTTON'
+      && !event.target.classList.contains('prog')) return;
+  const action = keys[event.key];
+  if (!action) return;
+  event.preventDefault();
+  userMoved = true;
+  action();
+});
+
+let resizeFrame = 0;
+new ResizeObserver(() => {
+  cancelAnimationFrame(resizeFrame);
+  resizeFrame = requestAnimationFrame(() => {
+    if (!channels.length || $('scroller').hidden) return;
+    fitWindow();
+    drawGrid();
+  });
+}).observe($('wrap'));
+
+// Keep the now line and clock honest without redrawing the grid, and roll
+// the page forward once the half hour on the left edge has finished.
+setInterval(() => {
+  tickClock();
+  if (guide && guide.available && !$('scroller').hidden) {
+    if (windowStart < minStart()) {
+      windowStart = minStart();
+      drawGrid();
+    } else {
+      drawNowLine(nowUnix());
+    }
+  }
+}, 15000);
+setInterval(pollPreview, 4000);
+
+tickClock();
+load();
+pollPreview();
+</script>
+</body>
+</html>

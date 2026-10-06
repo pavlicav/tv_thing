@@ -3,326 +3,260 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Re-scan Channels - TV Thing</title>
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <title>Scan — TV Thing</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="app.css">
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { display: flex; flex-direction: column; min-height: 100%; }
 
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #0a0a0a;
-      color: #d4cfc7;
-      min-height: 100vh;
-      padding: 1.5rem;
-    }
-
-    .top-bar {
-      display: flex;
-      align-items: baseline;
-      gap: 1rem;
-      margin-bottom: 1.5rem;
-    }
-    .back {
-      color: #555;
-      text-decoration: none;
-      font-size: 0.8rem;
-      letter-spacing: 0.03em;
-    }
-    .back:hover { color: #b8a070; }
-    h1 {
-      font-family: Georgia, "Times New Roman", serif;
-      font-size: 1.1rem;
-      font-weight: 400;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      color: #b8a070;
-    }
-
-    /* ── controls ── */
     .controls {
       display: flex;
       align-items: center;
-      gap: 0.75rem;
-      margin-bottom: 1.25rem;
+      gap: 12px;
       flex-wrap: wrap;
+      margin-bottom: 18px;
     }
-    button {
-      padding: 0.4rem 1rem;
-      font-family: inherit;
-      font-size: 0.8rem;
-      font-weight: 500;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      border-radius: 3px;
-      border: 1px solid #333;
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-    #start-btn {
-      background: #2a2520;
-      color: #b8a070;
-      border-color: #4a3f30;
-    }
-    #start-btn:hover { background: #3a3025; border-color: #6a5a40; }
-    #start-btn:disabled { background: #151515; color: #444; border-color: #222; cursor: not-allowed; }
-    #cancel-btn {
-      background: #151515;
-      color: #777;
-    }
-    #cancel-btn:hover { background: #1f1f1f; color: #aaa; }
+    .controls .hint { font-size: 12.5px; color: var(--text-mute); }
 
-    #status-text {
-      font-size: 0.8rem;
-      color: #666;
-      letter-spacing: 0.02em;
-    }
-
-    /* ── progress bar ── */
-    .progress-wrap {
-      background: #111;
-      border: 1px solid #1e1e1e;
-      border-radius: 2px;
+    .progress-track {
       height: 3px;
-      margin-bottom: 1.5rem;
-      overflow: hidden;
-    }
-    #progress-bar {
-      background: linear-gradient(90deg, #5a4a2a, #b8a070);
-      height: 100%;
-      width: 0%;
-      transition: width 0.4s ease;
-    }
-
-    /* ── band sections ── */
-    .band {
-      margin-bottom: 1.5rem;
-    }
-    .band-header {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      margin-bottom: 0.6rem;
-    }
-    .band-label {
-      font-size: 0.65rem;
-      font-weight: 600;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: #555;
-    }
-    .band-range {
-      font-size: 0.65rem;
-      color: #3a3a3a;
-    }
-    .band-line {
-      flex: 1;
-      height: 1px;
-      background: #1a1a1a;
-    }
-
-    /* ── channel grid ── */
-    .ch-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-
-    .ch-cell {
-      width: 90px;
-      min-height: 72px;
-      border: 1px solid #222;
-      border-radius: 3px;
-      background: #111;
-      padding: 0.4rem 0.5rem;
-      transition: background 0.3s, border-color 0.3s;
-      position: relative;
-      overflow: hidden;
-    }
-
-    /* state: scanning */
-    .ch-cell.scanning {
-      background: #1a1600;
-      border-color: #4a3e10;
-      animation: pulse-scan 1s ease-in-out infinite;
-    }
-    @keyframes pulse-scan {
-      0%, 100% { border-color: #4a3e10; }
-      50%       { border-color: #8a7a30; }
-    }
-
-    /* state: locked (signal, channels found) */
-    .ch-cell.locked {
-      background: #0d1a0d;
-      border-color: #2a5a2a;
-    }
-
-    /* state: empty-lock (signal locked but no channels parsed) */
-    .ch-cell.empty-lock {
-      background: #141a0d;
-      border-color: #3a5020;
-    }
-
-    /* state: no-signal */
-    .ch-cell.no-signal {
-      background: #150d0d;
-      border-color: #3a1a1a;
-    }
-
-    .ch-num {
-      font-size: 1rem;
-      font-weight: 700;
-      line-height: 1;
-      margin-bottom: 0.15rem;
-      font-variant-numeric: tabular-nums;
-      color: #555;
-      transition: color 0.3s;
-    }
-    .ch-cell.scanning .ch-num  { color: #a89040; }
-    .ch-cell.locked .ch-num    { color: #5aaa5a; }
-    .ch-cell.empty-lock .ch-num { color: #7a9a50; }
-    .ch-cell.no-signal .ch-num { color: #6a2a2a; }
-
-    .ch-mhz {
-      font-size: 0.6rem;
-      color: #333;
-      letter-spacing: 0.04em;
-      margin-bottom: 0.35rem;
-    }
-    .ch-cell.scanning .ch-mhz  { color: #6a5a20; }
-    .ch-cell.locked .ch-mhz    { color: #2a5a2a; }
-    .ch-cell.no-signal .ch-mhz { color: #3a1a1a; }
-
-    .ch-channels {
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-    }
-    .ch-chan-name {
-      font-size: 0.62rem;
-      color: #4a8a4a;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      line-height: 1.35;
-    }
-
-    .ch-state-icon {
-      position: absolute;
-      top: 0.35rem;
-      right: 0.4rem;
-      font-size: 0.55rem;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-    }
-    .ch-cell.locked .ch-state-icon    { color: #3a7a3a; content: "OK"; }
-    .ch-cell.no-signal .ch-state-icon { color: #5a2222; }
-
-    /* ── done message ── */
-    #done-msg {
-      display: none;
-      margin-top: 1rem;
-      padding: 0.75rem 1rem;
-      border-radius: 3px;
-      font-size: 0.85rem;
-    }
-    #done-msg.success {
-      background: #0d1a0d;
-      border: 1px solid #2a5a2a;
-      color: #6aaa6a;
-    }
-    #done-msg.error {
-      background: #1a0d0d;
-      border: 1px solid #5a2a2a;
-      color: #aa6a6a;
-    }
-    #done-msg a { color: #b8a070; text-decoration: none; }
-    #done-msg a:hover { color: #d4c090; }
-
-    /* ── legend ── */
-    .legend {
-      display: flex;
-      gap: 1rem;
-      margin-bottom: 1.25rem;
-      flex-wrap: wrap;
-    }
-    .legend-item {
-      display: flex;
-      align-items: center;
-      gap: 0.35rem;
-      font-size: 0.7rem;
-      color: #555;
-    }
-    .legend-dot {
-      width: 10px;
-      height: 10px;
+      background: var(--surface-3);
       border-radius: 2px;
-      border: 1px solid;
+      overflow: hidden;
+      margin-bottom: 22px;
     }
-    .legend-dot.pending   { background: #111;    border-color: #222; }
-    .legend-dot.scanning  { background: #1a1600; border-color: #4a3e10; }
-    .legend-dot.locked    { background: #0d1a0d; border-color: #2a5a2a; }
-    .legend-dot.no-signal { background: #150d0d; border-color: #3a1a1a; }
+    .progress-fill {
+      height: 100%;
+      width: 0;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.4s var(--ease);
+    }
+
+    .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
+    .legend-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11.5px; color: var(--text-mute);
+    }
+    .swatch {
+      width: 10px; height: 10px; border-radius: 3px;
+      border: 1px solid var(--border-strong); background: var(--surface-2);
+    }
+    .swatch.scanning { background: rgba(251,191,36,0.18); border-color: var(--warn); }
+    .swatch.locked { background: rgba(74,222,128,0.15); border-color: var(--ok); }
+    .swatch.no-signal { background: var(--surface); border-color: #3a2222; }
+
+    /* ---- TV band grid ---- */
+    .band { margin-bottom: 26px; }
+    .band-header {
+      display: flex; align-items: center; gap: 12px; margin-bottom: 10px;
+    }
+    .band-name {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--text-dim);
+    }
+    .band-range { font-size: 11px; color: var(--text-mute); }
+    .band-rule { flex: 1; height: 1px; background: var(--border); }
+
+    .ch-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+      gap: 8px;
+    }
+    .cell {
+      position: relative;
+      padding: 9px 10px;
+      min-height: 62px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      transition: all 0.2s var(--ease);
+    }
+    .cell.scanning {
+      border-color: var(--warn);
+      background: rgba(251, 191, 36, 0.07);
+    }
+    .cell.empty-lock, .cell.locked {
+      border-color: rgba(74, 222, 128, 0.5);
+      background: rgba(74, 222, 128, 0.06);
+    }
+    .cell.no-signal { opacity: 0.45; }
+    .cell-rf {
+      font-size: 15px; font-weight: 650; color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+    .cell.no-signal .cell-rf { color: var(--text-mute); }
+    .cell-mhz { font-size: 10.5px; color: var(--text-mute); font-variant-numeric: tabular-nums; }
+    .cell-names { display: flex; flex-direction: column; gap: 1px; margin-top: 5px; }
+    .cell-names span {
+      font-size: 10.5px; color: var(--ok);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .cell-icon {
+      position: absolute; top: 8px; right: 9px;
+      font-size: 11px; color: var(--text-mute);
+    }
+
+    /* ---- FM spectrum ---- */
+    .spectrum {
+      display: flex;
+      align-items: flex-end;
+      gap: 1px;
+      height: 150px;
+      padding: 10px 10px 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      overflow-x: auto;
+    }
+    .sp-bar {
+      flex: 1 0 4px;
+      min-width: 4px;
+      height: 2%;
+      background: var(--surface-3);
+      border-radius: 1px 1px 0 0;
+      transition: height 0.25s var(--ease), background 0.25s var(--ease);
+    }
+    .sp-bar.hit { background: var(--accent); }
+    .sp-bar.active { background: var(--warn); }
+    .sp-axis {
+      display: flex; justify-content: space-between;
+      font-size: 10.5px; color: var(--text-mute);
+      margin-top: 6px; font-variant-numeric: tabular-nums;
+    }
+
+    .found-list { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 7px; }
+    .found-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px; font-size: 12px;
+      background: var(--surface-2); border: 1px solid var(--border-strong);
+      border-radius: var(--r-full); font-variant-numeric: tabular-nums;
+    }
+    .found-chip b { color: var(--accent); font-weight: 600; }
+
+    #result { margin-top: 22px; display: none; }
+    .tabs { margin-bottom: 22px; }
   </style>
 </head>
 <body>
 
-  <div class="top-bar">
-    <a href="/" class="back">&larr; Back</a>
-    <h1>Channel Scan</h1>
-  </div>
+  <header class="topbar">
+    <a class="brand" href="./"><span class="brand-mark"></span><span>TV Thing</span></a>
+    <nav class="nav" aria-label="Pages">
+      <a class="navlink" href="./">Watch</a>
+      <a class="navlink" href="guide.html">Guide</a>
+      <a class="navlink" href="vcr.html">VCR</a>
+      <a class="navlink" href="cable.html">Cable</a>
+      <a class="navlink" href="rescan.html" aria-current="page">Scan</a>
+      <a class="navlink" href="dx.html">DX</a>
+      <a class="navlink" href="about.html">About</a>
+    </nav>
+  </header>
 
-  <div class="controls">
-    <button id="start-btn">Start Scan</button>
-    <button id="cancel-btn" onclick="location.href='/'">Cancel</button>
-    <span id="status-text">Ready. Scanning takes a few minutes and stops any active stream.</span>
-  </div>
+  <div class="page">
+    <h1>Signal Scan</h1>
+    <p class="lede">Sweep the television band and rebuild the channel list.
+       Scanning takes over the digital tuner, so a digital stream stops —
+       an analog one keeps playing on the other front-end. Covers RF 2–36;
+       everything above was reallocated in the 2020 repack.
+       For a single channel, use the <a href="dx.html">DX meter</a>.</p>
 
-  <div class="progress-wrap">
-    <div id="progress-bar"></div>
-  </div>
-
-  <div class="legend">
-    <div class="legend-item"><div class="legend-dot pending"></div> Not scanned</div>
-    <div class="legend-item"><div class="legend-dot scanning"></div> Scanning</div>
-    <div class="legend-item"><div class="legend-dot locked"></div> Signal found</div>
-    <div class="legend-item"><div class="legend-dot no-signal"></div> No signal</div>
-  </div>
-
-  <!-- VHF Low -->
-  <div class="band">
-    <div class="band-header">
-      <span class="band-label">VHF Low</span>
-      <span class="band-range">ch 2–6 &nbsp;·&nbsp; 54–88 MHz</span>
-      <div class="band-line"></div>
+    <div class="segmented tabs" id="scan-tabs" role="tablist" hidden>
+      <button role="tab" id="tab-tv" aria-selected="true">Television</button>
+      <button role="tab" id="tab-fm" aria-selected="false">FM Radio</button>
     </div>
-    <div class="ch-grid" id="band-vhf-lo"></div>
-  </div>
 
-  <!-- VHF High -->
-  <div class="band">
-    <div class="band-header">
-      <span class="band-label">VHF High</span>
-      <span class="band-range">ch 7–13 &nbsp;·&nbsp; 174–216 MHz</span>
-      <div class="band-line"></div>
-    </div>
-    <div class="ch-grid" id="band-vhf-hi"></div>
-  </div>
+    <!-- ================= TV ================= -->
+    <section id="panel-tv">
+      <div class="controls">
+        <button class="btn btn-accent" id="tv-start">Start TV Scan</button>
+        <span class="hint" id="tv-status">Ready. A full ATSC sweep takes a few minutes.</span>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="tv-progress"></div></div>
 
-  <!-- UHF -->
-  <div class="band">
-    <div class="band-header">
-      <span class="band-label">UHF</span>
-      <span class="band-range">ch 14–36 &nbsp;·&nbsp; 470–608 MHz</span>
-      <div class="band-line"></div>
-    </div>
-    <div class="ch-grid" id="band-uhf"></div>
-  </div>
+      <div class="legend">
+        <div class="legend-item"><span class="swatch"></span> Not scanned</div>
+        <div class="legend-item"><span class="swatch scanning"></span> Scanning</div>
+        <div class="legend-item"><span class="swatch locked"></span> Signal found</div>
+        <div class="legend-item"><span class="swatch no-signal"></span> No signal</div>
+      </div>
 
-  <div id="done-msg"></div>
+      <div class="band">
+        <div class="band-header">
+          <span class="band-name">VHF Low</span>
+          <span class="band-range">ch 2–6 · 54–88 MHz</span>
+          <div class="band-rule"></div>
+        </div>
+        <div class="ch-grid" id="band-vhf-lo"></div>
+      </div>
+
+      <div class="band">
+        <div class="band-header">
+          <span class="band-name">VHF High</span>
+          <span class="band-range">ch 7–13 · 174–216 MHz</span>
+          <div class="band-rule"></div>
+        </div>
+        <div class="ch-grid" id="band-vhf-hi"></div>
+      </div>
+
+      <div class="band">
+        <div class="band-header">
+          <span class="band-name">UHF</span>
+          <span class="band-range">ch 14–36 · 470–608 MHz</span>
+          <div class="band-rule"></div>
+        </div>
+        <div class="ch-grid" id="band-uhf"></div>
+      </div>
+    </section>
+
+    <!-- ================= FM ================= -->
+    <section id="panel-fm" hidden>
+      <div class="controls">
+        <button class="btn btn-accent" id="fm-start">Start FM Scan</button>
+        <span class="hint" id="fm-status">Ready. The sweep steps through 101 channels.</span>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="fm-progress"></div></div>
+
+      <div class="spectrum" id="spectrum"></div>
+      <div class="sp-axis">
+        <span>87.9</span><span>93</span><span>98</span><span>103</span><span>107.9</span>
+      </div>
+
+      <div class="found-list" id="fm-found"></div>
+    </section>
+
+    <div id="result"></div>
+  </div>
 
   <script>
-    // ── ATSC channel → frequency table (center = lower edge + 3 MHz) ──────────
+  (() => {
+    "use strict";
+    const $ = (id) => document.getElementById(id);
+    const result = $("result");
+    const FM_UI_ENABLED = false; // backend is retained for compatible hardware
+
+    // ---------- tabs ----------
+    const tabTv = $("tab-tv"), tabFm = $("tab-fm");
+    const panelTv = $("panel-tv"), panelFm = $("panel-fm");
+    $("scan-tabs").hidden = !FM_UI_ENABLED;
+
+    function selectTab(tv) {
+      tabTv.setAttribute("aria-selected", String(tv));
+      tabFm.setAttribute("aria-selected", String(!tv));
+      panelTv.hidden = !tv;
+      panelFm.hidden = tv;
+      result.style.display = "none";
+    }
+    tabTv.addEventListener("click", () => selectTab(true));
+    tabFm.addEventListener("click", () => selectTab(false));
+
+    function showResult(ok, html) {
+      result.style.display = "block";
+      result.innerHTML = `<div class="notice${ok ? "" : " error"}">${html}</div>`;
+      if (ok) result.querySelector(".notice").style.borderLeftColor = "var(--ok)";
+    }
+
+    // ================= TV scan =================
     // Matches server.py ATSC_FREQUENCIES exactly.
     const ATSC = [];
     for (let ch = 2; ch <= 4; ch++) ATSC.push({ ch, hz: ((ch - 2) * 6 + 54) * 1e6 });
@@ -330,140 +264,195 @@
     for (let ch = 7; ch <= 13; ch++) ATSC.push({ ch, hz: ((ch - 7) * 6 + 174) * 1e6 });
     for (let ch = 14; ch <= 36; ch++) ATSC.push({ ch, hz: ((ch - 14) * 6 + 470) * 1e6 });
 
-    // band assignments
-    function bandFor(ch) {
-      if (ch <= 6)  return "band-vhf-lo";
-      if (ch <= 13) return "band-vhf-hi";
-      return "band-uhf";
+    const bandFor = (ch) => ch <= 6 ? "band-vhf-lo" : ch <= 13 ? "band-vhf-hi" : "band-uhf";
+    const cellByRF = {};
+
+    for (const { ch, hz } of ATSC) {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      cell.innerHTML =
+        `<div class="cell-rf">${ch}</div>` +
+        `<div class="cell-mhz">${(hz / 1e6).toFixed(0)} MHz</div>` +
+        `<div class="cell-names"></div><span class="cell-icon"></span>`;
+      $(bandFor(ch)).appendChild(cell);
+      cellByRF[ch] = cell;
     }
 
-    // Build cells
-    const cellByRF = {};  // rf_channel (int) → cell element
-
-    ATSC.forEach(({ ch, hz }) => {
-      const mhz = (hz / 1e6).toFixed(0);
-      const cell = document.createElement("div");
-      cell.className = "ch-cell";
-      cell.id = "cell-rf" + ch;
-      cell.innerHTML = `
-        <div class="ch-num">${ch}</div>
-        <div class="ch-mhz">${mhz} MHz</div>
-        <div class="ch-channels"></div>
-        <span class="ch-state-icon"></span>
-      `;
-      document.getElementById(bandFor(ch)).appendChild(cell);
-      cellByRF[ch] = cell;
-    });
-
-    // ── SSE scan logic ────────────────────────────────────────────────────────
-    const startBtn     = document.getElementById("start-btn");
-    const cancelBtn    = document.getElementById("cancel-btn");
-    const statusText   = document.getElementById("status-text");
-    const progressBar  = document.getElementById("progress-bar");
-    const doneMsg      = document.getElementById("done-msg");
-
-    let eventSource = null;
-
-    // channel events only have a raw center frequency — match with ±4 MHz tolerance
-    function cellForFreq(freqHz) {
-      for (const { ch, hz } of ATSC) {
-        if (Math.abs(hz - freqHz) < 4_000_000) return cellByRF[ch];
-      }
+    function cellForFreq(hz) {
+      for (const a of ATSC) if (Math.abs(a.hz - hz) < 4e6) return cellByRF[a.ch];
       return null;
     }
 
-    function resetCells() {
-      document.querySelectorAll(".ch-cell").forEach(c => {
-        c.className = "ch-cell";
-        c.querySelector(".ch-channels").innerHTML = "";
-        c.querySelector(".ch-state-icon").textContent = "";
+    const tvStart = $("tv-start"), tvStatus = $("tv-status"), tvProgress = $("tv-progress");
+    let tvSource = null;
+
+    tvStart.addEventListener("click", () => {
+      tvStart.disabled = true;
+      result.style.display = "none";
+      document.querySelectorAll("#panel-tv .cell").forEach(c => {
+        c.className = "cell";
+        c.querySelector(".cell-names").innerHTML = "";
+        c.querySelector(".cell-icon").textContent = "";
       });
-      progressBar.style.width = "0%";
-      doneMsg.style.display = "none";
-      doneMsg.className = "";
-    }
+      tvProgress.style.width = "0%";
+      tvStatus.textContent = "Stopping active streams…";
 
-    startBtn.addEventListener("click", () => {
-      startBtn.disabled = true;
-      cancelBtn.textContent = "Back";
-      resetCells();
-      statusText.textContent = "Stopping active streams...";
+      tvSource = new EventSource("api/rescan/stream");
 
-      eventSource = new EventSource("/api/rescan/stream");
-
-      eventSource.addEventListener("status", e => {
-        statusText.textContent = e.data;
+      tvSource.addEventListener("status", e => { tvStatus.textContent = e.data; });
+      tvSource.addEventListener("progress", e => {
+        tvProgress.style.width = parseFloat(e.data) + "%";
       });
-
-      eventSource.addEventListener("progress", e => {
-        progressBar.style.width = parseFloat(e.data) + "%";
-      });
-
-      eventSource.addEventListener("frequency", e => {
+      tvSource.addEventListener("frequency", e => {
         const d = JSON.parse(e.data);
         const cell = cellByRF[d.rf_channel];
         if (cell) {
           cell.classList.add("scanning");
-          cell.querySelector(".ch-state-icon").textContent = "…";
+          cell.querySelector(".cell-icon").textContent = "…";
           cell.scrollIntoView({ behavior: "smooth", block: "nearest" });
         }
       });
-
-      eventSource.addEventListener("lock", e => {
+      tvSource.addEventListener("lock", e => {
         const d = JSON.parse(e.data);
         const cell = cellByRF[d.rf_channel];
         if (!cell) return;
         cell.classList.remove("scanning");
-        if (d.locked) {
-          // will be upgraded to "locked" when channels arrive; set empty-lock for now
-          cell.classList.add("empty-lock");
-          cell.querySelector(".ch-state-icon").textContent = "";
-        } else {
-          cell.classList.add("no-signal");
-          cell.querySelector(".ch-state-icon").textContent = "–";
-        }
+        cell.classList.add(d.locked ? "empty-lock" : "no-signal");
+        cell.querySelector(".cell-icon").textContent = d.locked ? "" : "–";
       });
-
-      eventSource.addEventListener("channel", e => {
+      tvSource.addEventListener("channel", e => {
         const d = JSON.parse(e.data);
         const cell = cellForFreq(d.frequency);
         if (!cell) return;
-        // upgrade to full locked state
         cell.classList.remove("empty-lock");
         cell.classList.add("locked");
-        cell.querySelector(".ch-state-icon").textContent = "";
-        const list = cell.querySelector(".ch-channels");
+        cell.querySelector(".cell-icon").textContent = "";
         const span = document.createElement("span");
-        span.className = "ch-chan-name";
         span.textContent = d.name;
-        list.appendChild(span);
+        cell.querySelector(".cell-names").appendChild(span);
       });
-
-      eventSource.addEventListener("done", e => {
+      tvSource.addEventListener("identify", e => {
         const d = JSON.parse(e.data);
-        eventSource.close();
-        eventSource = null;
-        progressBar.style.width = "100%";
-        startBtn.disabled = false;
+        const cell = cellByRF[d.rf_channel] || cellForFreq(d.frequency);
+        if (!cell) return;
 
-        doneMsg.style.display = "block";
+        cell.classList.remove("scanning", "empty-lock", "no-signal");
+        cell.classList.add("locked");
+        cell.querySelector(".cell-icon").textContent = "";
+
+        const names = cell.querySelector(".cell-names");
+        names.innerHTML = "";
+        for (const channel of d.channels || []) {
+          const span = document.createElement("span");
+          const number = channel.major && channel.minor
+            ? `${channel.major}.${channel.minor} ` : "";
+          span.textContent = number + (channel.name || "Unknown service");
+          names.appendChild(span);
+        }
+
+        const summary = (d.channels || []).map(channel => {
+          const number = channel.major && channel.minor
+            ? `${channel.major}.${channel.minor} ` : "";
+          return number + (channel.name || "Unknown service");
+        }).join(", ");
+        tvStatus.textContent = summary
+          ? `RF ${d.rf_channel}: ${summary}`
+          : `RF ${d.rf_channel}: signal found, no station data`;
+      });
+      tvSource.addEventListener("done", e => {
+        const d = JSON.parse(e.data);
+        tvSource.close(); tvSource = null;
+        tvProgress.style.width = "100%";
+        tvStart.disabled = false;
         if (d.ok) {
-          doneMsg.className = "success";
-          doneMsg.innerHTML = `Found ${d.count} channels. <a href="/">Return to TV Thing &rarr;</a>`;
-          statusText.textContent = "Scan complete.";
+          tvStatus.textContent = "Scan complete.";
+          showResult(true, `Found <strong>${d.count}</strong> channels. <a href="./">Back to TV Thing &rarr;</a>`);
         } else {
-          doneMsg.className = "error";
-          doneMsg.textContent = "Scan failed: " + d.error;
-          statusText.textContent = "Scan failed.";
+          tvStatus.textContent = "Scan failed.";
+          showResult(false, `<strong>Scan failed.</strong> ${d.error}`);
         }
       });
-
-      eventSource.onerror = () => {
-        if (eventSource) { eventSource.close(); eventSource = null; }
-        statusText.textContent = "Connection lost.";
-        startBtn.disabled = false;
+      tvSource.onerror = () => {
+        if (tvSource) { tvSource.close(); tvSource = null; }
+        tvStatus.textContent = "Connection lost.";
+        tvStart.disabled = false;
       };
     });
+
+    // ================= FM scan =================
+    const FM_MIN = 87.9, FM_MAX = 107.9, FM_STEP = 0.2;
+    const fmChannels = [];
+    for (let f = FM_MIN; f <= FM_MAX + 0.001; f += FM_STEP) {
+      fmChannels.push(Math.round(f * 10) / 10);
+    }
+
+    const spectrum = $("spectrum");
+    const barByFreq = {};
+    for (const f of fmChannels) {
+      const bar = document.createElement("div");
+      bar.className = "sp-bar";
+      bar.title = f.toFixed(1) + " MHz";
+      spectrum.appendChild(bar);
+      barByFreq[f.toFixed(1)] = bar;
+    }
+
+    const fmStart = $("fm-start"), fmStatus = $("fm-status");
+    const fmProgress = $("fm-progress"), fmFound = $("fm-found");
+    let fmSource = null;
+
+    fmStart.addEventListener("click", () => {
+      fmStart.disabled = true;
+      result.style.display = "none";
+      fmFound.innerHTML = "";
+      fmProgress.style.width = "0%";
+      Object.values(barByFreq).forEach(b => {
+        b.className = "sp-bar";
+        b.style.height = "2%";
+      });
+      fmStatus.textContent = "Starting FM sweep…";
+
+      fmSource = new EventSource("api/fm/scan/stream");
+
+      fmSource.addEventListener("status", e => { fmStatus.textContent = e.data; });
+      fmSource.addEventListener("progress", e => {
+        fmProgress.style.width = parseFloat(e.data) + "%";
+      });
+      fmSource.addEventListener("channel", e => {
+        const d = JSON.parse(e.data);
+        const key = Number(d.frequency).toFixed(1);
+        const bar = barByFreq[key];
+        if (!bar) return;
+        bar.style.height = Math.max(2, d.strength) + "%";
+        bar.className = "sp-bar" + (d.strength >= 25 ? " hit" : "");
+        fmStatus.textContent = `Testing ${key} MHz…`;
+        if (d.strength >= 25) {
+          const chip = document.createElement("span");
+          chip.className = "found-chip";
+          chip.innerHTML = `<b>${key}</b> ${d.strength}%` +
+                           (d.stereo ? " · stereo" : "");
+          fmFound.appendChild(chip);
+        }
+      });
+      fmSource.addEventListener("done", e => {
+        const d = JSON.parse(e.data);
+        fmSource.close(); fmSource = null;
+        fmProgress.style.width = "100%";
+        fmStart.disabled = false;
+        if (d.ok) {
+          fmStatus.textContent = "Sweep complete.";
+          showResult(true, `Found <strong>${d.count}</strong> FM stations. <a href="./">Back to TV Thing &rarr;</a>`);
+        } else {
+          fmStatus.textContent = "Sweep finished with problems.";
+          showResult(false, `<strong>FM scan could not complete.</strong><br>${d.error}`);
+        }
+      });
+      fmSource.onerror = () => {
+        if (fmSource) { fmSource.close(); fmSource = null; }
+        fmStatus.textContent = "Connection lost.";
+        fmStart.disabled = false;
+      };
+    });
+  })();
   </script>
 </body>
 </html>

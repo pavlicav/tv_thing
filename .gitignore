@@ -3,4 +3,7 @@ __pycache__/
 streams/
 w_scan_output.txt
 vct_data.json
+epg.json
 .claude/
+.deploy-backups/
+*.orig

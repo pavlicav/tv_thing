@@ -214,11 +214,14 @@ def _get_frequencies():
     return sorted(freqs)
 
 
-def main(progress_cb=None):
+def main(progress_cb=None, channel_cb=None):
     """Fetch VCT for all scanned frequencies and write vct_data.json.
 
     progress_cb: optional callable(str) for status messages (used by the
                  rescan SSE handler to send live updates to the browser).
+    channel_cb: optional callable(freq_hz, channels), invoked immediately
+                after each frequency is tuned and identified. ``channels``
+                is the parsed VCT list and may be empty.
     After writing vct_data.json, calls parse_channels.main() to rebuild
     channels.json with real PSIP virtual channel numbers.
     """
@@ -241,6 +244,8 @@ def main(progress_cb=None):
         print(f"  {mhz} MHz...", end='', flush=True)
 
         channels = fetch_vct_for_freq(freq)
+        if channel_cb:
+            channel_cb(freq, channels)
 
         if channels:
             vct_data[str(freq)] = {

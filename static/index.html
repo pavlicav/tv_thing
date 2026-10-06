@@ -4,427 +4,1777 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TV Thing</title>
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="app.css">
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    .app {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) var(--panel-w);
+      grid-template-rows: var(--header-h) 1fr;
+      grid-template-areas: "top top" "stage panel";
+      height: 100vh;
+    }
+    .topbar { grid-area: top; }
 
-    :root { --bar-h: 2.2rem; }
-
-    body {
-      font-family: Georgia, "Times New Roman", serif;
-      background: #0a0a0a;
-      color: #d4cfc7;
+    /* Lowkey set-top box: the stage and channel list borrow the guide's navy
+       glass and gold highlight. Scoped here, not :root, so the shared top
+       bar looks the same on every page. */
+    .stage, .panel {
+      --stb-font: Tiresias, "Tiresias Screenfont", Verdana, Tahoma, "DejaVu Sans", sans-serif;
+      --bg: #040a1c;
+      --surface: #081231;
+      --surface-2: #0d1a42;
+      --surface-3: #142656;
+      --border: #16244d;
+      --border-strong: #22386e;
+      --text-dim: #b3c2e8;
+      --text-mute: #7185b8;
+      --accent: #ffd23f;
+      --accent-soft: rgba(255, 210, 63, 0.11);
+      --accent-line: rgba(255, 210, 63, 0.42);
+      --banner-min: 124px;
+    }
+    .stage {
+      grid-area: stage;
       display: flex;
       flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      background: #000;
     }
-
-    /* =============================================
-       TALL MODE (default) — portrait / square
-       Video at 16:9 top, channel list scrolls below
-       ============================================= */
-    .player-col {
+    .panel {
+      grid-area: panel;
       display: flex;
       flex-direction: column;
-      width: 100%;
+      min-height: 0;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
     }
-    .screen {
+
+    /* ---- Viewport ---- */
+    /* The picture takes exactly 16:9 of the width, up to what leaves room for
+       the info banner; the banner gets every pixel that used to be black
+       letterbox above and below the video. */
+    .viewport {
+      position: relative;
+      flex: 0 1 auto;
       width: 100%;
       aspect-ratio: 16 / 9;
-      background: #000;
-      position: relative;
-      overflow: hidden;
-      flex-shrink: 0;
-    }
-    video {
-      width: 100%; height: 100%;
-      display: block;
-      object-fit: contain;
-    }
-    .no-signal {
-      position: absolute;
-      inset: 0;
+      max-height: calc(100% - var(--banner-min));
+      min-height: 0;
       display: flex;
       align-items: center;
       justify-content: center;
+      background: #000;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: contain;
+      background: #000;
+    }
+    .live-controls { position: absolute; bottom: 0; left: 0; right: 0; z-index: 3;
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+      padding: 30px 14px 12px;
+      background: linear-gradient(180deg, transparent, rgba(2, 6, 22, .9));
+      color: #fff; font: 700 12px/1 var(--stb-font);
+      text-shadow: 1px 1px 0 #000;
+      transition: opacity .3s var(--ease); }
+    .viewport.idle .live-controls:not(:focus-within) { opacity: 0; pointer-events: none; }
+    .viewport.idle { cursor: none; }
+    .live-controls button {
+      padding: 6px 13px; cursor: pointer;
+      font: inherit; color: #fff; text-shadow: 0 1px 0 rgba(0,0,0,.6);
+      background: linear-gradient(180deg, #4a6fc4 0%, #2a4d9e 50%, #1f3c80 51%, #2a4d9e 100%);
+      border: 1px solid #0b1a44; border-radius: 12px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 1px 2px rgba(0,0,0,.5);
+    }
+    .live-controls button:hover:not(:disabled) { filter: brightness(1.15); }
+    .live-controls button:disabled { opacity: .45; cursor: default; }
+    .live-controls label { display: flex; align-items: center; gap: 6px; color: #b3c2e8; }
+    .live-controls input { width: 90px; accent-color: #ffd23f; }
+    .live-controls :focus-visible { outline: 2px solid #ffd23f; outline-offset: 3px; }
+    #live-message { flex: 1; color: #ffd23f; letter-spacing: .06em; }
+    .hidden { display: none !important; }
+
+    .placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
       flex-direction: column;
-      gap: 0.5rem;
-      color: #333;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 0.9rem;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      background: repeating-linear-gradient(
-        0deg, transparent, transparent 2px,
-        rgba(255,255,255,0.01) 2px, rgba(255,255,255,0.01) 4px
-      );
-    }
-
-    /* Control bar */
-    .control-bar {
-      display: flex;
       align-items: center;
-      gap: 0.6rem;
-      padding: 0 0.75rem;
-      height: var(--bar-h);
-      background: #0f0f0f;
-      border-top: 1px solid #1a1a1a;
-      flex-shrink: 0;
+      justify-content: center;
+      gap: 12px;
+      color: var(--text-mute);
+      background:
+        repeating-linear-gradient(0deg, transparent, transparent 2px,
+          rgba(255,255,255,0.012) 2px, rgba(255,255,255,0.012) 4px),
+        radial-gradient(ellipse at center, #131519 0%, #000 75%);
     }
-    .brand {
-      font-family: Georgia, "Times New Roman", serif;
-      font-size: 0.65rem;
-      letter-spacing: 0.18em;
+    .placeholder-title {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.16em;
       text-transform: uppercase;
-      color: #3a3530;
     }
-    .bar-sep { width: 1px; height: 12px; background: #222; }
-    .quality-pills {
+    .placeholder-sub { font-size: 12px; color: #4a5058; }
+
+    /* ---- Radio now-playing ---- */
+    .radio-stage {
+      position: absolute;
+      inset: 0;
       display: flex;
-      border: 1px solid #333;
-      border-radius: 999px;
-      overflow: hidden;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      padding: 24px;
+      background: radial-gradient(ellipse at 50% 40%, #16191f 0%, #08090b 70%);
     }
-    .quality-pill {
-      padding: 0.2rem 0.6rem;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 0.7rem;
-      font-weight: 500;
-      letter-spacing: 0.03em;
-      background: #1a1a1a;
-      color: #777;
-      border: none;
-      cursor: pointer;
-      transition: all 0.15s;
-      border-right: 1px solid #333;
-    }
-    .quality-pill:last-child { border-right: none; }
-    .quality-pill:hover { background: #222; color: #aaa; }
-    .quality-pill.active { background: #2a2520; color: #b8a070; }
-    #status {
-      color: #555;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 0.7rem;
-      letter-spacing: 0.03em;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .bar-spacer { flex: 1; }
-    .bar-link {
-      color: #383838;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 0.6rem;
-      text-decoration: none;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      transition: color 0.15s;
-    }
-    .bar-link:hover { color: #8a7a5a; }
-    #stop-btn {
-      padding: 0.2rem 0.7rem;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 0.7rem;
-      font-weight: 500;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      background: #1a1a1a;
-      color: #888;
-      border: 1px solid #333;
-      border-radius: 999px;
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-    #stop-btn:hover { background: #252525; color: #aaa; }
-
-    /* Channel toggle button — hidden in tall mode */
-    #ch-toggle { display: none; }
-
-    /* Channel list — tall mode: normal flow, scrollable */
-    .channel-list {
-      overflow-y: auto;
-      background: #0f0f0f;
-      border-top: 1px solid #222;
-      scrollbar-width: thin;
-      scrollbar-color: #333 transparent;
-    }
-    .channel-list::-webkit-scrollbar { width: 4px; }
-    .channel-list::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
-
-    .ch-btn {
+    .freq-readout {
       display: flex;
       align-items: baseline;
-      gap: 0.5rem;
-      padding: 0.5rem 0.7rem;
-      width: 100%;
-      background: none;
-      border: none;
-      border-bottom: 1px solid #1a1a1a;
-      color: #888;
-      cursor: pointer;
-      transition: all 0.12s;
-      text-align: left;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 0.8rem;
-      line-height: 1.3;
+      gap: 10px;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
     }
-    .ch-btn:last-child { border-bottom: none; }
-    .ch-btn:hover { background: #1a1816; color: #ccc; }
-    .ch-btn.active { background: #2a2520; color: #b8a070; }
-    .ch-num {
+    .freq-value {
+      font-size: clamp(48px, 11vw, 88px);
+      font-weight: 300;
+      letter-spacing: -0.02em;
+      color: var(--accent);
+      text-shadow: 0 0 40px rgba(224, 169, 74, 0.28);
+    }
+    .freq-unit {
+      font-size: 15px;
       font-weight: 600;
-      font-size: 0.75rem;
-      min-width: 2.5em;
-      opacity: 0.7;
+      letter-spacing: 0.14em;
+      color: var(--text-mute);
+      text-transform: uppercase;
+    }
+    .radio-name {
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-align: center;
+    }
+    .radio-format { font-size: 12.5px; color: var(--text-mute); }
+    .radio-meta {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .radio-audio {
+      width: min(420px, 100%);
+      height: 34px;
+    }
+    .tuner-strip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* ---- Info banner: the strip a cable box shows on a channel change ---- */
+    .banner {
+      flex: 1 0 var(--banner-min);
+      min-height: var(--banner-min);
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 18px;
+      padding: 14px 18px;
+      font-family: var(--stb-font);
+      color: #fff;
+      background:
+        radial-gradient(120% 140% at 50% 0%, #13306f 0%, transparent 70%),
+        linear-gradient(180deg, #0a1d4a, #040a1c);
+      border-top: 2px solid #030a1f;
+      box-shadow: inset 0 1px 0 rgba(138, 164, 220, .35);
+      overflow: hidden;
+    }
+    .now-playing {
+      display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+      min-width: 92px; max-width: 200px;
+    }
+    .bn-num {
+      font: 700 30px/1 var(--stb-font); letter-spacing: -.01em;
+      text-shadow: 2px 2px 0 #000;
       font-variant-numeric: tabular-nums;
     }
-    .ch-btn.active .ch-num { opacity: 1; }
-    .ch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-    .ch-rf { font-size: 0.65rem; color: #555; white-space: nowrap; margin-left: auto; padding-left: 0.4rem; }
+    .now-playing .np-title {
+      font: 700 13px/1.2 var(--stb-font); color: #ffd23f;
+      max-width: 100%;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .now-playing .np-sub {
+      font: 700 11px/1.3 var(--stb-font); color: var(--text-mute);
+      max-width: 100%;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
 
-    /* =============================================
-       WIDE MODE — landscape, close to 16:9
-       Video fills window, channel list is a
-       slide-up panel triggered by a button
-       ============================================= */
-    @media (min-aspect-ratio: 4/3) {
-      html, body { height: 100%; overflow: hidden; }
+    .bn-body {
+      min-width: 0; display: flex; flex-direction: column; gap: 6px;
+      padding-left: 18px; border-left: 1px solid rgba(138, 164, 220, .25);
+    }
+    .bn-row { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+    .bn-k {
+      flex-shrink: 0; width: 3.4em;
+      font: 700 10.5px/1 var(--stb-font); letter-spacing: .1em; color: var(--text-mute);
+    }
+    .bn-title {
+      min-width: 0; font: 700 17px/1.25 var(--stb-font);
+      text-shadow: 1px 1px 0 #000;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .bn-row.next .bn-title { font-size: 13.5px; color: var(--text-dim); text-shadow: none; }
+    .bn-time {
+      flex-shrink: 0; font: 700 12px/1 var(--stb-font); color: var(--text-dim);
+      font-variant-numeric: tabular-nums;
+    }
+    .bn-cc {
+      flex-shrink: 0; font: 700 9.5px/1 var(--stb-font); padding: 2px 4px 1px;
+      border: 1px solid rgba(255,255,255,.55); border-radius: 2px; color: #fff;
+    }
+    .bn-progress {
+      height: 5px; margin: 1px 0 3px calc(3.4em * 10.5 / 17 + 10px);
+      max-width: 420px;
+      background: #030a1f; border: 1px solid rgba(138, 164, 220, .35);
+    }
+    .bn-progress i {
+      display: block; height: 100%;
+      background: linear-gradient(180deg, #fff1a8, #ffd23f 50%, #e5a312);
+    }
+    .bn-desc {
+      font: 12.5px/1.45 var(--stb-font); color: var(--text-dim);
+      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+      max-width: 90ch;
+    }
+    .bn-none { font: 700 13px/1.4 var(--stb-font); color: var(--text-mute); }
 
-      .player-col { flex: 1; min-height: 0; position: relative; }
-
-      .screen { aspect-ratio: unset; width: 100%; height: 100%; }
-
-      /* control bar fixed to bottom */
-      .control-bar {
-        position: fixed;
-        bottom: 0; left: 0; right: 0;
-        z-index: 20;
-        border-top: 1px solid #1a1a1a;
+    /* LATER: the next few airings as a short vertical list of guide cells.
+       Beside NOW when the banner is wide, under it when it is not. */
+    .bn-body { container-type: inline-size; }
+    .bn-split { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .bn-now { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+    .bn-later { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+    .bn-list {
+      list-style: none; display: flex; flex-direction: column; gap: 2px;
+      background: #030a1f; border: 2px solid #030a1f;
+    }
+    .bn-list li {
+      display: grid; grid-template-columns: 5.4em minmax(0, 1fr); gap: 8px;
+      align-items: baseline; padding: 3px 8px;
+      background: linear-gradient(180deg, #2c56b0 0%, #1d3f8c 45%, #16326f 100%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.16);
+    }
+    .bn-list b {
+      font: 700 11px/1.3 var(--stb-font); color: var(--text-dim);
+      white-space: nowrap; font-variant-numeric: tabular-nums;
+    }
+    .bn-list span {
+      font: 700 12.5px/1.3 var(--stb-font); color: #fff;
+      text-shadow: 1px 1px 0 rgba(0,0,0,.55);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    /* Stacked, the banner only has room for two rows under NOW. */
+    .bn-list li:nth-child(n+3) { display: none; }
+    @container (min-width: 560px) {
+      .bn-split {
+        display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+        gap: 0 22px; align-items: start;
       }
+      .bn-list li:nth-child(n+3) { display: grid; }
+      .bn-list li:nth-child(n+5) { display: none; }
+    }
 
-      /* push video up so it doesn't hide under the bar */
-      .screen { padding-bottom: var(--bar-h); }
+    .bn-side {
+      display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+    }
+    .bn-clock {
+      font: 700 22px/1 var(--stb-font); text-shadow: 2px 2px 0 #000;
+      font-variant-numeric: tabular-nums; white-space: nowrap;
+    }
+    .bn-clock small { font-size: 11px; margin-left: 2px; color: var(--text-dim); }
+    .banner .segmented { background: #030a1f; border-color: #22386e; }
+    .banner .segmented button { font-family: var(--stb-font); }
 
-      /* channel toggle visible */
-      #ch-toggle {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.3rem;
-        padding: 0.2rem 0.7rem;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        font-size: 0.7rem;
-        font-weight: 500;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-        background: #1a1a1a;
-        color: #888;
-        border: 1px solid #333;
-        border-radius: 999px;
-        cursor: pointer;
-        transition: all 0.15s;
-      }
-      #ch-toggle:hover { background: #252525; color: #aaa; }
-      #ch-toggle.open { background: #2a2520; color: #b8a070; border-color: #4a3f30; }
+    /* ---- Panel ---- */
+    .panel-head {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .panel-head-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .panel-list { flex: 1; min-height: 0; }
+    .panel-foot {
+      padding: 10px 14px;
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--text-mute);
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .empty {
+      padding: 28px 18px;
+      text-align: center;
+      color: var(--text-mute);
+      font-size: 12.5px;
+    }
+    .panel-notice { padding: 12px 14px; }
 
-      /* channel list: slide-up panel fixed above the control bar */
-      .channel-list {
-        position: fixed;
-        left: 0; right: 0;
-        bottom: var(--bar-h);
-        max-height: 45%;
-        overflow-y: auto;
-        background: rgba(12, 12, 12, 0.97);
-        border-top: 1px solid #333;
-        z-index: 15;
-        transform: translateY(100%);
-        transition: transform 0.25s ease;
+    /* Channel list, cable-box style: bold numbers, what is on now, and a
+       thin bar for how far into it we are. */
+    .panel .item-key { font-family: var(--stb-font); font-weight: 700; color: var(--text-dim); }
+    .panel .item-name, .panel .item-sub { display: block; }
+    .panel .item-name { font-family: var(--stb-font); font-weight: 700; font-size: 12.5px; }
+    .panel .item-sub { font-family: var(--stb-font); font-size: 11.5px; color: var(--text-mute); }
+    .panel .list-item { padding: 8px 14px; align-items: center; min-height: 54px; }
+    .panel .list-item[aria-current="true"] .item-sub { color: var(--text-dim); }
+    .panel .item-tag { font-family: var(--stb-font); font-size: 10px; opacity: .8; }
+    .item-bar { display: block; height: 2px; margin-top: 5px; background: var(--border); max-width: 180px; }
+    .item-bar i { display: block; height: 100%; background: var(--accent); opacity: .75; }
+    .panel-head .section-label, .panel-foot { font-family: var(--stb-font); }
+    .source-tabs {
+      max-width: min(46vw, 520px);
+      overflow-x: auto;
+      scrollbar-width: none;
+      flex-shrink: 1;
+    }
+    .source-tabs::-webkit-scrollbar { display: none; }
+
+    /* ---- Narrow layout ---- */
+    @media (max-width: 900px) {
+      html, body { height: auto; }
+      .app {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: var(--header-h) auto auto;
+        grid-template-areas: "top" "stage" "panel";
+        height: auto;
+        min-height: 100vh;
       }
-      .channel-list.open {
-        transform: translateY(0);
-      }
+      .viewport { aspect-ratio: 16 / 9; flex: none; max-height: none; }
+      .banner { flex: none; grid-template-columns: auto minmax(0, 1fr); }
+      .bn-side { grid-column: 1 / -1; flex-direction: row; align-items: center; justify-content: space-between; }
+      .banner { gap: 12px 14px; padding: 12px 14px; }
+      .bn-body { padding-left: 14px; }
+    }
+    @media (max-width: 620px) {
+      .banner { grid-template-columns: minmax(0, 1fr); }
+      .now-playing { flex-direction: row; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; max-width: none; }
+      .bn-body { padding-left: 0; border-left: 0; }
+      .bn-progress { margin-left: 0; }
+      .bn-row .bn-k { width: auto; }
+      .topbar .status-pill { display: none; }   /* the banner names the channel */
+      .panel { border-left: none; border-top: 1px solid var(--border); }
+      .panel-list { max-height: none; }
+      .topbar { position: sticky; top: 0; z-index: 30; }
+    }
+
+    /* ---------- Tuner lock ---------- */
+
+    .lock-pill {
+      display: flex; align-items: center; gap: 7px;
+      padding: 4px 10px; border-radius: var(--r-full);
+      background: rgba(251, 191, 36, .12);
+      border: 1px solid rgba(251, 191, 36, .35);
+      color: var(--warn); font-size: 12px; font-weight: 550;
+      cursor: pointer; white-space: nowrap;
+    }
+    .lock-pill[hidden] { display: none; }
+    .lock-pill:hover { background: rgba(251, 191, 36, .2); }
+
+    .modal-backdrop {
+      position: fixed; inset: 0; z-index: 50;
+      background: rgba(6, 7, 9, .72);
+      display: flex; align-items: center; justify-content: center;
+      padding: 20px;
+    }
+    .modal-backdrop[hidden] { display: none; }
+    .modal {
+      width: min(460px, 100%);
+      background: var(--surface); border: 1px solid var(--border-strong);
+      border-radius: var(--r-lg); padding: 22px;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, .55);
+    }
+    .modal h2 {
+      font-size: 15.5px; font-weight: 650; margin-bottom: 10px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .modal h2::before { content: "\26A0"; color: var(--warn); }
+    .modal p { font-size: 13px; color: var(--text-dim); margin-bottom: 10px; }
+    .modal .ovr-note {
+      color: var(--text-mute); font-size: 12.5px;
+      border-left: 2px solid var(--warn); padding-left: 10px;
+    }
+    .modal-actions {
+      display: flex; gap: 9px; justify-content: flex-end; margin-top: 18px;
+    }
+    .btn-danger {
+      background: rgba(248, 113, 113, .14);
+      border-color: rgba(248, 113, 113, .45); color: var(--err);
+    }
+    .btn-danger:hover:not(:disabled) {
+      background: rgba(248, 113, 113, .24);
+      border-color: rgba(248, 113, 113, .7);
     }
   </style>
 </head>
 <body>
-  <div class="player-col">
-    <div class="screen">
-      <video id="player" controls></video>
-      <div class="no-signal" id="no-signal">No Signal</div>
-    </div>
-    <div class="control-bar">
-      <span class="brand">tv thing</span>
-      <div class="bar-sep"></div>
-      <div class="quality-pills">
-        <button class="quality-pill" data-quality="low">480p</button>
-        <button class="quality-pill active" data-quality="medium">720p</button>
-        <button class="quality-pill" data-quality="high">1080p</button>
+  <div class="app">
+
+    <header class="topbar">
+      <a class="brand" href="./"><span class="brand-mark"></span><span>TV Thing</span></a>
+      <nav class="nav" aria-label="Pages">
+        <a class="navlink" href="./" aria-current="page">Watch</a>
+        <a class="navlink" href="guide.html">Guide</a>
+        <a class="navlink" href="vcr.html">VCR</a>
+        <a class="navlink" href="cable.html">Cable</a>
+        <a class="navlink" href="rescan.html">Scan</a>
+        <a class="navlink" href="dx.html">DX</a>
+        <a class="navlink" href="about.html">About</a>
+      </nav>
+      <div class="topbar-tools">
+        <div class="segmented source-tabs" id="source-tabs" role="tablist" aria-label="Source">
+          <button role="tab" id="tab-tv" aria-selected="true">Digital</button>
+          <button role="tab" id="tab-cable" aria-selected="false">Cable</button>
+          <button role="tab" id="tab-radio" aria-selected="false" hidden>FM Radio</button>
+        </div>
+
+        <div class="status-pill">
+          <span class="dot" id="status-dot"></span>
+          <span id="status-text">Loading…</span>
+        </div>
+
+        <button class="lock-pill" id="lock-pill" hidden></button>
       </div>
-      <span id="status">Loading channels...</span>
-      <div class="bar-spacer"></div>
-      <button id="ch-toggle">&#9776; Channels</button>
-      <a class="bar-link" href="/rescan.html">Re-scan</a>
-      <a class="bar-link" href="/about.html">About</a>
-      <button id="stop-btn">Stop</button>
-    </div>
-    <div class="channel-list" id="channel-list"></div>
+    </header>
+
+    <main class="stage">
+      <div class="viewport">
+        <video id="player" playsinline aria-label="Live television"></video>
+        <div class="live-controls" id="live-controls" role="group" aria-label="Live television controls">
+          <button id="live-play" type="button" disabled aria-label="Play live television">Play</button>
+          <button id="live-mute" type="button" aria-label="Mute" aria-pressed="false">Mute</button>
+          <label>Volume <input id="live-volume" type="range" min="0" max="1" step="0.05" value="1"></label>
+          <button id="live-edge" type="button" disabled>Go live</button>
+          <span id="live-message" role="status" aria-live="polite">Waiting for channel</span>
+          <button id="live-fullscreen" type="button">Fullscreen</button>
+        </div>
+
+        <div class="placeholder" id="placeholder">
+          <div class="placeholder-title" id="placeholder-title">No Signal</div>
+          <div class="placeholder-sub" id="placeholder-sub">Choose a channel to begin</div>
+        </div>
+
+        <div class="radio-stage hidden" id="radio-stage">
+          <div class="freq-readout">
+            <span class="freq-value num" id="radio-freq">88.5</span>
+            <span class="freq-unit">MHz</span>
+          </div>
+          <div>
+            <div class="radio-name" id="radio-name">—</div>
+            <div class="radio-format" id="radio-format" style="text-align:center"></div>
+          </div>
+          <div class="radio-meta">
+            <div class="tuner-strip">
+              <span class="section-label">Signal</span>
+              <span class="meter" id="radio-meter" aria-label="Signal strength">
+                <i></i><i></i><i></i><i></i><i></i>
+              </span>
+            </div>
+            <span class="item-tag" id="radio-stereo">MONO</span>
+          </div>
+          <audio class="radio-audio" id="radio-audio" controls></audio>
+          <div class="tuner-strip">
+            <button class="btn btn-icon" id="freq-down" title="Down 0.2 MHz">&#9664;</button>
+            <button class="btn btn-icon" id="freq-up" title="Up 0.2 MHz">&#9654;</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="banner" id="banner">
+        <div class="now-playing">
+          <div class="bn-num" id="bn-num">– –</div>
+          <div class="np-title" id="np-title">Nothing playing</div>
+          <div class="np-sub" id="np-sub">Idle</div>
+        </div>
+        <div class="bn-body" id="bn-body" aria-live="polite">
+          <div class="bn-none">No listing</div>
+        </div>
+        <div class="bn-side">
+          <div class="bn-clock" id="bn-clock">--:--</div>
+          <div class="segmented" id="quality-group" aria-label="Quality">
+            <button data-quality="low" aria-selected="false">480p</button>
+            <button data-quality="medium" aria-selected="true">720p</button>
+            <button data-quality="high" aria-selected="false">1080p</button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <aside class="panel">
+      <div class="panel-head">
+        <div class="panel-head-row">
+          <span class="section-label" id="panel-label">Channels</span>
+          <span class="section-label num" id="panel-count"></span>
+        </div>
+        <input class="field" id="filter" type="search" placeholder="Filter…" autocomplete="off">
+      </div>
+      <div class="list panel-list scroll" id="list"></div>
+      <div class="panel-foot">
+        <span id="foot-left">—</span>
+        <span id="foot-right"></span>
+      </div>
+    </aside>
+
   </div>
 
-  <script src="/hls.min.js"></script>
+  <div class="modal-backdrop" id="override-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true"
+         aria-labelledby="ovr-title" aria-describedby="ovr-body">
+      <h2 id="ovr-title">Tuner is locked</h2>
+      <p id="ovr-body"></p>
+      <p class="ovr-note" id="ovr-note"></p>
+      <div class="modal-actions">
+        <button class="btn" id="ovr-cancel">Leave it alone</button>
+        <button class="btn btn-danger" id="ovr-confirm">Override the lock</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="hls.min.js"></script>
+  <script src="live-player.js"></script>
   <script>
-    const channelList = document.getElementById("channel-list");
-    const chToggle = document.getElementById("ch-toggle");
-    const qualityPills = document.querySelectorAll(".quality-pill");
-    const stopBtn = document.getElementById("stop-btn");
-    const video = document.getElementById("player");
-    const statusEl = document.getElementById("status");
-    const noSignal = document.getElementById("no-signal");
+  (() => {
+    "use strict";
+
+    const $ = (id) => document.getElementById(id);
+    const FM_UI_ENABLED = false; // backend is retained for compatible hardware
+
+    const els = {
+      tabTv: $("tab-tv"), tabCable: $("tab-cable"),
+      tabRadio: $("tab-radio"),
+      statusDot: $("status-dot"), statusText: $("status-text"),
+      video: $("player"), placeholder: $("placeholder"),
+      phTitle: $("placeholder-title"), phSub: $("placeholder-sub"),
+      radioStage: $("radio-stage"), radioFreq: $("radio-freq"),
+      radioName: $("radio-name"), radioFormat: $("radio-format"),
+      radioMeter: $("radio-meter"), radioStereo: $("radio-stereo"),
+      radioAudio: $("radio-audio"),
+      freqDown: $("freq-down"), freqUp: $("freq-up"),
+      npTitle: $("np-title"), npSub: $("np-sub"),
+      qualityGroup: $("quality-group"),
+      panelLabel: $("panel-label"), panelCount: $("panel-count"),
+      filter: $("filter"), list: $("list"),
+      footLeft: $("foot-left"), footRight: $("foot-right"),
+      lockPill: $("lock-pill"), overrideModal: $("override-modal"),
+      ovrTitle: $("ovr-title"), ovrBody: $("ovr-body"), ovrNote: $("ovr-note"),
+      ovrCancel: $("ovr-cancel"), ovrConfirm: $("ovr-confirm"),
+    };
+
+    const FM_STEP = 0.2, FM_MIN = 87.9, FM_MAX = 107.9;
+    els.tabRadio.hidden = !FM_UI_ENABLED;
+
+    const state = {
+      lock: null,        // live tuner lock, or null
+      mode: "tv",        // which source list the panel shows
+      playing: null,     // stage source: "tv", "cable", "fm" or null
+      channels: [],
+      cableChannels: [],
+      cableAvailable: false,
+      cableTuner: null,
+      stations: [],
+      radioAvailable: false,
+      radioHint: null,
+      currentChannelId: null,
+      currentCableChannel: null,
+      streamId: null,
+      tuneSerial: 0,
+      tuning: false,
+      needsReconnect: false,
+      currentFreq: null,
+      quality: "medium",
+      filter: "",
+    };
 
     let hls = null;
-    let channels = [];
-    let currentChannelId = null;
-    let currentQuality = "medium";
+    let signalTimer = null;
+    let stepTimer = null;
+    let sourcePollTimer = null;
+    let sourcePollMs = 3000;
 
-    const wideQuery = window.matchMedia("(min-aspect-ratio: 4/3)");
+    // ---------- helpers ----------
 
-    function isWide() { return wideQuery.matches; }
-
-    function openChannelList() {
-      channelList.classList.add("open");
-      chToggle.classList.add("open");
-    }
-    function closeChannelList() {
-      channelList.classList.remove("open");
-      chToggle.classList.remove("open");
-    }
-    function toggleChannelList() {
-      channelList.classList.toggle("open");
-      chToggle.classList.toggle("open");
+    function setStatus(text, kind) {
+      els.statusText.textContent = text;
+      els.statusDot.className = "dot" + (kind ? " " + kind : "");
     }
 
-    chToggle.addEventListener("click", toggleChannelList);
+    function setNowPlaying(title, sub) {
+      els.npTitle.textContent = title;
+      els.npSub.textContent = sub;
+      renderBanner();
+    }
 
-    // Keyboard: 'c' toggles in wide mode, Escape closes
-    document.addEventListener("keydown", (e) => {
-      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
-      if (!isWide()) return;
-      if (e.key === "c" || e.key === "C") toggleChannelList();
-      else if (e.key === "Escape") closeChannelList();
+    // ---------- info banner (now / next from the broadcast guide) ----------
+
+    let guideNow = {};
+    const fmtClock = (unix) => new Date(unix * 1000)
+      .toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+    // The next few hours on the channel being watched, for the LATER strip.
+    const schedule = { number: null, events: [], fetchedAt: 0 };
+    const LATER_HOURS = 3;
+
+    async function loadSchedule(number) {
+      if (!number) return;
+      if (schedule.number === number && Date.now() - schedule.fetchedAt < 300000) return;
+      try {
+        const res = await fetch(`api/guide?channel=${encodeURIComponent(number)}&hours=${LATER_HOURS + 1}`,
+                                { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        const channel = (data.channels || {})[number];
+        schedule.number = number;
+        schedule.events = channel ? channel.events : [];
+        schedule.fetchedAt = Date.now();
+      } catch (_) {
+        return;
+      }
+      renderBanner();
+    }
+
+    function laterStrip(number, after) {
+      if (schedule.number !== number) return "";
+      const until = after + LATER_HOURS * 3600;
+      const rows = schedule.events
+        .filter(e => e.start >= after && e.start < until)
+        .slice(0, 4)
+        .map(e =>
+          `<li title="${escapeHtml(e.title || "No title")} · ${fmtClock(e.start)}">` +
+          `<b>${fmtClock(e.start)}</b><span>${escapeHtml(e.title || "No title")}</span></li>`);
+      if (!rows.length) return "";
+      return `<div class="bn-later"><span class="bn-k">LATER</span>` +
+             `<ol class="bn-list">${rows.join("")}</ol></div>`;
+    }
+
+    async function loadGuideNow() {
+      try {
+        const res = await fetch("api/guide/now", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        guideNow = data.channels || {};
+      } catch (_) {
+        return;   // the banner keeps what it had; the guide is optional
+      }
+      renderBanner();
+      if (state.mode === "tv") renderList();
+    }
+
+    // The airing on now, even if the cached "now" has just ended and the
+    // "next" one has begun since the last fetch.
+    function listingFor(number, now) {
+      const entry = guideNow[number];
+      if (!entry) return { now: null, next: null };
+      const live = (e) => e && e.start <= now && now < e.start + e.duration;
+      if (live(entry.now)) return entry;
+      if (live(entry.next)) return { now: entry.next, next: null };
+      return { now: null, next: entry.next && entry.next.start > now ? entry.next : null };
+    }
+
+    function progressOf(event, now) {
+      return Math.max(0, Math.min(100, ((now - event.start) / event.duration) * 100));
+    }
+
+    function renderBanner() {
+      const body = $("bn-body");
+      const num = $("bn-num");
+      const now = Date.now() / 1000;
+      if (state.playing === "tv") {
+        const ch = state.channels.find(c => c.id === state.currentChannelId);
+        num.textContent = ch ? ch.number : "– –";
+        const { now: on, next } = ch ? listingFor(ch.number, now) : {};
+        if (!on && !next) {
+          body.innerHTML = '<div class="bn-none">No listing for this channel</div>';
+          return;
+        }
+        let nowHtml = "";
+        if (on) {
+          nowHtml +=
+            `<div class="bn-row"><span class="bn-k">NOW</span>` +
+            `<span class="bn-title">${escapeHtml(on.title || "No title")}</span>` +
+            `<span class="bn-time">${fmtClock(on.start)} – ${fmtClock(on.start + on.duration)}</span>` +
+            (on.captions ? '<span class="bn-cc">CC</span>' : "") + `</div>` +
+            `<div class="bn-progress"><i style="width:${progressOf(on, now).toFixed(1)}%"></i></div>`;
+          if (on.description) nowHtml += `<div class="bn-desc">${escapeHtml(on.description)}</div>`;
+        }
+        loadSchedule(ch.number);
+        let later = laterStrip(ch.number, on ? on.start + on.duration : now);
+        if (!later && next) {
+          later =
+            `<div class="bn-row next"><span class="bn-k">NEXT</span>` +
+            `<span class="bn-title">${escapeHtml(next.title || "No title")}</span>` +
+            `<span class="bn-time">${fmtClock(next.start)}</span></div>`;
+        }
+        const html = `<div class="bn-split"><div class="bn-now">${nowHtml}</div>${later}</div>`;
+        body.innerHTML = html;
+      } else if (state.playing === "cable") {
+        num.textContent = state.currentCableChannel != null ? String(state.currentCableChannel) : "– –";
+        body.innerHTML = '<div class="bn-none">Analog cable carries no guide</div>';
+      } else {
+        num.textContent = "– –";
+        body.innerHTML = '<div class="bn-none">Choose a channel</div>';
+      }
+    }
+
+    function tickClock() {
+      const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const match = time.match(/^(.*?)\s*([AP]\.?M\.?)$/i);
+      $("bn-clock").innerHTML = match
+        ? `${escapeHtml(match[1])}<small>${escapeHtml(match[2])}</small>` : escapeHtml(time);
+    }
+    tickClock();
+    setInterval(() => { tickClock(); renderBanner(); }, 20000);
+    setInterval(loadGuideNow, 60000);
+
+    // Controls fade away while you watch and come back when you move.
+    (() => {
+      const viewport = els.video.parentElement;
+      let idleTimer = null;
+      const wake = () => {
+        viewport.classList.remove("idle");
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          if (!els.video.paused) viewport.classList.add("idle");
+        }, 3000);
+      };
+      ["mousemove", "touchstart", "keydown", "focusin"].forEach(event =>
+        viewport.addEventListener(event, wake, { passive: true }));
+      viewport.addEventListener("mouseleave", () => {
+        if (!els.video.paused) viewport.classList.add("idle");
+      });
+      els.video.addEventListener("pause", wake);
+      els.video.addEventListener("playing", wake);
+    })();
+
+    let cancelStartup = () => {};
+    const liveMessage = $("live-message");
+    function goLive() {
+      const target = LivePlayer.livePosition(els.video, hls);
+      if (target !== null) els.video.currentTime = target;
+    }
+    function playLive() {
+      goLive();
+      els.video.play().catch(() => { liveMessage.textContent = "Press Play to watch"; });
+    }
+    $("live-play").addEventListener("click", () => {
+      if (els.video.paused) playLive(); else els.video.pause();
     });
+    $("live-edge").addEventListener("click", playLive);
+    $("live-mute").addEventListener("click", () => { els.video.muted = !els.video.muted; });
+    $("live-volume").addEventListener("input", event => {
+      els.video.volume = Number(event.target.value);
+      els.video.muted = els.video.volume === 0;
+    });
+    els.video.addEventListener("volumechange", () => {
+      $("live-mute").textContent = els.video.muted ? "Unmute" : "Mute";
+      $("live-mute").setAttribute("aria-label", els.video.muted ? "Unmute" : "Mute");
+      $("live-mute").setAttribute("aria-pressed", String(els.video.muted));
+      $("live-volume").value = els.video.volume;
+    });
+    ["playing", "pause", "waiting", "timeupdate"].forEach(event => {
+      els.video.addEventListener(event, () => {
+        $("live-play").textContent = els.video.paused ? "Play" : "Pause";
+        $("live-play").setAttribute("aria-label", els.video.paused ? "Play live television" : "Pause television");
+        if (event === "waiting") liveMessage.textContent = "Buffering…";
+        else if (els.video.paused) liveMessage.textContent = "Paused · resume returns to live";
+        else {
+          const target = LivePlayer.livePosition(els.video, hls);
+          liveMessage.textContent = target !== null && target - els.video.currentTime > 2 ? "Behind live" : "LIVE";
+        }
+      });
+    });
+    $("live-fullscreen").addEventListener("click", async () => {
+      try {
+        if (document.fullscreenElement) await document.exitFullscreen();
+        else if (els.video.parentElement.requestFullscreen) await els.video.parentElement.requestFullscreen();
+        else if (els.video.webkitEnterFullscreen) els.video.webkitEnterFullscreen();
+      } catch (_) { liveMessage.textContent = "Fullscreen unavailable"; }
+    });
+
+    function destroyHls() {
+      cancelStartup();
+      cancelStartup = () => {};
+      if (hls) { hls.destroy(); hls = null; }
+    }
+
+    function attachStream(url, media, onFail, onReady) {
+      destroyHls();
+      liveMessage.textContent = "Buffering…";
+      $("live-play").disabled = true;
+      $("live-edge").disabled = true;
+      let active = true, prepared = false, recoveryAttempts = 0;
+      let cancelBuffer = () => {};
+      const listeners = [];
+      const fail = () => {
+        if (!active) return;
+        cancelStartup();
+        if (onFail) onFail();
+      };
+      const manifestDeadline = setTimeout(fail, 20000);
+      cancelStartup = () => {
+        active = false;
+        clearTimeout(manifestDeadline);
+        cancelBuffer();
+        listeners.forEach(([event, fn]) => media.removeEventListener(event, fn));
+      };
+      const prepare = instance => {
+        if (!active || prepared) return;
+        prepared = true;
+        clearTimeout(manifestDeadline);
+        cancelBuffer = LivePlayer.prepare(media, {
+          hls: instance,
+          onCanPlay: () => {
+            if (!active) return;
+            $("live-play").disabled = false;
+            $("live-edge").disabled = false;
+          },
+          onReady: () => { if (active && onReady) onReady(); },
+          onFail: fail,
+          onBlocked: () => { liveMessage.textContent = "Press Play to watch"; },
+        });
+      };
+      if (window.Hls && Hls.isSupported()) {
+        const instance = new Hls({
+          liveDurationInfinity: true,
+          // Wait for four segments on a newly tuned stream. The buffer
+          // check below determines when the browser can start smoothly.
+          backBufferLength: 8,
+          maxBufferLength: 12,
+          maxMaxBufferLength: 20,
+          liveSyncDurationCount: 4,
+          initialLiveManifestSize: 4,
+          liveMaxLatencyDurationCount: 8,
+        });
+        hls = instance;
+        instance.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (instance !== hls || !active) return;
+          prepare(instance);
+        });
+        instance.on(Hls.Events.ERROR, (_e, data) => {
+          if (instance !== hls || !active || !data.fatal) return;
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR && recoveryAttempts++ < 2) {
+            instance.recoverMediaError();
+            return;
+          }
+          fail();
+        });
+        instance.loadSource(url);
+        instance.attachMedia(media);
+      } else if (media.canPlayType("application/vnd.apple.mpegurl")) {
+        const metadata = () => prepare(null);
+        listeners.push(["error", fail], ["loadedmetadata", metadata]);
+        listeners.forEach(([event, fn]) => media.addEventListener(event, fn));
+        media.preload = "auto";
+        media.src = url;
+      } else {
+        fail();
+      }
+    }
+
+    function delay(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function fetchWithFallback(primary, fallback, options) {
+      let response = await fetch(primary, options);
+      if (response.status === 404 && fallback) {
+        response = await fetch(fallback, options);
+      }
+      return response;
+    }
+
+    function normalizeStatus(data) {
+      if (data && data.api_version === "v1") return data;
+      const source = data && data.mode === "tv"
+        ? { id: "digital", kind: "digital", name: "Digital TV" }
+        : (data && data.mode === "cable"
+          ? { id: "cable", kind: "cable", name: "Cable TV" }
+          : (data && data.mode === "fm"
+            ? { id: "fm", kind: "fm", name: "FM Radio" }
+            : null));
+      const cableChannel = data && data.mode === "cable"
+        ? state.cableChannels.find(
+            item => item.number === data.cable_channel
+          )
+        : null;
+      const selection = data && data.mode === "tv" ? data.channel
+        : (data && data.mode === "cable" ? {
+            channel: data.cable_channel,
+            frequency_hz: cableChannel ? cableChannel.frequency_hz : null,
+            tuner: data.capture || null,
+          }
+          : (data && data.mode === "fm" ? data.fm : null));
+      return {
+        source,
+        selection,
+        quality: data && data.quality,
+        stream: {
+          id: data && data.stream_id,
+          active: !!(data && data.streaming),
+          ready: !!(data && data.stream_ready),
+          health: data && data.stream_health,
+        },
+        fm: data && data.fm,
+      };
+    }
+
+    async function waitForTvStream(streamId, timeoutMs) {
+      const deadline = Date.now() + (timeoutMs || 15000);
+      while (Date.now() < deadline) {
+        const cacheKey = Date.now();
+        const res = await fetchWithFallback(
+          `api/v1/status?_=${cacheKey}`,
+          `api/status?_=${cacheKey}`,
+          { cache: "no-store" },
+        );
+        if (res.ok) {
+          const raw = await res.json();
+          const status = normalizeStatus(raw);
+          if (raw.lanes) {
+            const matching = Object.values(raw.lanes).find(lane => lane.stream.id === streamId);
+            if (matching) status.stream = matching.stream;
+          }
+          if (status.stream && status.stream.id === streamId) {
+            if (status.stream.health && !status.stream.health.ok) {
+              throw new Error(status.stream.health.reason || "Stream safety check failed");
+            }
+            if (status.stream.ready) return status;
+          }
+        }
+        await delay(200);
+      }
+      throw new Error("Stream did not become ready");
+    }
+
+    function setMeter(percent) {
+      const lit = Math.round((percent || 0) / 20);
+      els.radioMeter.querySelectorAll("i").forEach((bar, i) => {
+        bar.classList.toggle("on", i < lit);
+      });
+    }
+
+    // ---------- data ----------
 
     async function loadChannels() {
       try {
-        const res = await fetch("/api/channels");
-        channels = await res.json();
-        channelList.innerHTML = "";
-
-        channels.forEach(ch => {
-          const btn = document.createElement("button");
-          btn.className = "ch-btn";
-          btn.dataset.id = ch.id;
-          btn.innerHTML = `<span class="ch-num">${ch.number}</span><span class="ch-name">${ch.name}</span><span class="ch-rf">RF&nbsp;${ch.rf_channel}</span>`;
-          btn.addEventListener("click", () => {
-            tune(ch.id);
-            if (isWide()) closeChannelList();
-          });
-          channelList.appendChild(btn);
-        });
-
-        statusEl.textContent = `${channels.length} channels`;
+        const res = await fetchWithFallback(
+          "api/v1/sources/digital", "api/channels"
+        );
+        const data = await res.json();
+        state.channels = Array.isArray(data) ? data : (data.items || []);
       } catch (e) {
-        statusEl.textContent = "Failed to load channels";
+        state.channels = [];
       }
     }
 
-    function setActiveChannel(id) {
-      currentChannelId = id;
-      channelList.querySelectorAll(".ch-btn").forEach(btn => {
-        btn.classList.toggle("active", btn.dataset.id === id);
-      });
+    async function loadCableChannels(refreshView) {
+      try {
+        const cacheKey = Date.now();
+        const res = await fetchWithFallback(
+          `api/v1/sources/cable?_=${cacheKey}`,
+          `api/cable/channels?_=${cacheKey}`,
+          { cache: "no-store" },
+        );
+        const data = await res.json();
+        const source = data.source || data;
+        state.cableChannels = data.items || data.channels || [];
+        state.cableAvailable = !!source.available;
+        state.cableTuner = source.tuner || null;
+        if (refreshView) render();
+      } catch (e) {
+        // Keep the most recent channel plan across a transient API failure.
+      }
     }
 
-    async function tune(channelId) {
-      setActiveChannel(channelId);
-      statusEl.textContent = "Tuning...";
-
+    async function loadSources(refreshView) {
       try {
-        const res = await fetch("/api/tune", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({channel_id: channelId, quality: currentQuality}),
-        });
+        const cacheKey = Date.now();
+        const res = await fetchWithFallback(
+          `api/v1/sources?_=${cacheKey}`,
+          `api/sources?_=${cacheKey}`,
+          { cache: "no-store" },
+        );
         const data = await res.json();
-        if (data.ok) {
-          statusEl.textContent = `${data.channel.name} \u2014 buffering...`;
-          setTimeout(() => startPlayback(), 5000);
+        const sources = data.sources || [];
+        const cable = sources.find(source => source.id === "cable");
+        if (cable) state.cableAvailable = cable.available !== false;
+        sourcePollMs = Math.max(
+          1000,
+          Number((data.source && data.source.poll_interval_ms)
+            || data.poll_interval_ms) || 3000,
+        );
+        if (refreshView) render();
+      } catch (e) {
+        // Keep the most recent inventory across a transient API failure.
+      }
+    }
+
+    function startSourcePolling() {
+      if (sourcePollTimer) clearInterval(sourcePollTimer);
+      sourcePollTimer = setInterval(async () => {
+        await Promise.all([loadSources(false), loadCableChannels(false)]);
+        render();
+      }, sourcePollMs);
+    }
+
+    async function loadStations() {
+      try {
+        const res = await fetch("api/fm/stations");
+        const data = await res.json();
+        state.stations = data.stations || [];
+        state.radioAvailable = !!data.available;
+        state.radioHint = data.hint;
+      } catch (e) {
+        state.stations = [];
+      }
+    }
+
+    // ---------- rendering ----------
+
+    function render() {
+      // The panel follows the selected tab; the stage follows what is
+      // actually playing, so switching tabs never hides live controls.
+      const tv = state.mode === "tv";
+      const cable = state.mode === "cable";
+      const radio = state.mode === "radio";
+      els.tabTv.setAttribute("aria-selected", String(tv));
+      els.tabCable.setAttribute("aria-selected", String(cable));
+      els.tabRadio.setAttribute("aria-selected", String(radio));
+      els.qualityGroup.classList.toggle("hidden", radio);
+      els.panelLabel.textContent = tv ? "Digital Channels"
+        : (cable ? "Analog Channels" : "Stations");
+      els.filter.placeholder = tv ? "Filter digital channels…"
+        : (cable ? "Filter analog channels…" : "Filter stations…");
+
+      const onRadio = state.playing === "fm";
+      els.video.classList.toggle("hidden", onRadio);
+      $("live-controls").classList.toggle("hidden", onRadio);
+      els.radioStage.classList.toggle("hidden", !onRadio);
+      els.placeholder.classList.toggle("hidden", state.playing !== null);
+
+      if (state.playing === null) {
+        els.phTitle.textContent = tv ? "No Signal"
+          : (cable ? "Analog Idle" : "Radio Idle");
+        els.phSub.textContent = tv ? "Choose a channel to begin"
+          : (cable ? (state.cableAvailable
+              ? "Choose an analog channel to begin"
+              : "Analog tuner not available")
+            : (state.radioAvailable ? "Choose a station to begin"
+                                    : "FM tuner not enabled"));
+      }
+
+      renderList();
+      renderFoot();
+    }
+
+    function matches(text) {
+      return !state.filter || text.toLowerCase().includes(state.filter);
+    }
+
+    function renderList() {
+      const scrollTop = els.list.scrollTop;
+      els.list.innerHTML = "";
+      requestAnimationFrame(() => { els.list.scrollTop = scrollTop; });
+
+      if (state.mode === "radio" && !state.radioAvailable) {
+        const wrap = document.createElement("div");
+        wrap.className = "panel-notice";
+        wrap.innerHTML =
+          '<div class="notice"><strong>FM tuner not enabled.</strong><br>' +
+          'The cx18 driver only creates the radio device when asked. Run ' +
+          '<code>sudo modprobe -r cx18 &amp;&amp; sudo modprobe cx18 radio=1</code> ' +
+          'and reload this page.</div>';
+        els.list.appendChild(wrap);
+        els.panelCount.textContent = "";
+        return;
+      }
+
+      const items = state.mode === "tv"
+        ? state.channels.filter(c => matches(`${c.number} ${c.name}`))
+        : (state.mode === "cable"
+          ? state.cableChannels.filter(channel =>
+              matches(`rf ${channel.number} ${channel.frequency_mhz} mhz`))
+          : state.stations.filter(s =>
+              matches(`${s.frequency} ${s.name} ${s.format || ""}`)));
+
+      els.panelCount.textContent = String(items.length);
+
+      if (!items.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = state.filter
+          ? "Nothing matches that filter."
+          : (state.mode === "tv" ? "No channels yet — run a scan."
+            : (state.mode === "cable" ? "Analog channel plan unavailable."
+              : "No stations yet — run a scan."));
+        els.list.appendChild(empty);
+        return;
+      }
+
+      for (const item of items) {
+        const btn = document.createElement("button");
+        btn.className = "list-item";
+
+        if (state.mode === "tv") {
+          btn.setAttribute("aria-current", String(item.id === state.currentChannelId));
+          const on = listingFor(item.number, Date.now() / 1000).now;
+          const sub = on
+            ? `<span class="item-sub">${escapeHtml(on.title || "No title")}</span>` +
+              `<span class="item-bar"><i style="width:${progressOf(on, Date.now() / 1000).toFixed(0)}%"></i></span>`
+            : "";
+          btn.innerHTML =
+            `<span class="item-key">${escapeHtml(item.number)}</span>` +
+            `<span class="item-body"><span class="item-name">${escapeHtml(item.name)}</span>${sub}</span>` +
+            `<span class="item-tag">RF ${item.rf_channel}</span>`;
+          btn.addEventListener("click", () => tuneTv(item.id));
+        } else if (state.mode === "cable") {
+          btn.setAttribute("aria-current",
+                           String(item.number === state.currentCableChannel));
+          btn.disabled = !state.cableAvailable;
+          const displayMhz = Math.ceil(item.frequency_hz / 1e6);
+          btn.innerHTML =
+            `<span class="item-key">RF ${item.number}</span>` +
+            `<span class="item-body"></span>` +
+            `<span class="item-tag">${displayMhz} MHz</span>`;
+          btn.addEventListener("click", () => tuneCable(item.number));
         } else {
-          statusEl.textContent = `Error: ${data.error}`;
+          const active = state.currentFreq !== null &&
+                         Math.abs(item.frequency - state.currentFreq) < 0.05;
+          btn.setAttribute("aria-current", String(active));
+          const sub = item.format ? escapeHtml(item.format) : "";
+          const tag = item.detected
+            ? `<span class="item-tag">${item.strength}%</span>` : "";
+          btn.innerHTML =
+            `<span class="item-key">${item.frequency.toFixed(1)}</span>` +
+            `<span class="item-body"><span class="item-name">${escapeHtml(item.name)}</span>` +
+            (sub ? `<span class="item-sub">${sub}</span>` : "") + `</span>` + tag;
+          btn.addEventListener("click", () => tuneFm(item.frequency));
         }
+        els.list.appendChild(btn);
+      }
+    }
+
+    function renderFoot() {
+      if (state.mode === "tv") {
+        els.footLeft.textContent = `${state.channels.length} channels`;
+        els.footRight.textContent = "ATSC · 8VSB";
+      } else if (state.mode === "cable") {
+        els.footLeft.textContent = `${state.cableChannels.length} channels`;
+        els.footRight.textContent = state.cableAvailable
+          ? "NTSC-M · frequency order"
+          : "Analog tuner unavailable";
+      } else {
+        els.footLeft.textContent = `${state.stations.length} stations`;
+        els.footRight.textContent = "FM · 87.9–107.9";
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      })[c]);
+    }
+
+    function apiErrorMessage(data, fallback) {
+      if (!data || !data.error) return fallback;
+      return typeof data.error === "string"
+        ? data.error
+        : (data.error.message || fallback);
+    }
+
+    // ---------- tuning ----------
+
+    // ---------- Tuner locks ----------
+    //
+    // A lock is another service's deliberate claim on the front-end.
+    // Overriding one is always a person's decision, taken in front of the
+    // details of what is being broken -- the page never retries past a 423
+    // on its own.
+
+    function lockSummary(lock) {
+      const minutes = Math.max(1, Math.round(lock.seconds_remaining / 60));
+      const playing = lock.program && lock.program.title
+        ? ` while “${lock.program.title}” is on` : "";
+      return `${lock.owner} holds the ${lock.lane} tuner${playing}, `
+           + `about ${minutes} minute${minutes === 1 ? "" : "s"} left`;
+    }
+
+    let overrideResolve = null;
+
+    function confirmOverride(lock, action) {
+      els.ovrTitle.textContent = `Override ${lock.owner}'s lock?`;
+      els.ovrBody.textContent =
+        `${lockSummary(lock)}.`
+        + (lock.reason ? ` It was taken for: ${lock.reason}.` : "")
+        + ` You are about to ${action}.`;
+      els.ovrNote.textContent = lock.until === "program_end"
+        ? "The lock was set to last until that programme ends. Overriding it "
+          + "interrupts whatever that service is doing, and cannot be undone "
+          + "from here."
+        : "Overriding interrupts whatever that service is doing, and cannot "
+          + "be undone from here.";
+      els.overrideModal.hidden = false;
+      // The safe choice takes focus, so a stray Enter does not break a lock.
+      els.ovrCancel.focus();
+      return new Promise(resolve => { overrideResolve = resolve; });
+    }
+
+    function closeOverride(result) {
+      els.overrideModal.hidden = true;
+      if (overrideResolve) { overrideResolve(result); overrideResolve = null; }
+    }
+
+    els.ovrCancel.addEventListener("click", () => closeOverride(false));
+    els.ovrConfirm.addEventListener("click", () => closeOverride(true));
+    els.overrideModal.addEventListener("click", (event) => {
+      if (event.target === els.overrideModal) closeOverride(false);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !els.overrideModal.hidden) {
+        closeOverride(false);
+      }
+    });
+
+    function showLock(lock) {
+      state.lock = lock || null;
+      if (!lock) { els.lockPill.hidden = true; return; }
+      const minutes = Math.max(1, Math.round(lock.seconds_remaining / 60));
+      els.lockPill.hidden = false;
+      els.lockPill.textContent = `🔒 ${lock.owner} · ${minutes}m`;
+      els.lockPill.title = `${lockSummary(lock)}. Click to release it.`;
+    }
+
+    els.lockPill.addEventListener("click", async () => {
+      const lock = state.lock;
+      if (!lock) return;
+      if (!await confirmOverride(lock, "release this lock")) return;
+      const res = await fetchWithFallback(
+        "api/v1/tuner/lock/release", "api/tuner/lock/release", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lane: lock.lane, override: true }),
+        });
+      if (res.ok) { showLock(null); return; }
+      const data = await res.json().catch(() => ({}));
+      setStatus(apiErrorMessage(data, "Could not release the lock"), "error");
+    });
+
+    async function pollLock() {
+      try {
+        const res = await fetchWithFallback(
+          "api/v1/tuner/lock", "api/tuner/lock", { cache: "no-store" });
+        if (!res.ok) return;
+        const locks = (await res.json()).locks || {};
+        showLock(locks.digital || locks.analog || null);
+      } catch (error) {
+        // A missed poll is not worth surfacing; the next one is 15s away,
+        // and any tune against a live lock is refused on the server anyway.
+      }
+    }
+
+    pollLock();
+    setInterval(pollLock, 15000);
+
+    // Follow external retunes and encoder recovery without issuing a tune.
+    let streamPollBusy = false;
+    async function pollStream() {
+      if (streamPollBusy || state.tuning || !["tv", "cable"].includes(state.playing)) return;
+      streamPollBusy = true;
+      const serial = state.tuneSerial;
+      const playing = state.playing;
+      try {
+        const response = await fetch("api/v1/status", { cache: "no-store" });
+        if (!response.ok || state.tuning || serial !== state.tuneSerial || playing !== state.playing) return;
+        const data = await response.json();
+        if (state.tuning || serial !== state.tuneSerial || playing !== state.playing) return;
+        const lane = data.lanes && data.lanes[playing === "cable" ? "analog" : "digital"];
+        if (!lane) return;
+        if (lane.stream.state === "failed") {
+          liveMessage.textContent = lane.stream.error?.message || "Stream unavailable";
+          return;
+        }
+        if (!lane.stream.ready || (lane.stream.id === state.streamId && !state.needsReconnect)) return;
+        state.streamId = lane.stream.id;
+        state.quality = lane.quality;
+        const selection = lane.selection || {};
+        state.currentChannelId = playing === "tv" ? selection.id : null;
+        state.currentCableChannel = playing === "cable" ? selection.channel : null;
+        const title = playing === "cable" ? `Cable ${selection.channel}` : selection.name;
+        destroyHls();
+        els.video.pause();
+        els.video.removeAttribute("src");
+        els.video.load();
+        render();
+        setStatus(title, "busy");
+        setNowPlaying(title, "Buffering…");
+        const generation = state.streamId;
+        startTvPlayback(generation, 0, () => {
+          if (serial !== state.tuneSerial || generation !== state.streamId) return;
+          setStatus(title, "live");
+          setNowPlaying(title, lane.quality);
+        });
+      } catch (_) {
+        // A brief failed status request must not interrupt healthy playback.
+      } finally { streamPollBusy = false; }
+    }
+    setInterval(pollStream, 2000);
+
+    async function tuneTv(channelId) {
+      const tuneSerial = ++state.tuneSerial;
+      const ch = state.channels.find(c => c.id === channelId);
+      state.currentChannelId = channelId;
+      state.currentCableChannel = null;
+      state.currentFreq = null;
+      stopSignalPolling();
+      render();
+
+      setStatus("Tuning…", "busy");
+      setNowPlaying(ch ? ch.name : "…", "Acquiring signal");
+      // Freeze the last decoded frame while the server creates a new encoder
+      // generation. Continuing to load the old playlist would expose its
+      // player to a reset media sequence before the new manifest is ready.
+      if (hls) hls.stopLoad();
+      cancelStartup();
+      $("live-play").disabled = true;
+      $("live-edge").disabled = true;
+      els.video.pause();
+      liveMessage.textContent = "Tuning…";
+      state.needsReconnect = true;
+
+      state.tuning = true;
+      try {
+        const body = {
+          source: "digital",
+          channel_id: channelId,
+          quality: state.quality,
+        };
+        const post = (extra) => fetchWithFallback(
+          "api/v1/tune", "api/tune", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...body, ...extra }),
+          });
+
+        let res = await post({});
+        let data = await res.json();
+        if (tuneSerial !== state.tuneSerial) return;
+
+        if (res.status === 423 && data.lock) {
+          showLock(data.lock);
+          const label = ch ? `tune to ${ch.name}` : "retune this tuner";
+          if (!await confirmOverride(data.lock, label)) {
+            setStatus("Tuner locked", "error");
+            setNowPlaying("Nothing playing", lockSummary(data.lock));
+            return;
+          }
+          if (tuneSerial !== state.tuneSerial) return;
+          res = await post({ override: true });
+          data = await res.json();
+          if (tuneSerial !== state.tuneSerial) return;
+          if (res.ok) showLock(null);
+        }
+
+        if (!res.ok || !data.ok) {
+          const message = apiErrorMessage(data, "Tune failed");
+          setStatus(message, "error");
+          setNowPlaying("Nothing playing", message);
+          return;
+        }
+        const tuned = data.selection || data.channel || ch;
+        state.playing = "tv";
+        state.streamId = (data.stream && data.stream.id) || data.stream_id;
+        if (!state.streamId) throw new Error("Server returned no stream ID");
+        render();
+        setStatus(tuned.name, "busy");
+        setNowPlaying(tuned.name, `Channel ${tuned.number} · buffering`);
+
+        // Do not hand hls.js a manifest URL until the matching generation has
+        // published one. A fatal 404 on the initial manifest load cannot be
+        // repaired reliably with startLoad().
+        await waitForTvStream(state.streamId);
+        if (tuneSerial !== state.tuneSerial) return;
+        destroyHls();
+        els.video.removeAttribute("src");
+        els.video.load();
+        startTvPlayback(state.streamId, 0, () => {
+          if (tuneSerial !== state.tuneSerial) return;
+          setStatus(tuned.name, "live");
+          setNowPlaying(tuned.name,
+                        `Channel ${tuned.number} · ${state.quality}`);
+        });
       } catch (e) {
-        statusEl.textContent = "Failed to tune";
+        if (tuneSerial !== state.tuneSerial) return;
+        setStatus("Failed to tune", "error");
+        setNowPlaying(ch ? ch.name : "Nothing playing", e.message || "Tune failed");
+      } finally {
+        if (tuneSerial === state.tuneSerial) state.tuning = false;
       }
     }
 
-    function startPlayback() {
-      noSignal.style.display = "none";
-      const streamUrl = "/stream/live.m3u8";
+    async function tuneCable(channelNumber) {
+      const tuneSerial = ++state.tuneSerial;
+      const channel = state.cableChannels.find(
+        item => item.number === channelNumber
+      );
+      if (!channel || !state.cableAvailable) {
+        setStatus("Analog cable tuner unavailable", "error");
+        return;
+      }
 
-      if (hls) { hls.destroy(); hls = null; }
+      state.currentCableChannel = channelNumber;
+      state.currentChannelId = null;
+      state.currentFreq = null;
+      stopSignalPolling();
+      render();
+      setStatus("Tuning…", "busy");
+      setNowPlaying(`Cable ${channelNumber}`, "Acquiring signal");
+      if (hls) hls.stopLoad();
+      cancelStartup();
+      $("live-play").disabled = true;
+      $("live-edge").disabled = true;
+      els.video.pause();
+      liveMessage.textContent = "Tuning…";
+      state.needsReconnect = true;
 
-      if (Hls.isSupported()) {
-        hls = new Hls({
-          liveDurationInfinity: true,
-          liveBackBufferLength: 0,
-          maxBufferLength: 10,
-          maxMaxBufferLength: 20,
+      state.tuning = true;
+      try {
+        const res = await fetchWithFallback(
+          "api/v1/tune", "api/cable/tune", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source: "cable",
+            channel: channelNumber,
+            quality: state.quality,
+          }),
+          },
+        );
+        const data = await res.json();
+        if (tuneSerial !== state.tuneSerial) return;
+        if (!res.ok || !data.ok) {
+          const message = apiErrorMessage(data, "Cable tune failed");
+          setStatus(message, "error");
+          setNowPlaying("Nothing playing", message);
+          return;
+        }
+
+        const tuned = data.selection || {
+          channel: data.channel || channelNumber,
+          frequency_hz: data.frequency_hz || channel.frequency_hz,
+        };
+        const displayMhz = Math.ceil(tuned.frequency_hz / 1e6);
+        state.playing = "cable";
+        state.streamId = (data.stream && data.stream.id) || data.stream_id;
+        if (!state.streamId) throw new Error("Server returned no stream ID");
+        render();
+        setStatus(`Cable ${tuned.channel}`, "busy");
+        setNowPlaying(`Cable ${tuned.channel}`, `${displayMhz} MHz · buffering`);
+        await waitForTvStream(state.streamId);
+        if (tuneSerial !== state.tuneSerial) return;
+        destroyHls();
+        els.video.removeAttribute("src");
+        els.video.load();
+        startTvPlayback(state.streamId, 0, () => {
+          if (tuneSerial !== state.tuneSerial) return;
+          setStatus(`Cable ${tuned.channel}`, "live");
+          setNowPlaying(
+            `Cable ${tuned.channel}`,
+            `${displayMhz} MHz · ${state.quality}`,
+          );
         });
-        hls.loadSource(streamUrl);
-        hls.attachMedia(video);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
-        hls.on(Hls.Events.ERROR, (event, data) => {
-          if (data.fatal) setTimeout(() => startPlayback(), 3000);
-        });
-      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = streamUrl;
-        video.play();
+      } catch (e) {
+        if (tuneSerial !== state.tuneSerial) return;
+        setStatus("Cable tune failed", "error");
+        setNowPlaying(
+          `Cable ${channelNumber}`,
+          e.message || "Cable tune failed",
+        );
+      } finally {
+        if (tuneSerial === state.tuneSerial) state.tuning = false;
       }
     }
 
-    qualityPills.forEach(pill => {
-      pill.addEventListener("click", () => {
-        qualityPills.forEach(p => p.classList.remove("active"));
-        pill.classList.add("active");
-        currentQuality = pill.dataset.quality;
-        if (currentChannelId) tune(currentChannelId);
+    // Playback retries re-attach to the existing stream; they never re-issue
+    // a tune, which would restart the encoder and take the tuner down again.
+    function startTvPlayback(streamId, attempt, onReady) {
+      attempt = attempt || 0;
+      streamId = streamId || state.streamId || String(Date.now());
+      if (state.streamId && streamId !== state.streamId) return;
+      state.needsReconnect = false;
+      const playlist = state.playing === "cable" ? "analog" : "digital";
+      attachStream(`stream/${playlist}.m3u8?v=${encodeURIComponent(streamId)}`, els.video, () => {
+        if (streamId !== state.streamId) return;
+        if (attempt < 5) {
+          setTimeout(() => startTvPlayback(streamId, attempt + 1, onReady), 1000);
+        }
+        else setStatus("Stream unavailable", "error");
+      }, onReady);
+    }
+
+    function startFmPlayback(attempt) {
+      attempt = attempt || 0;
+      attachStream("stream/radio.m3u8", els.radioAudio, () => {
+        if (attempt < 5) setTimeout(() => startFmPlayback(attempt + 1), 3000);
+        else setStatus("Stream unavailable", "error");
+      });
+    }
+
+    async function tuneFm(freq) {
+      freq = Math.round(freq * 10) / 10;
+      if (freq < FM_MIN || freq > FM_MAX) return;
+      if (!state.radioAvailable) {
+        setStatus("FM tuner not enabled", "error");
+        return;
+      }
+
+      state.currentFreq = freq;
+      state.currentChannelId = null;
+      state.currentCableChannel = null;
+      const known = state.stations.find(s => Math.abs(s.frequency - freq) < 0.05);
+
+      els.radioFreq.textContent = freq.toFixed(1);
+      els.radioName.textContent = known ? known.name : "Unlisted";
+      els.radioFormat.textContent = known && known.format ? known.format : "";
+      els.radioStereo.textContent = "MONO";
+      setMeter(0);
+      stopSignalPolling();
+      state.playing = "fm";
+      render();
+
+      setStatus(`Tuning ${freq.toFixed(1)} MHz…`, "busy");
+      setNowPlaying(known ? known.name : `${freq.toFixed(1)} FM`, "Acquiring signal");
+
+      try {
+        const res = await fetch("api/fm/tune", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ frequency: freq }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          state.playing = null;
+          render();
+          setStatus(data.error || "FM tune failed", "error");
+          setNowPlaying("Nothing playing", "FM tune failed");
+          return;
+        }
+        setTimeout(() => {
+          if (state.currentFreq !== freq) return;  // superseded
+          startFmPlayback();
+          setStatus(`${freq.toFixed(1)} MHz`, "live");
+          setNowPlaying(known ? known.name : `${freq.toFixed(1)} FM`,
+                        `${freq.toFixed(1)} MHz · FM`);
+          startSignalPolling();
+        }, 4000);
+      } catch (e) {
+        setStatus("Failed to tune", "error");
+      }
+    }
+
+    // Stepping updates the readout at once but debounces the retune, so
+    // holding an arrow key doesn't restart the encoder on every step.
+    function stepFrequency(direction) {
+      const base = state.currentFreq === null ? FM_MIN : state.currentFreq;
+      let next = Math.round((base + direction * FM_STEP) * 10) / 10;
+      if (next > FM_MAX) next = FM_MIN;
+      if (next < FM_MIN) next = FM_MAX;
+
+      state.currentFreq = next;
+      els.radioFreq.textContent = next.toFixed(1);
+      const known = state.stations.find(s => Math.abs(s.frequency - next) < 0.05);
+      els.radioName.textContent = known ? known.name : "Unlisted";
+      els.radioFormat.textContent = known && known.format ? known.format : "";
+
+      if (stepTimer) clearTimeout(stepTimer);
+      stepTimer = setTimeout(() => { stepTimer = null; tuneFm(next); }, 600);
+    }
+
+    // ---------- signal polling ----------
+
+    function startSignalPolling() {
+      stopSignalPolling();
+      signalTimer = setInterval(async () => {
+        try {
+          const res = await fetch("api/fm/status");
+          const fm = await res.json();
+          if (!fm.playing) { stopSignalPolling(); return; }
+          setMeter(fm.signal);
+          els.radioStereo.textContent = fm.stereo ? "STEREO" : "MONO";
+        } catch (e) { /* transient */ }
+      }, 3000);
+    }
+
+    function stopSignalPolling() {
+      if (signalTimer) { clearInterval(signalTimer); signalTimer = null; }
+    }
+
+    // ---------- events ----------
+
+    function selectSource(mode) {
+      state.mode = mode;
+      state.filter = "";
+      els.filter.value = "";
+      render();
+    }
+
+    els.tabTv.addEventListener("click", () => selectSource("tv"));
+    els.tabCable.addEventListener("click", () => selectSource("cable"));
+    els.tabRadio.addEventListener("click", () => selectSource("radio"));
+
+    els.filter.addEventListener("input", () => {
+      state.filter = els.filter.value.trim().toLowerCase();
+      renderList();
+    });
+
+    els.qualityGroup.querySelectorAll("button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        state.quality = btn.dataset.quality;
+        els.qualityGroup.querySelectorAll("button").forEach(b =>
+          b.setAttribute("aria-selected", String(b === btn)));
+        if (state.currentChannelId) tuneTv(state.currentChannelId);
+        else if (state.currentCableChannel !== null) {
+          tuneCable(state.currentCableChannel);
+        }
       });
     });
 
-    stopBtn.addEventListener("click", async () => {
-      if (hls) { hls.destroy(); hls = null; }
-      video.src = "";
-      noSignal.style.display = "flex";
-      currentChannelId = null;
-      channelList.querySelectorAll(".ch-btn").forEach(btn => btn.classList.remove("active"));
-      await fetch("/api/stop", {method: "POST"});
-      statusEl.textContent = "Stopped";
+    els.freqDown.addEventListener("click", () => stepFrequency(-1));
+    els.freqUp.addEventListener("click", () => stepFrequency(1));
+
+    document.addEventListener("keydown", (e) => {
+      const tag = e.target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.key === "/") { e.preventDefault(); els.filter.focus(); }
+      else if (state.mode === "radio" && e.key === "ArrowLeft") stepFrequency(-1);
+      else if (state.mode === "radio" && e.key === "ArrowRight") stepFrequency(1);
     });
 
-    async function checkStatus() {
+    // ---------- resume existing session ----------
+
+    async function resume() {
       try {
-        const res = await fetch("/api/status");
-        const data = await res.json();
-        if (data.streaming && data.channel) {
-          currentChannelId = data.channel.id;
-          currentQuality = data.quality || "medium";
-          qualityPills.forEach(p => {
-            p.classList.toggle("active", p.dataset.quality === currentQuality);
-          });
-          setActiveChannel(data.channel.id);
-          startPlayback();
-          statusEl.textContent = data.channel.name || "Playing";
+        const res = await fetchWithFallback(
+          "api/v1/status", "api/status", { cache: "no-store" }
+        );
+        const data = normalizeStatus(await res.json());
+        const sourceKind = data.source && data.source.kind;
+        const stream = data.stream || {};
+        const selection = data.selection;
+
+        if (FM_UI_ENABLED && sourceKind === "fm" && data.fm && data.fm.playing) {
+          state.mode = "radio";
+          state.playing = "fm";
+          state.currentFreq = data.fm.frequency;
+          els.radioFreq.textContent = Number(data.fm.frequency).toFixed(1);
+          const known = state.stations.find(
+            s => Math.abs(s.frequency - data.fm.frequency) < 0.05);
+          els.radioName.textContent = data.fm.station || (known ? known.name : "Unlisted");
+          els.radioFormat.textContent = known && known.format ? known.format : "";
+          els.radioStereo.textContent = data.fm.stereo ? "STEREO" : "MONO";
+          render();
+          startFmPlayback();
+          setMeter(data.fm.signal);
+          setStatus(`${Number(data.fm.frequency).toFixed(1)} MHz`, "live");
+          setNowPlaying(els.radioName.textContent,
+                        `${Number(data.fm.frequency).toFixed(1)} MHz · FM`);
+          startSignalPolling();
+          return;
         }
-      } catch (e) {}
+
+        state.quality = data.quality || "medium";
+        els.qualityGroup.querySelectorAll("button").forEach(b =>
+          b.setAttribute("aria-selected",
+            String(b.dataset.quality === state.quality)));
+
+        if ((sourceKind === "cable" || sourceKind === "analog") && stream.active && selection) {
+          state.mode = "cable";
+          state.playing = "cable";
+          state.currentCableChannel = selection.channel;
+          state.currentChannelId = null;
+              state.streamId = stream.id;
+          render();
+          const displayMhz = Math.ceil(selection.frequency_hz / 1e6);
+          setStatus(`Cable ${selection.channel}`, "busy");
+          setNowPlaying(
+            `Cable ${selection.channel}`,
+            `${displayMhz} MHz · buffering`,
+          );
+          const resumeStreamId = state.streamId;
+          await waitForTvStream(resumeStreamId);
+          if (state.streamId !== resumeStreamId || state.tuneSerial) return;
+          startTvPlayback(resumeStreamId, 0, () => {
+            if (state.streamId !== resumeStreamId || state.tuneSerial) return;
+            setStatus(`Cable ${selection.channel}`, "live");
+            setNowPlaying(
+              `Cable ${selection.channel}`,
+              `${displayMhz} MHz · ${state.quality}`,
+            );
+          });
+          return;
+        }
+
+        if (sourceKind === "digital" && stream.active && selection) {
+          state.mode = "tv";
+          state.playing = "tv";
+          state.currentChannelId = selection.id;
+          state.currentCableChannel = null;
+              state.streamId = stream.id;
+          render();
+          setStatus(selection.name, "busy");
+          setNowPlaying(selection.name,
+                        `Channel ${selection.number} · buffering`);
+          const resumeStreamId = state.streamId;
+          await waitForTvStream(resumeStreamId);
+          if (state.streamId !== resumeStreamId || state.tuneSerial) return;
+          startTvPlayback(resumeStreamId, 0, () => {
+            if (state.streamId !== resumeStreamId || state.tuneSerial) return;
+            setStatus(selection.name, "live");
+            setNowPlaying(selection.name,
+                          `Channel ${selection.number} · ${state.quality}`);
+          });
+          return;
+        }
+
+        setStatus(`${state.channels.length} channels ready`);
+        setNowPlaying("Nothing playing", "Idle");
+      } catch (e) {
+        setStatus("Server unreachable", "error");
+      }
     }
 
-    loadChannels().then(() => checkStatus());
+    const loaders = FM_UI_ENABLED
+      ? [loadChannels(), loadCableChannels(false), loadSources(false), loadStations()]
+      : [loadChannels(), loadCableChannels(false), loadSources(false)];
+    Promise.all(loaders).then(() => {
+      render();
+      loadGuideNow();
+      resume();
+      startSourcePolling();
+    });
+  })();
   </script>
 </body>
 </html>

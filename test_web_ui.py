@@ -1,0 +1,425 @@
+"""Fast regressions for the browser handoff and operator-facing About page."""
+
+from pathlib import Path
+
+
+ROOT = Path(__file__).parent
+STATIC = ROOT / "static" if (ROOT / "static").is_dir() else ROOT
+INDEX = (STATIC / "index.html").read_text()
+ABOUT = (STATIC / "about.html").read_text()
+CABLE = (STATIC / "cable.html").read_text()
+GUIDE = (STATIC / "guide.html").read_text()
+VCR = (STATIC / "vcr.html").read_text()
+
+
+def section(source, start, end):
+    return source[source.index(start):source.index(end)]
+
+
+def test_cable_is_a_primary_source_tab():
+    source_tabs = section(INDEX, 'id="source-tabs"', 'id="status-dot"')
+
+    assert source_tabs.index('id="tab-tv"') < source_tabs.index('id="tab-cable"')
+    assert ">Digital<" in source_tabs
+    assert "window.location.href" not in source_tabs
+    # Capture cards were removed; only the card's own tuners remain.
+    assert 'id="tab-capture"' not in source_tabs
+
+
+def test_channel_change_waits_for_matching_ready_stream_before_handoff():
+    tune = section(INDEX, "async function tuneTv", "// Playback retries")
+
+    assert "const tuneSerial = ++state.tuneSerial" in tune
+    assert "if (hls) hls.stopLoad()" in tune
+    assert "await waitForTvStream(state.streamId)" in tune
+    assert tune.index("await waitForTvStream") < tune.index("startTvPlayback")
+    assert "if (tuneSerial !== state.tuneSerial) return" in tune
+    assert 'setStatus(tuned.name, "live")' in tune
+
+
+def test_initial_manifest_failure_recreates_hls_without_retuning():
+    playback = section(INDEX, "function startTvPlayback", "function startFmPlayback")
+
+    assert "startTvPlayback(streamId, attempt + 1, onReady)" in playback
+    assert "api/tune" not in playback
+    assert "attempt < 5" in playback
+
+
+def test_resume_cannot_override_a_newer_channel_click():
+    resume = section(INDEX, "async function resume", "const loaders")
+
+    assert "const resumeStreamId = state.streamId" in resume
+    assert "state.streamId !== resumeStreamId || state.tuneSerial" in resume
+
+
+def test_capture_card_support_is_absent_from_the_ui():
+    """The UI drives the tuner card only -- no V4L2 grabbers."""
+    assert "tuneCapture" not in INDEX
+    assert "captureDevices" not in INDEX
+    assert "api/v1/sources/capture" not in INDEX
+    assert "api/capture/tune" not in INDEX
+
+
+def test_source_inventory_uses_the_versioned_catalog():
+    data = section(INDEX, "async function loadSources", "async function loadStations")
+
+    assert "api/v1/sources" in data
+    assert "loadSources(false)" in INDEX
+
+
+def test_main_ui_lists_and_tunes_all_cable_channels():
+    data = section(INDEX, "async function loadCableChannels", "async function loadSources")
+    render = section(INDEX, "function renderList", "function renderFoot")
+    tune = section(INDEX, "async function tuneCable", "// Playback retries")
+
+    assert "api/v1/sources/cable" in data
+    assert "state.cableChannels = data.items || data.channels || []" in data
+    assert '`<span class="item-key">RF ${item.number}</span>`' in render
+    assert "Math.ceil(item.frequency_hz / 1e6)" in render
+    assert '"api/v1/tune", "api/cable/tune"' in tune
+    assert 'source: "cable"' in tune
+    assert "channel: channelNumber" in tune
+    assert "await waitForTvStream(state.streamId)" in tune
+
+
+def test_main_ui_uses_versioned_api_for_all_video_sources():
+    assert '"api/v1/sources/digital", "api/channels"' in INDEX
+    assert '`api/v1/sources/cable?' in INDEX
+    assert '`api/v1/sources?' in INDEX
+    assert '"api/v1/status", "api/status"' in INDEX
+    # Digital and analog cable are the two video sources that remain.
+    assert INDEX.count('"api/v1/tune",') == 2
+
+
+def test_main_ui_falls_back_during_a_zero_downtime_server_restart():
+    helper = section(INDEX, "async function fetchWithFallback", "function normalizeStatus")
+
+    assert "response.status === 404" in helper
+    assert "response = await fetch(fallback, options)" in helper
+    assert '"api/v1/tune", "api/tune"' in INDEX
+    assert '"api/v1/tune", "api/cable/tune"' in INDEX
+
+
+def test_cable_page_uses_fixed_channel_list_without_scanning():
+    assert "api/cable/channels" in CABLE
+    assert 'fetch("api/cable/tune"' in CABLE
+    assert "await waitForStream(state.streamId)" in CABLE
+    assert "Fixed channel list" in CABLE
+    assert "no scan" in CABLE
+    assert "api/rescan" not in CABLE
+
+
+def test_cable_page_lists_every_rf_channel_in_frequency_order():
+    render = section(CABLE, "function renderChannels", "async function tune")
+
+    assert 'class="channel-list list scroll"' in CABLE
+    assert "left.frequency_hz - right.frequency_hz" in render
+    assert "Math.ceil(exactMhz)" in render
+    assert '`<span class="item-key">RF ${item.number}</span>`' in render
+    assert '`<span class="item-tag">${displayMhz} MHz</span>`' in render
+
+
+def test_about_page_matches_the_current_streaming_stack():
+    for expected in (
+        "dvb_source.py",
+        "stream_sanity_check.py",
+        "600 ms",
+        "libx264",
+        "2.5 Mb/s",
+        "Three real retunes",
+    ):
+        assert expected in ABOUT
+
+    for stale in ("cvlc", "dvr0 BROKEN", "8–10 seconds"):
+        assert stale not in ABOUT
+
+
+# ---------------------------------------------------------------------------
+# Guide
+# ---------------------------------------------------------------------------
+
+def test_guide_is_reachable_from_every_page():
+    for page in (INDEX, ABOUT, CABLE, GUIDE):
+        assert 'href="guide.html"' in page
+
+
+def test_guide_positions_everything_from_one_window_origin():
+    """Ticks, blocks and the now line must share an origin or they drift."""
+    for anchor in ("(offset / 60) * PPM",
+                   "((event.start - windowStart) / 60) * PPM",
+                   "((now - windowStart) / 60) * PPM"):
+        assert anchor in GUIDE
+
+
+def test_guide_clips_events_that_started_before_the_window():
+    block = section(GUIDE, "function block(", "function drawNowLine")
+    assert "Math.max(0, ((event.start - windowStart) / 60) * PPM)" in block
+    assert "Math.max(2, right - left - 2)" in block
+
+
+def test_guide_titles_are_escaped_not_interpolated_raw():
+    """Titles come off the air, so they are untrusted input."""
+    assert "escape(event.title" in GUIDE
+    assert "escape(channel.name)" in GUIDE
+    assert "node.textContent = text == null" in GUIDE
+
+
+def test_guide_refresh_uses_the_streaming_endpoint():
+    refresh = section(GUIDE, "function refresh()", "function escape(")
+    assert "api/guide/refresh/stream?descriptions=" in refresh
+    for event in ("status", "frequency", "result", "saved", "failed"):
+        assert f"addEventListener('{event}'" in refresh
+    # The button must come back even when the sweep dies mid-stream.
+    assert refresh.count("$('btn-refresh').disabled = false") >= 3
+
+
+def test_guide_explains_why_a_refresh_interrupts_live_tv():
+    assert "interrupts live TV" in GUIDE
+    assert "tuning a channel yourself stops it early" in GUIDE
+
+
+def test_guide_orders_primaries_before_subchannels():
+    """The grid must match the channel list's order, not group by station."""
+    sort = section(GUIDE, "function channelSortKey", "function renderMeta")
+    assert "minor === 1 ? [0, major, 0] : [1, major, minor]" in sort
+    # The naive major-then-minor comparison is the thing being replaced.
+    assert "aMajor - bMajor || aMinor - bMinor" not in GUIDE
+
+
+def test_pages_address_the_api_relatively():
+    """Absolute API paths break the UI behind the Apache /tv/ proxy.
+
+    A page served at /tv/guide.html that asks for "/api/guide" escapes the
+    proxy prefix and gets Apache's document root back, so the failure is a
+    chunk of HTML arriving where JSON was expected -- and it only ever
+    reproduces through the proxy, never on :8080 directly.
+    """
+    import re
+
+    pattern = re.compile(r"""(?:fetch|EventSource)\(\s*[`'"]/""")
+    for name, page in (("index", INDEX), ("about", ABOUT),
+                       ("cable", CABLE), ("guide", GUIDE), ("vcr", VCR)):
+        assert not pattern.search(page), f"{name}.html calls the API absolutely"
+
+
+# ---------------------------------------------------------------------------
+# Tuner lock override
+# ---------------------------------------------------------------------------
+
+def test_override_is_never_automatic():
+    """A 423 must reach a person, not be retried past by the page."""
+    tune = section(INDEX, "async function tuneTv", "// Playback retries")
+    assert "res.status === 423" in tune
+    assert "await confirmOverride(" in tune
+    # The retry only happens after the prompt resolves true.
+    assert tune.index("await confirmOverride(") < tune.index('post({ override: true })')
+    assert "if (!await confirmOverride" in tune
+
+
+def test_the_override_prompt_warns_before_it_offers_the_button():
+    prompt = section(INDEX, "function confirmOverride", "function closeOverride")
+    assert "cannot be undone" in prompt
+    assert "interrupts whatever that service is doing" in prompt
+    # The safe choice holds focus so a stray Enter cannot break a lock.
+    assert "els.ovrCancel.focus()" in prompt
+    assert 'id="ovr-confirm"' in INDEX
+    assert "Override the lock" in INDEX
+
+
+def test_dismissing_the_prompt_leaves_the_lock_alone():
+    tune = section(INDEX, "async function tuneTv", "// Playback retries")
+    assert 'setStatus("Tuner locked", "error")' in tune
+    close = section(INDEX, "function closeOverride", "els.ovrCancel.addEventListener")
+    assert "overrideResolve(result)" in close
+    # Escape and a backdrop click both resolve false, never true.
+    assert "closeOverride(false)" in INDEX
+    assert INDEX.count("closeOverride(true)") == 1
+
+
+def test_releasing_a_lock_from_the_ui_goes_through_the_same_prompt():
+    release = section(INDEX, 'els.lockPill.addEventListener',
+                      "async function pollLock")
+    assert "await confirmOverride(lock, \"release this lock\")" in release
+    assert '"api/v1/tuner/lock/release", "api/tuner/lock/release"' in release
+    assert "override: true" in release
+
+
+def test_every_element_the_script_queries_exists_before_it_runs():
+    """The script runs inline, so a later element resolves to null.
+
+    Adding the override modal after the closing </script> made $() return
+    null, and the TypeError that followed aborted the rest of the script --
+    which is where the channel list is loaded. The page came up blank with a
+    working API behind it.
+    """
+    import re
+
+    script_start = INDEX.index("<script>")
+    ids = set(re.findall(r'\$\("([a-z0-9-]+)"\)', INDEX))
+    assert ids, "no $() lookups found -- has the pattern changed?"
+
+    for element_id in sorted(ids):
+        marker = f'id="{element_id}"'
+        assert marker in INDEX, f"{element_id} is queried but never defined"
+        assert INDEX.index(marker) < script_start, (
+            f"{element_id} is defined after the script that queries it"
+        )
+
+
+def test_live_controls_do_not_advertise_dvr_seeking():
+    assert '<video id="player" controls' not in INDEX
+    assert 'id="live-play"' in INDEX
+    assert 'id="live-volume"' in INDEX
+    assert 'id="live-fullscreen"' in INDEX
+    assert 'id="live-edge"' in INDEX
+    assert 'initialLiveManifestSize: 4' in INDEX
+
+
+def test_player_uses_lane_playlist_instead_of_shared_primary_alias():
+    playback = section(INDEX, "function startTvPlayback", "function startFmPlayback")
+    assert 'state.playing === "cable" ? "analog" : "digital"' in playback
+    assert 'stream/live.m3u8' not in playback
+
+
+def test_live_player_runtime():
+    import shutil
+    import subprocess
+    import pytest
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is required for live player runtime tests")
+    subprocess.run([node, "--test", str(ROOT / "test_live_player.cjs")],
+                   check=True, capture_output=True, text=True, timeout=15)
+
+
+# ---------------------------------------------------------------------------
+# VCR
+# ---------------------------------------------------------------------------
+
+def test_vcr_is_reachable_from_every_page():
+    for name in ("index", "about", "cable", "guide", "rescan", "dx", "vcr"):
+        page = (STATIC / f"{name}.html").read_text()
+        assert 'href="vcr.html"' in page, f"{name}.html has no VCR link"
+
+
+def test_vcr_offers_both_channel_time_and_guide_name_programming():
+    assert 'id="panel-ctime"' in VCR and "CH/TIME" in VCR
+    assert 'id="panel-name"' in VCR and "GUIDE NAME" in VCR
+    assert 'mode: "manual"' in VCR
+    assert 'mode: "guide"' in VCR
+    assert 'mode: "otr"' in VCR
+    assert "api/v1/recordings/search" in VCR or "${API}/search" in VCR
+
+
+def test_vcr_script_only_queries_elements_defined_before_it():
+    import re
+
+    script_start = VCR.index("<script>")
+    ids = set(re.findall(r'\$\("([a-z0-9-]+)"\)', VCR))
+    ids |= {f"tab-{t}" for t in ("ctime", "name", "timers", "tapes")}
+    ids |= {f"panel-{t}" for t in ("ctime", "name", "timers", "tapes")}
+    assert len(ids) > 20
+    for element_id in sorted(ids):
+        marker = f'id="{element_id}"'
+        assert marker in VCR, f"{element_id} is queried but never defined"
+        assert VCR.index(marker) < script_start
+
+
+def test_vcr_never_interpolates_programme_titles_as_html():
+    script = VCR[VCR.index("<script>"):]
+    assert "innerHTML" not in script
+
+
+def test_erasing_a_tape_asks_first_with_the_safe_choice_focused():
+    assert 'id="confirm-no"' in VCR
+    ask = VCR[VCR.index("function askErase"):VCR.index("function closeErase")]
+    assert '$("confirm-no").focus()' in ask
+    erase = VCR[VCR.index('$("confirm-yes").addEventListener'):]
+    assert "${API}/erase" in erase[:400]
+
+
+def test_the_guide_can_hand_an_airing_to_the_vcr():
+    assert 'id="d-record"' in GUIDE
+    record = GUIDE[GUIDE.index("async function record"):]
+    assert "'api/v1/recordings'" in record[:400]
+    assert "mode: 'guide'" in record[:600]
+
+
+# ---------------------------------------------------------------------------
+# Shared chrome
+# ---------------------------------------------------------------------------
+
+PAGES = ("index", "guide", "vcr", "cable", "rescan", "dx", "about")
+
+
+def test_every_page_has_the_same_nav_in_the_same_place():
+    """The links must not move between pages.
+
+    They are left-aligned straight after the brand and identical everywhere
+    except for which one is marked current; page-specific controls live in
+    .topbar-tools on the right, where they cannot push the nav around.
+    """
+    import re
+
+    navs = {}
+    for name in PAGES:
+        page = (STATIC / f"{name}.html").read_text()
+        header = section(page, '<header class="topbar">', "</header>")
+        nav = section(header, '<nav class="nav"', "</nav>")
+        assert header.index('class="brand"') < header.index('<nav class="nav"')
+        assert 'class="spacer"' not in header
+        assert nav.count('aria-current="page"') == 1, name
+        navs[name] = re.sub(r"\s+", " ", nav.replace(' aria-current="page"', ""))
+    assert len(set(navs.values())) == 1, navs
+
+
+def test_no_page_restyles_the_shared_top_bar():
+    for name in PAGES:
+        page = (STATIC / f"{name}.html").read_text()
+        style = page[:page.index("</style>")] if "</style>" in page else ""
+        assert ".navlink" not in style, name
+        assert ".brand span" not in style, name
+
+
+def test_guide_preview_only_watches_and_never_tunes():
+    preview = section(GUIDE, "// ---------- Picture-in-picture preview",
+                      "// ---------- Clock")
+    assert "api/v1/status" in preview
+    assert "api/tune" not in preview and "method:" not in preview
+    assert '<video id="pip-video" muted' in GUIDE
+
+
+def test_guide_keyboard_moves_like_a_remote():
+    keys = section(GUIDE, "document.addEventListener('keydown'", "let resizeFrame")
+    for key in ("ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"):
+        assert key in keys
+
+
+def test_tapes_can_be_played_and_saved_from_the_vcr():
+    tapes = section(VCR, "function renderTapes()", "function askErase(")
+    assert '"▶ PLAY"' in tapes and '"SAVE"' in tapes
+    assert "save.download = tape.name" in tapes
+    assert 'download ? "&download=1"' in VCR
+    assert "api/v1/recordings" in VCR and "/file?name=${encodeURIComponent(name)}" in VCR
+    assert 'id="tape-video"' in VCR and 'id="player-stop"' in VCR
+    # Erasing the tape that is playing ejects it first.
+    erase = VCR[VCR.index('$("confirm-yes").addEventListener'):]
+    assert "stopTape();" in erase[:200]
+
+
+def test_watch_page_banner_uses_the_guide_without_tuning():
+    banner = section(INDEX, "// ---------- info banner", "// Controls fade away")
+    assert 'fetch("api/guide/now"' in banner
+    assert "api/guide?channel=" in banner
+    assert "method:" not in banner and "api/tune" not in banner
+    assert "escapeHtml(on.title" in banner and "escapeHtml(e.title" in banner
+
+
+def test_watch_page_video_leaves_room_for_the_banner():
+    assert "max-height: calc(100% - var(--banner-min))" in INDEX
+    assert "grid-template-columns: minmax(0, 1fr) var(--panel-w)" in INDEX
+
+
+def test_hidden_attribute_always_wins():
+    css = (STATIC / "app.css").read_text()
+    assert "[hidden] { display: none !important; }" in css

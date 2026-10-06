@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DX — TV Thing</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="app.css">
+  <style>
+    body { display: flex; flex-direction: column; min-height: 100%; }
+
+    .dx-layout { display: grid; grid-template-columns: 1fr 320px; gap: 22px; }
+    @media (max-width: 900px) { .dx-layout { grid-template-columns: 1fr; } }
+
+    .controls {
+      display: flex; align-items: center; gap: 14px;
+      flex-wrap: wrap; margin-bottom: 18px;
+    }
+    .controls label { font-size: 12.5px; color: var(--text-dim); }
+    .controls input[type="number"] {
+      width: 62px; background: var(--surface-2); color: var(--text);
+      border: 1px solid var(--border); border-radius: var(--r-sm);
+      padding: 5px 7px; font: inherit; font-size: 13px;
+    }
+    .hint { font-size: 12.5px; color: var(--text-mute); }
+
+    .band { margin-bottom: 20px; }
+    .band h2 {
+      font-size: 11px; letter-spacing: .09em; text-transform: uppercase;
+      color: var(--text-mute); margin: 0 0 8px; font-weight: 600;
+    }
+    .grid {
+      display: grid; gap: 6px;
+      grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+    }
+    .cell {
+      position: relative; background: var(--surface-2);
+      border: 1px solid var(--border); border-radius: var(--r-md);
+      padding: 8px 6px; cursor: pointer; text-align: center;
+      transition: border-color .12s var(--ease), background .12s var(--ease);
+    }
+    .cell:hover { border-color: var(--border-strong); background: var(--surface-3); }
+    .cell[aria-current="true"] { border-color: var(--accent-line); background: var(--accent-soft); }
+    .cell.locked  { border-color: rgba(74, 222, 128, .5); }
+    .cell.nosig   { opacity: .45; }
+    .cell.busy    { border-color: var(--accent-line); }
+    .cell-rf   { font: 600 15px/1.1 var(--mono); color: var(--text); }
+    .cell-mhz  { font-size: 10.5px; color: var(--text-mute); margin-top: 2px; }
+    .cell-snr  { font: 600 10.5px/1.3 var(--mono); margin-top: 3px; min-height: 14px; }
+    .cell.locked .cell-snr { color: var(--ok); }
+    .cell-known {
+      font-size: 10px; color: var(--text-dim); margin-top: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .cell.repacked .cell-rf { color: var(--text-mute); }
+
+    .readout {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--r-lg); padding: 16px; position: sticky; top: 16px;
+    }
+    .readout h2 { margin: 0 0 2px; font-size: 15px; }
+    .readout .sub { font-size: 12px; color: var(--text-mute); margin-bottom: 14px; }
+
+    .meter { margin-bottom: 12px; }
+    .meter-head {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-size: 11.5px; color: var(--text-dim); margin-bottom: 4px;
+    }
+    .meter-head b { font: 600 13px var(--mono); color: var(--text); }
+    .meter-track {
+      height: 6px; background: var(--surface-3);
+      border-radius: var(--r-full); overflow: hidden; position: relative;
+    }
+    .meter-fill {
+      height: 100%; width: 0; border-radius: var(--r-full);
+      background: var(--accent); transition: width .25s var(--ease);
+    }
+    .meter-fill.ok { background: var(--ok); }
+    .meter-fill.warn { background: var(--warn); }
+    .meter-fill.err { background: var(--err); }
+    /* Where 8VSB stops decoding, ~15 dB. */
+    .meter-track .threshold {
+      position: absolute; top: -2px; bottom: -2px; width: 1px;
+      background: var(--border-strong);
+    }
+
+    .facts { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 12px; }
+    .fact { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; padding: 3px 0; }
+    .fact span { color: var(--text-mute); }
+    .fact b { font: 500 12.5px var(--mono); color: var(--text); }
+
+    .services { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
+    .service {
+      display: flex; gap: 8px; align-items: baseline;
+      font-size: 12.5px; padding: 4px 0;
+    }
+    .service .num { font: 600 12px var(--mono); color: var(--accent); min-width: 38px; }
+    .service .pids { margin-left: auto; font: 11px var(--mono); color: var(--text-mute); }
+    .empty { font-size: 12.5px; color: var(--text-mute); padding: 6px 0; }
+
+    .pill {
+      display: inline-block; font-size: 10.5px; font-weight: 600;
+      letter-spacing: .04em; text-transform: uppercase;
+      padding: 2px 7px; border-radius: var(--r-full);
+    }
+    .pill.lock   { background: rgba(74,222,128,.15); color: var(--ok); }
+    .pill.nolock { background: rgba(248,113,113,.15); color: var(--err); }
+    .pill.busy   { background: var(--accent-soft); color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./"><span class="brand-mark"></span><span>TV Thing</span></a>
+    <nav class="nav" aria-label="Pages">
+      <a class="navlink" href="./">Watch</a>
+      <a class="navlink" href="guide.html">Guide</a>
+      <a class="navlink" href="vcr.html">VCR</a>
+      <a class="navlink" href="cable.html">Cable</a>
+      <a class="navlink" href="rescan.html">Scan</a>
+      <a class="navlink" href="dx.html" aria-current="page">DX</a>
+      <a class="navlink" href="about.html">About</a>
+    </nav>
+  </header>
+
+  <div class="page">
+    <h1>DX Meter</h1>
+    <p class="lede">Tune one RF channel at a time and watch what the demodulator
+       sees. Each probe holds the digital tuner only while it measures, so an
+       analog stream keeps playing.</p>
+
+    <div class="controls">
+      <label>Dwell
+        <input type="number" id="dwell" value="3" min="0" max="30" step="1"> s
+      </label>
+      <label>Lock wait
+        <input type="number" id="lockwait" value="2" min="0.3" max="10" step="0.5"> s
+      </label>
+      <label>
+        <input type="checkbox" id="repacked"> Show RF 37–69
+      </label>
+      <span class="hint" id="hint">Click a channel to probe it.</span>
+    </div>
+
+    <div class="dx-layout">
+      <div id="bands"></div>
+
+      <aside class="readout" aria-live="polite">
+        <h2 id="r-title">No channel probed</h2>
+        <div class="sub" id="r-sub">Pick an RF channel to begin.</div>
+
+        <div class="meter">
+          <div class="meter-head"><span>SNR</span><b id="m-snr">—</b></div>
+          <div class="meter-track">
+            <div class="meter-fill" id="m-snr-fill"></div>
+            <div class="threshold" id="m-snr-thr" style="left:43%"></div>
+          </div>
+        </div>
+
+        <div class="meter">
+          <div class="meter-head"><span>Signal</span><b id="m-sig">—</b></div>
+          <div class="meter-track"><div class="meter-fill" id="m-sig-fill"></div></div>
+        </div>
+
+        <div class="meter">
+          <div class="meter-head"><span>Lock held</span><b id="m-lock">—</b></div>
+          <div class="meter-track"><div class="meter-fill" id="m-lock-fill"></div></div>
+        </div>
+
+        <div class="facts" id="facts"></div>
+        <div class="services" id="services"></div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+  (() => {
+    "use strict";
+    const $ = (id) => document.getElementById(id);
+    const BANDS = [
+      ["VHF-Lo", "VHF-Lo · 54–88 MHz"],
+      ["VHF-Hi", "VHF-Hi · 174–216 MHz"],
+      ["UHF", "UHF · 470–608 MHz"],
+      ["Repacked", "Repacked · RF 37–69, reallocated in 2020"],
+    ];
+    // 8VSB needs roughly this much SNR to decode; the scale runs to 35 dB.
+    const SNR_THRESHOLD = 15, SNR_MAX = 35;
+
+    const cells = {};
+    let plan = [];
+    let busy = false;
+    let current = null;
+
+    function bandKey(entry) {
+      return entry.repacked ? "Repacked" : entry.band;
+    }
+
+    async function loadPlan() {
+      const include = $("repacked").checked ? "1" : "0";
+      const res = await fetch(`api/v1/scan/plan?include_repacked=${include}`,
+                              { cache: "no-store" });
+      plan = (await res.json()).channels || [];
+      render();
+    }
+
+    function render() {
+      const host = $("bands");
+      host.innerHTML = "";
+      for (const [key, label] of BANDS) {
+        const entries = plan.filter(e => bandKey(e) === key);
+        if (!entries.length) continue;
+        const section = document.createElement("div");
+        section.className = "band";
+        section.innerHTML = `<h2>${label}</h2><div class="grid"></div>`;
+        const grid = section.querySelector(".grid");
+        for (const entry of entries) {
+          const cell = document.createElement("div");
+          cell.className = "cell" + (entry.repacked ? " repacked" : "");
+          cell.setAttribute("role", "button");
+          cell.tabIndex = 0;
+          const known = entry.known_channels.map(c => c.number).join(" ");
+          cell.innerHTML =
+            `<div class="cell-rf">${entry.rf_channel}</div>` +
+            `<div class="cell-mhz">${entry.frequency_mhz.toFixed(0)} MHz</div>` +
+            `<div class="cell-snr"></div>` +
+            `<div class="cell-known">${known}</div>`;
+          const probe = () => probeChannel(entry);
+          cell.addEventListener("click", probe);
+          cell.addEventListener("keydown", e => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); probe(); }
+          });
+          grid.appendChild(cell);
+          cells[entry.rf_channel] = cell;
+        }
+        host.appendChild(section);
+      }
+    }
+
+    function setMeter(fillId, textId, value, max, text, tone) {
+      const pct = value === null || value === undefined
+        ? 0 : Math.max(0, Math.min(100, (value / max) * 100));
+      const fill = $(fillId);
+      fill.style.width = pct + "%";
+      fill.className = "meter-fill" + (tone ? " " + tone : "");
+      $(textId).textContent = text;
+    }
+
+    function snrTone(db) {
+      if (db === null || db === undefined) return "";
+      if (db >= 20) return "ok";
+      if (db >= SNR_THRESHOLD) return "warn";
+      return "err";
+    }
+
+    async function probeChannel(entry) {
+      if (busy) return;
+      busy = true;
+      if (current) current.removeAttribute("aria-current");
+      const cell = cells[entry.rf_channel];
+      current = cell;
+      cell.setAttribute("aria-current", "true");
+      cell.classList.add("busy");
+      cell.classList.remove("locked", "nosig");
+
+      $("r-title").textContent = `RF ${entry.rf_channel}`;
+      $("r-sub").innerHTML =
+        `${entry.frequency_mhz.toFixed(0)} MHz · <span class="pill busy">probing</span>`;
+      $("hint").textContent = "Holding the digital tuner…";
+
+      try {
+        const res = await fetch("api/v1/scan/channel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rf_channel: entry.rf_channel,
+            dwell: Number($("dwell").value) || 0,
+            lock_timeout: Number($("lockwait").value) || 2,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.ok === false) {
+          const message = (data.error && data.error.message) || "Probe failed";
+          $("r-sub").innerHTML =
+            `${entry.frequency_mhz.toFixed(0)} MHz · <span class="pill nolock">${message}</span>`;
+          $("hint").textContent = message;
+          return;
+        }
+        showResult(entry, data);
+      } catch (e) {
+        $("hint").textContent = e.message || "Probe failed";
+      } finally {
+        busy = false;
+        cell.classList.remove("busy");
+        $("hint").textContent = "Click a channel to probe it.";
+      }
+    }
+
+    function showResult(entry, data) {
+      const cell = cells[entry.rf_channel];
+      cell.classList.toggle("locked", !!data.locked);
+      cell.classList.toggle("nosig", !data.locked);
+      cell.querySelector(".cell-snr").textContent =
+        data.locked && data.snr_db != null ? `${data.snr_db} dB` : "";
+
+      const lockPill = data.locked
+        ? `<span class="pill lock">lock</span>`
+        : `<span class="pill nolock">no lock</span>`;
+      $("r-title").textContent = `RF ${entry.rf_channel}`;
+      $("r-sub").innerHTML =
+        `${entry.frequency_mhz.toFixed(0)} MHz · ${lockPill}`;
+
+      const range = data.snr_db_range;
+      setMeter("m-snr-fill", "m-snr", data.snr_db, SNR_MAX,
+        data.snr_db == null ? "—"
+          : range ? `${range.min}–${range.max} dB` : `${data.snr_db} dB`,
+        snrTone(data.snr_db));
+      $("m-snr-thr").style.left = (SNR_THRESHOLD / SNR_MAX * 100) + "%";
+
+      setMeter("m-sig-fill", "m-sig", data.signal_percent, 100,
+        data.signal_percent == null ? "—" : `${data.signal_percent}%`, "");
+
+      const ratio = data.lock_ratio;
+      setMeter("m-lock-fill", "m-lock", ratio == null ? null : ratio * 100, 100,
+        ratio == null ? "—" : `${Math.round(ratio * 100)}%`,
+        ratio >= 0.95 ? "ok" : ratio > 0 ? "warn" : "err");
+
+      const facts = [
+        ["Frequency", `${data.frequency_mhz.toFixed(0)} MHz`],
+        ["Band edge", `${data.lower_edge_mhz} MHz`],
+        ["Samples", data.samples ?? "—"],
+        ["BER", data.ber ?? "—"],
+        ["Uncorrected", data.uncorrected_blocks ?? "—"],
+        ["Probe time", `${data.elapsed_seconds}s`],
+      ];
+      if (range) facts.splice(2, 0, ["SNR mean", `${range.mean} dB`]);
+      $("facts").innerHTML = facts.map(
+        ([k, v]) => `<div class="fact"><span>${k}</span><b>${v}</b></div>`
+      ).join("");
+
+      const services = data.virtual_channels || [];
+      $("services").innerHTML = services.length
+        ? services.map(s =>
+            `<div class="service">` +
+            `<span class="num">${s.number}</span>` +
+            `<span>${s.name || "(unnamed)"}</span>` +
+            `<span class="pids">${s.video_pid ? `v${s.video_pid}/a${s.audio_pid}` : "no PMT"}</span>` +
+            `</div>`).join("")
+        : `<div class="empty">${data.locked
+            ? "Locked, but no PSIP table was readable."
+            : "Nothing decoded here."}</div>`;
+
+      const known = entry.known_channels.map(c => c.number).join(" ");
+      cell.querySelector(".cell-known").textContent =
+        services.length ? services.map(s => s.number).join(" ") : known;
+    }
+
+    $("repacked").addEventListener("change", loadPlan);
+    loadPlan();
+  })();
+  </script>
+</body>
+</html>

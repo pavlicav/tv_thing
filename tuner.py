@@ -23,8 +23,8 @@ FE_READ_STATUS = 0x80046F45
 DTV_FREQUENCY = 3
 DTV_MODULATION = 4
 DTV_DELIVERY_SYSTEM = 17
-DTV_TUNE = 18
-DTV_CLEAR = 19
+DTV_TUNE = 1
+DTV_CLEAR = 2
 
 # Delivery systems
 SYS_ATSC = 11
@@ -49,28 +49,26 @@ DMX_SET_BUFFER_SIZE = 0x6F2D
 DMX_IN_FRONTEND = 0
 DMX_OUT_TS_TAP = 2
 DMX_PES_OTHER = 20
-DMX_IMMEDIATE_START = 0x01
+DMX_IMMEDIATE_START = 0x04
 
 
 class DtvProperty(ctypes.Structure):
-    """struct dtv_property — 48 bytes on x86_64.
+    """Packed ``struct dtv_property`` — 76 bytes on x86_64.
 
     Layout from linux/dvb/frontend.h:
         __u32 cmd;
         __u32 reserved[3];
-        union { __u32 data; ... } u;  (48 bytes)
+        union { __u32 data; ... } u;  (56 bytes)
         int result;
-    Total = 4 + 12 + 48 + 4 = 68 bytes? No...
-
-    Actually the kernel struct is simpler for our purposes.
-    We just need cmd + data at known offsets. The union starts
-    at offset 16 and data is the first __u32 in it.
+    The union starts at offset 16 and ``data`` is its first member. Its
+    largest member is the 56-byte property buffer, so retaining that full
+    size is required even when a command only uses the first uint32.
     """
     _fields_ = [
         ("cmd", ctypes.c_uint32),           # offset 0
         ("reserved", ctypes.c_uint32 * 3),  # offset 4
         ("data", ctypes.c_uint32),          # offset 16 (first member of union)
-        ("_pad", ctypes.c_uint8 * 44),      # rest of union
+        ("_pad", ctypes.c_uint8 * 52),      # rest of the 56-byte union
         ("result", ctypes.c_int32),         # after union
     ]
 

@@ -3,277 +3,229 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>About - TV Thing</title>
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <title>About · TV Thing</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="app.css">
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: Georgia, "Times New Roman", serif;
-      background: #111;
-      color: #d4cfc7;
-      line-height: 1.8;
-      padding: 2rem 1.5rem;
-      max-width: 740px;
-      margin: 0 auto;
+    body { min-height: 100vh; background: var(--bg); }
+    .page { width: min(920px, calc(100% - 32px)); margin: 0 auto; padding: 46px 0 72px; }
+    .eyebrow {
+      color: var(--accent); font-size: 11px; font-weight: 700;
+      letter-spacing: .16em; text-transform: uppercase;
     }
-    a { color: #b8a070; text-decoration: none; }
-    a:hover { color: #d4c090; }
-    h1 {
-      font-size: 1.3rem;
-      font-weight: 400;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      color: #b8a070;
-      margin-bottom: 0.3rem;
+    h1 { margin: 10px 0 12px; font-size: clamp(32px, 6vw, 54px); line-height: 1; }
+    .lede { max-width: 700px; color: var(--text-mute); font-size: 16px; line-height: 1.65; }
+    .flow {
+      display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px;
+      margin: 34px 0; overflow: hidden; border: 1px solid var(--border);
+      border-radius: 10px; background: var(--border);
     }
-    h2 {
-      font-size: 1rem;
-      font-weight: 400;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      margin: 2.5rem 0 0.75rem;
-      color: #8a7a5a;
-      border-bottom: 1px solid #222;
-      padding-bottom: 0.4rem;
+    .flow-step { min-height: 108px; padding: 16px; background: var(--surface); }
+    .flow-num { color: var(--accent); font: 600 11px/1 var(--mono); }
+    .flow-name { margin-top: 15px; font-weight: 650; }
+    .flow-sub { margin-top: 5px; color: var(--text-mute); font-size: 11px; line-height: 1.45; }
+    .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+    .card { padding: 22px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+    .card h2 { margin: 0 0 10px; font-size: 15px; }
+    .card p, .card li { color: var(--text-mute); font-size: 13px; line-height: 1.65; }
+    .card p:last-child { margin-bottom: 0; }
+    .card ul { margin: 8px 0 0; padding-left: 18px; }
+    .tag {
+      display: inline-block; margin: 2px 4px 2px 0; padding: 3px 7px;
+      border: 1px solid var(--border); border-radius: 999px;
+      color: var(--text-mute); font: 600 10px/1.4 var(--mono);
     }
-    h3 {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 0.8rem;
-      font-weight: 600;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      margin: 1.5rem 0 0.5rem;
-      color: #888;
+    code { color: var(--text); font-family: var(--mono); font-size: .92em; }
+    .note { margin-top: 14px; padding: 18px 20px; border-left: 2px solid var(--accent); background: var(--surface); }
+    .note strong { display: block; margin-bottom: 5px; font-size: 13px; }
+    .note span { color: var(--text-mute); font-size: 12px; line-height: 1.55; }
+    @media (max-width: 760px) {
+      .flow { grid-template-columns: 1fr; }
+      .flow-step { min-height: 0; }
+      .grid { grid-template-columns: 1fr; }
     }
-    p { margin-bottom: 1rem; font-size: 0.95rem; }
-    code {
-      font-family: "SF Mono", Menlo, Consolas, monospace;
-      background: #1a1a1a;
-      padding: 0.1em 0.35em;
-      border-radius: 2px;
-      font-size: 0.85em;
-      color: #c8b888;
-    }
-    pre {
-      background: #0a0a0a;
-      border: 1px solid #1a1a1a;
-      border-radius: 3px;
-      padding: 1rem;
-      overflow-x: auto;
-      margin: 1rem 0;
-      font-size: 0.8rem;
-      line-height: 1.5;
-    }
-    pre code { background: none; padding: 0; color: #999; }
-    ul, ol { margin: 0.5rem 0 1rem 1.5rem; font-size: 0.95rem; }
-    li { margin-bottom: 0.3rem; }
-    .subtitle {
-      color: #777;
-      font-size: 0.9rem;
-      margin-bottom: 2rem;
-      font-style: italic;
-    }
-    .diagram {
-      background: #0a0a0a;
-      border: 1px solid #1a1a1a;
-      border-radius: 3px;
-      padding: 1.25rem;
-      overflow-x: auto;
-      margin: 1rem 0;
-      font-family: "SF Mono", Menlo, Consolas, monospace;
-      font-size: 0.75rem;
-      line-height: 1.4;
-      white-space: pre;
-      color: #888;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 1rem 0;
-      font-size: 0.9rem;
-    }
-    th, td {
-      text-align: left;
-      padding: 0.45rem 0.6rem;
-      border-bottom: 1px solid #1a1a1a;
-    }
-    th {
-      color: #8a7a5a;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 0.75rem;
-      font-weight: 600;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-    }
-    .back {
-      display: inline-block;
-      margin-bottom: 1.5rem;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 0.8rem;
-      letter-spacing: 0.03em;
-      color: #666;
-    }
-    .back:hover { color: #b8a070; }
   </style>
 </head>
 <body>
+  <header class="topbar">
+    <a class="brand" href="./"><span class="brand-mark"></span><span>TV Thing</span></a>
+    <nav class="nav" aria-label="Pages">
+      <a class="navlink" href="./">Watch</a>
+      <a class="navlink" href="guide.html">Guide</a>
+      <a class="navlink" href="vcr.html">VCR</a>
+      <a class="navlink" href="cable.html">Cable</a>
+      <a class="navlink" href="rescan.html">Scan</a>
+      <a class="navlink" href="dx.html">DX</a>
+      <a class="navlink" href="about.html" aria-current="page">About</a>
+    </nav>
+  </header>
 
-<a href="/" class="back">&larr; Back to TV Thing</a>
+  <main class="page">
+    <div class="eyebrow">Broadcast · analog · concurrent</div>
+    <h1>About TV Thing</h1>
+    <p class="lede">
+      TV Thing turns the Hauppauge HVR-1600 in <code>viviserv</code> into
+      low-latency browser streams. The card carries two independent RF
+      front-ends, so a digital and an analog channel stream at the same time,
+      each on its own playlist. It is purpose-built around the installed
+      hardware, with fast source changes and hard limits that keep a bad
+      timestamp or encoder failure from running away with the machine.
+    </p>
 
-<h1>TV Thing</h1>
-<p class="subtitle">Stream over-the-air ATSC television to any device on the local network.</p>
+    <section class="flow" aria-label="Broadcast processing path">
+      <div class="flow-step"><div class="flow-num">01</div><div class="flow-name">ATSC tuner</div><div class="flow-sub">Linux DVB frontend locks the requested RF channel.</div></div>
+      <div class="flow-step"><div class="flow-num">02</div><div class="flow-name">Service select</div><div class="flow-sub"><code>dvb_source.py</code> keeps the chosen program and remaps its PIDs.</div></div>
+      <div class="flow-step"><div class="flow-num">03</div><div class="flow-name">Local UDP</div><div class="flow-sub">A small MPEG transport stream crosses localhost only.</div></div>
+      <div class="flow-step"><div class="flow-num">04</div><div class="flow-name">Bounded encode</div><div class="flow-sub">FFmpeg produces H.264/AAC in 600 ms, generation-scoped HLS segments.</div></div>
+      <div class="flow-step"><div class="flow-num">05</div><div class="flow-name">Browser</div><div class="flow-sub">The UI waits for the exact generation, then atomically hands it to hls.js.</div></div>
+    </section>
 
-<h2>How It Works</h2>
+    <section class="grid">
+      <article class="card">
+        <h2>Why every tune starts fresh</h2>
+        <p>
+          Stations do not share one reliable timestamp clock. Reusing an encoder
+          across channels can make FFmpeg invent huge runs of duplicate frames.
+          Each request therefore gets a new source, encoder, stream ID, and
+          segment namespace. The old picture stays visible until the new
+          manifest is actually ready.
+        </p>
+      </article>
 
-<div class="diagram">
- Antenna
-    |
-    v
-+--------------------+
-| Hauppauge HVR-1600 |   cx18 kernel driver
-| DVB frontend       |   /dev/dvb/adapter0/frontend0  (tuning)
-| /dev/dvb/adapter0/ |   /dev/dvb/adapter0/demux0     (section filters)
-+--------+-----------+   NOTE: dvr0 is broken on this card — VLC works around it
-         |
-         | (tuned, locked)
-         |
-   +-----+-------------------------------+
-   |                                     |
-   v                                     v
-+------------------+           +--------------------+
-| cvlc             |           | fetch_vct.py       |  (during rescan only)
-| atsc://frequency |           |                    |
-| DVB tune + demux |           | opens demux0 fd    |
-| select --program |           | DMX_SET_FILTER:    |
-| H.264 + AAC      |           |   PID 0x1FFB (PSIP)|
-| livehttp HLS out |           |   table 0xC8 (TVCT)|
-+--------+---------+           | reads virtual ch # |
-         |                     | writes vct_data.json
-         v                     +--------------------+
-  streams/live.m3u8
-  streams/segment_NNN.ts
-         |
-         v
-+------------------+
-| server.py        |   Python HTTP, ThreadingMixIn, port 8080
-| /api/channels    |   serves channels.json
-| /api/tune        |   spawns cvlc, manages process
-| /api/stop        |   kills cvlc, clears streams/
-| /api/status      |   returns streaming state
-| /api/rescan/     |   SSE: w_scan → fetch_vct → parse_channels
-|   stream         |
-| /stream/*.m3u8   |   serves HLS playlist
-| /stream/*.ts     |   serves HLS segments
-+--------+---------+
-         |
-         v
-+------------------+
-| Browser (hls.js) |   MSE-based HLS playback, any device on LAN
-| Channel list     |   PSIP virtual numbers (4.1, 5.1, 9.1 …)
-| Quality picker   |   480p / 720p / 1080p
-+------------------+
-</div>
+      <article class="card">
+        <h2>Quality presets</h2>
+        <p>
+          <span class="tag">480p · 1 Mb/s</span>
+          <span class="tag">720p · 2.5 Mb/s</span>
+          <span class="tag">Native · 4.5 Mb/s</span>
+        </p>
+        <p>Audio is AAC at 96, 128, or 160 kb/s respectively.</p>
+      </article>
 
-<p>The signal path has four stages:</p>
-<ol>
-  <li><strong>Tuning &amp; streaming</strong> &mdash; <code>cvlc</code> (headless VLC) commands the DVB frontend, demuxes the transport stream, selects the right program by service ID, transcodes video to H.264 and audio to AAC, and writes HLS segments to <code>streams/</code>.</li>
-  <li><strong>Channel numbering</strong> &mdash; During a rescan, <code>fetch_vct.py</code> opens a separate fd on <code>demux0</code> and installs a DVB section filter for PID <code>0x1FFB</code> (the PSIP base PID) to read the Virtual Channel Table. This gives real virtual channel numbers (WRC-TV = 4.1, Fox 5 = 5.1) rather than RF channel numbers.</li>
-  <li><strong>Serving</strong> &mdash; The Python server serves the HLS playlist and segments, plus the REST API and web UI.</li>
-  <li><strong>Playback</strong> &mdash; hls.js in the browser fetches segments and plays them in real time.</li>
-</ol>
+      <article class="card">
+        <h2>Guardrails</h2>
+        <ul>
+          <li>Duplicate-frame and UDP-overrun trips</li>
+          <li>Maximum segment size and stalled-output watchdogs</li>
+          <li>CPU, memory, process, file-size, GPU, and temperature limits</li>
+          <li>Three real retunes plus software decode before deployment</li>
+        </ul>
+      </article>
 
-<h2>Components</h2>
+      <article class="card">
+        <h2>Encoding on viviserv</h2>
+        <p>
+          Production currently uses low-latency <code>libx264</code>. The NVIDIA
+          Quadro K4200 can encode with NVENC, but sustained streaming drove this
+          particular card to its thermal ceiling, so the safe CPU path is pinned.
+          Hardware probing and automatic fallback remain available.
+        </p>
+      </article>
 
-<h3>Hardware</h3>
-<table>
-  <tr><th>Component</th><th>Details</th></tr>
-  <tr><td>TV Tuner Card</td><td>Hauppauge HVR-1600 (PCIe)</td></tr>
-  <tr><td>Encoder Chip</td><td>Conexant CX23418 &mdash; hardware MPEG-2 encoder</td></tr>
-  <tr><td>Demodulator</td><td>Samsung S5H1409 &mdash; 8VSB (ATSC) + QAM</td></tr>
-  <tr><td>Kernel Driver</td><td><code>cx18</code></td></tr>
-  <tr><td>Frequency Range</td><td>54 MHz &ndash; 858 MHz</td></tr>
-</table>
+      <article class="card">
+        <h2>Operational pieces</h2>
+        <p>
+          <code>server.py</code> owns the API and lifecycle,
+          <code>dvb_source.py</code> talks directly to Linux DVB,
+          <code>atsc_scan.py</code> sweeps the band and probes single
+          channels for DX, and
+          <code>analog_tuner.py</code> discovers the card's tuner inputs and
+          maps fixed US cable channel numbers onto its NTSC tuner, while
+          <code>stream_sanity_check.py</code> measures request-to-stream time,
+          decodability, segment behavior, write rate, CPU, memory, and GPU load.
+        </p>
+      </article>
 
-<h3>Software</h3>
-<table>
-  <tr><th>Component</th><th>Role</th></tr>
-  <tr><td><code>cvlc</code></td><td>VLC headless &mdash; DVB tuning, TS demux, program selection, H.264+AAC transcode, HLS output</td></tr>
-  <tr><td><code>server.py</code></td><td>HTTP server: REST API, static files, HLS stream serving, rescan SSE endpoint</td></tr>
-  <tr><td><code>fetch_vct.py</code></td><td>Reads ATSC PSIP Virtual Channel Table via DVB section filter; writes <code>vct_data.json</code> with real virtual channel numbers</td></tr>
-  <tr><td><code>parse_channels.py</code></td><td>Converts <code>w_scan</code> output + VCT data into <code>channels.json</code></td></tr>
-  <tr><td><code>w_scan</code></td><td>ATSC frequency scan (finds active RF channels)</td></tr>
-  <tr><td><code>hls.js</code></td><td>Browser-side HLS playback (bundled locally for LAN use)</td></tr>
-</table>
+      <article class="card">
+        <h2>Two front-ends, two lanes</h2>
+        <p>
+          The S5H1409 ATSC demodulator and the analog tuner tune
+          independently, so the <code>digital</code> and <code>analog</code>
+          lanes each hold their own tuner, encoder, and HLS playlist and never
+          displace one another. FM is the same analog tuner in radio demod
+          mode, so it replaces analog TV only. The analog list exposes
+          channels 1–135 from the fixed US cable STD plan and never runs a
+          channel scan. Generic capture cards are not supported: discovery
+          keeps only nodes that expose a V4L2 tuner input.
+        </p>
+      </article>
 
-<h3>Quality Presets</h3>
-<table>
-  <tr><th>Preset</th><th>Video</th><th>Audio</th><th>Scale</th></tr>
-  <tr><td>Low</td><td>500 kbps H.264</td><td>64 kbps AAC</td><td>480p</td></tr>
-  <tr><td>Medium (default)</td><td>1000 kbps H.264</td><td>96 kbps AAC</td><td>720p</td></tr>
-  <tr><td>High</td><td>2000 kbps H.264</td><td>128 kbps AAC</td><td>Native</td></tr>
-</table>
+      <article class="card">
+        <h2>Scanning and DX</h2>
+        <p>
+          Channel scanning is native rather than a <code>w_scan</code> wrapper.
+          Each frequency is visited once, reading the PSIP virtual channel
+          table and the PAT/PMT together, with every PMT filtered
+          concurrently. The sweep covers RF 2–36; everything above was
+          reallocated by the 2020 repack. The DX meter probes one channel at a
+          time and reports lock, signal, SNR and BER without disturbing the
+          analog lane.
+        </p>
+      </article>
 
-<h2>Project Files</h2>
+      <article class="card">
+        <h2>Tuner locks</h2>
+        <p>
+          A recorder or a set-top can claim a front-end so nothing retunes it
+          mid-programme, either for a fixed time or until the guide says the
+          current programme ends. A claim blocks tuning, stopping the lane,
+          band scans and the scheduled guide refresh alike.
+        </p>
+        <p>
+          It deliberately does not block the always-on keeper. If the encoder
+          behind a locked stream dies, the keeper still restarts that same
+          channel — a lock whose stream cannot recover would be worse than no
+          lock at all.
+        </p>
+        <p>
+          Holding the lock means holding the token issued with it; that token
+          is what releases it early. Someone at this UI can override a lock
+          anyway, but only through a prompt that names who holds it and what
+          is about to be interrupted. Locks expire on their own and are
+          capped, so a service that crashes cannot strand the tuner.
+        </p>
+      </article>
 
-<pre><code>tv_thing/
-├── server.py            HTTP server: API, static files, stream serving, rescan SSE
-├── fetch_vct.py         Reads PSIP VCT via DVB section filter → vct_data.json
-├── parse_channels.py    Converts w_scan output + VCT data → channels.json
-├── scan_channels.sh     Manual one-shot channel scan wrapper
-├── tv-thing.service     systemd service unit
-├── channels.json        Channel list with PSIP numbers (auto-generated)
-├── vct_data.json        PSIP virtual channel table cache (auto-generated)
-├── w_scan_output.txt    Raw w_scan output (auto-generated)
-├── static/
-│   ├── index.html       Web UI: channel list + video player
-│   ├── rescan.html      Channel rescan page with live progress
-│   ├── about.html       This page
-│   ├── favicon.svg      Favicon
-│   └── hls.min.js       HLS playback library (bundled for LAN use)
-└── streams/             HLS segments written here at runtime (auto-generated)
-    ├── live.m3u8        Live HLS playlist
-    └── segment_NNN.ts   4-second video segments</code></pre>
+      <article class="card">
+        <h2>Where the guide comes from</h2>
+        <p>
+          Nothing is fetched from the internet. Every ATSC station transmits
+          its own schedule, and <code>epg.py</code> reads it off the air with
+          the same kind of section filter the channel scan uses: the Master
+          Guide Table names the PIDs, the Event Information Tables carry the
+          programmes, and the System Time Table supplies the leap-second
+          offset that turns broadcast timestamps into real times.
+        </p>
+        <p>
+          The EIT arrives in three-hour blocks, and stations are only obliged
+          to send four of them — so <strong>twelve hours</strong> is all the
+          guide anyone is guaranteed. A single overnight refresh would run out
+          by midday, which is why it runs twice: <strong>03:00 and
+          15:00</strong>.
+        </p>
+        <p>
+          A refresh needs the digital tuner one frequency at a time, so it
+          interrupts digital TV like a scan does. Tuning a channel takes the
+          tuner straight back and the refresh keeps whatever it had read.
+          Programme descriptions live in a separate table that repeats sixty
+          times more slowly, so they are opt-in rather than automatic.
+        </p>
+      </article>
 
-<h2>API</h2>
+      <article class="card">
+        <h2>FM radio</h2>
+        <p>
+          The FM implementation remains in the project, but the control is hidden
+          on viviserv because the installed HVR-1600 does not expose a usable FM
+          audio path with the current Linux driver setup.
+        </p>
+      </article>
+    </section>
 
-<table>
-  <tr><th>Endpoint</th><th>Method</th><th>Description</th></tr>
-  <tr><td><code>/api/channels</code></td><td>GET</td><td>List all available channels</td></tr>
-  <tr><td><code>/api/tune</code></td><td>POST</td><td>Tune to a channel: <code>{"channel_id": "...", "quality": "medium"}</code></td></tr>
-  <tr><td><code>/api/stop</code></td><td>POST</td><td>Stop current stream</td></tr>
-  <tr><td><code>/api/status</code></td><td>GET</td><td>Current tuner state</td></tr>
-  <tr><td><code>/api/rescan/stream</code></td><td>GET</td><td>SSE stream of channel scan progress</td></tr>
-  <tr><td><code>/stream/live.m3u8</code></td><td>GET</td><td>HLS playlist</td></tr>
-  <tr><td><code>/stream/segment_NNN.ts</code></td><td>GET</td><td>HLS video segments</td></tr>
-</table>
-
-<h2>Channel Rescan</h2>
-
-<p>The rescan page runs a two-phase process:</p>
-<ol>
-  <li><strong>w_scan</strong> &mdash; scans all ATSC frequencies (RF channels 2&ndash;36) and finds active stations. Progress streams live to the browser via Server-Sent Events.</li>
-  <li><strong>VCT fetch</strong> &mdash; for each found frequency, <code>fetch_vct.py</code> tunes briefly with VLC then reads the PSIP Virtual Channel Table via a DVB section filter on <code>/dev/dvb/adapter0/demux0</code>. This extracts real virtual channel numbers (major.minor) broadcast by each station.</li>
-</ol>
-<p>The channel list is rebuilt with correct PSIP numbers after both phases complete. Tuning is blocked (returns 409) while a scan is in progress.</p>
-
-<h2>Known Quirks</h2>
-
-<ul>
-  <li>The cx18 driver's DVR device (<code>/dev/dvb/adapter0/dvr0</code>) never produces data despite a successful frontend lock &mdash; a known driver issue with this card. VLC's internal DVB stack works around this entirely and is the only path that produces data.</li>
-  <li>DVB <em>section</em> filters (used by <code>fetch_vct.py</code>) work fine even though DVR doesn't &mdash; they go through the demux device directly rather than through <code>dvr0</code>.</li>
-  <li>Only one channel can be tuned at a time (single tuner).</li>
-  <li>Channel changes take ~8&ndash;10 seconds (VLC startup + tune + lock + first HLS segment).</li>
-  <li>Subchannels on the same RF frequency share one multiplex. VLC's <code>--program</code> flag selects the specific subchannel by PSIP service ID.</li>
-  <li>RF channel 7 (177 MHz) does not produce a signal at this location and is excluded from the channel list.</li>
-</ul>
-
-<h2>Future Plans</h2>
-
-<ul>
-  <li>Roku TV app (Roku natively supports HLS)</li>
-  <li>FM radio support &mdash; the analog tuner covers 44&ndash;958 MHz, which includes FM broadcast (87.5&ndash;108 MHz)</li>
-  <li>EPG (Electronic Program Guide) from ATSC PSIP EIT tables</li>
-</ul>
-
+    <aside class="note">
+      <strong>Deployment rule</strong>
+      <span>Streaming and player changes are staged on isolated ports and must pass the real-stream resource gate before production is changed. The same gate runs again after promotion.</span>
+    </aside>
+  </main>
 </body>
 </html>

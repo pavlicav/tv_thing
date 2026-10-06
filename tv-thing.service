@@ -1,14 +1,38 @@
 [Unit]
-Description=TV Thing ATSC streaming server
+Description=TV Thing ATSC + analog streaming server
 After=network.target
 
 [Service]
 Type=simple
 User=vivian
 WorkingDirectory=/home/vivian/tv_thing
+# Bind by interface, not by a literal address: the previous pinned
+# 192.168.86.230 was the old Wi-Fi address and stopped being assignable when
+# the host moved to Ethernet, so the service could not start. The server
+# resolves this at boot and falls back to any other LAN address before the
+# wildcard (another service already holds :8080 on tailscale0).
+# 127.0.0.1 is always bound as well, which is what Apache proxies /tv/ to.
+Environment=TV_THING_BIND=iface:enx9405bb192913
+Environment=TV_THING_MAX_GPU_TEMP_C=80
+Environment=TV_THING_VIDEO_ENCODER=cpu
+# Recordings live on the 4 TB data drive, not the boot SSD; MiniDLNA indexes
+# the folder as its own media_dir (see deploy notes in API.md).
+Environment="TV_THING_RECORDINGS_DIR=/mnt/sda1/media/TV Recordings"
 ExecStart=/home/vivian/miniconda3/bin/python3 /home/vivian/tv_thing/server.py
-Restart=on-failure
+# Restart on a clean exit too. The server exits 0 when it is signalled, so
+# on-failure left a SIGTERM/SIGINT'd service stopped until someone noticed.
+Restart=always
 RestartSec=5
+TimeoutStopSec=5
+# The digital and analog lanes each run their own H.264 encoder, so the
+# quota and memory ceiling cover two concurrent transcodes.
+CPUQuota=400%
+MemoryMax=1200M
+TasksMax=128
+# The 16 MB soft cap kills a runaway HLS segment early. Only the VCR's
+# recorder processes raise their own soft limit, to TV_THING_RECORD_MAX_GB
+# (16 GB); everything else keeps the 16 MB cap.
+LimitFSIZE=16M:16G
 
 [Install]
 WantedBy=multi-user.target
