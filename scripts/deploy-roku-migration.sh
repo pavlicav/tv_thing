@@ -85,6 +85,20 @@ wait_for() {  # seconds, description, command...
     say "$what"
 }
 
+# The gates' GPU limit (80 C) guards TV Thing's own encoders. vizelVision's master
+# encodes on NVENC and keeps the card near 86 C, so a gate run right after stopping it
+# failed on heat TV Thing did not make (2026-10-06 17:28, 82 C at 0% GPU use). Gate a
+# cool card instead: it idles at 64-65 C.
+GPU_COOL_C=72
+gpu_temp() { nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits | head -1; }
+gpu_cool() { [ "$(gpu_temp)" -le "$GPU_COOL_C" ]; }
+wait_gpu_cool() {
+    say "GPU at $(gpu_temp) C; waiting for it to cool to ${GPU_COOL_C} C before gating"
+    wait_for 900 "GPU cooled" gpu_cool \
+        || fail "the GPU stayed above ${GPU_COOL_C} C for 15 minutes ($(gpu_temp) C)"
+    say "GPU at $(gpu_temp) C"
+}
+
 locks_clear() { [ "$(json http://127.0.0.1:8080/api/v1/tuner/lock "d['locks'].get('digital') is None and d['locks'].get('analog') is None")" = "True" ]; }
 device_free() { ! fuser "$DEVICE" >/dev/null 2>&1; }
 lane_ready() {  # url lane
@@ -179,6 +193,7 @@ cp -p "$TV/streams/tuner_locks.json" "$LOGDIR/" 2>/dev/null
 stop_vizelvision
 say "Stopping production TV Thing"
 systemctl stop tv-thing.service || fail "could not stop tv-thing"
+wait_gpu_cool
 
 # --- 3. the candidate -------------------------------------------------------------------------
 say "Staging the candidate in $STAGE"
@@ -216,6 +231,7 @@ systemctl start tv-thing.service || fail "tv-thing did not start"
 wait_for 120 "Production's digital lane is ready" lane_ready http://127.0.0.1:8080 digital || fail "production digital lane"
 wait_for 60 "Production's Roku capture is ready" lane_ready http://127.0.0.1:8080 roku || fail "production Roku capture"
 sleep 20
+wait_gpu_cool
 PID=$(systemctl show -p MainPID --value tv-thing)
 gate production-digital http://127.0.0.1:8080 "$PID" --retunes 3 || fail "production digital gate"
 gate production-roku http://127.0.0.1:8080 "$PID" "${ROKU_GATE[@]}" || fail "production Roku gate"
