@@ -18,6 +18,9 @@ from .operations import EventLog, OperationStore
 
 
 class RokuStreamController:
+    # How many Downs may look for a guide row before the screen is treated as unknown.
+    ROWLESS_DOWNS = 4
+
     def __init__(
         self,
         config: AppConfig,
@@ -399,6 +402,12 @@ class RokuStreamController:
         prior_state: AppState | None = None
         repeated_state = 0
         live_entry_started = False
+        # Downs pressed on guide times with no focused row. Two clear the
+        # sort toolbar and a promotional shelf; more means the times belong to
+        # something else -- the player's info overlay on 2026-10-06, after a
+        # fullscreen program was taken for Home -- and Down will never find a
+        # row there.
+        rowless_downs = 0
 
         for transition in range(1, 21):
             observation = self._observe_state(app_id)
@@ -421,9 +430,22 @@ class RokuStreamController:
 
             if state == AppState.LIVE_GUIDE:
                 if observation.get('evidence') == 'ocr_guide_time_grid' and observation.get('focus') is None:
+                    if rowless_downs >= self.ROWLESS_DOWNS:
+                        # Not the guide after all: restart from Roku Home.
+                        self.ecp.keypress("Home")
+                        self._publish_operation(
+                            phase="recovering",
+                            message="No guide row came into focus; recovering through Roku Home",
+                        )
+                        events.append({"event": "state_action", "from": state,
+                                       "action": "recover_to_roku_home", "rowless_downs": rowless_downs})
+                        self._sleep(nav.post_exit_settle_seconds)
+                        rowless_downs = 0
+                        continue
                     # The sort toolbar and promotional shelf expose guide
                     # times, but neither is a selected station/program row.
                     self.ecp.keypress('Down')
+                    rowless_downs += 1
                     events.append({'event': 'keypress', 'key': 'Down', 'action': 'enter_guide_rows'})
                     self._sleep(nav.guide_settle_seconds)
                     continue

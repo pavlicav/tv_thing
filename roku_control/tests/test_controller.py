@@ -625,3 +625,47 @@ class ControllerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RowlessGuideTests(unittest.TestCase):
+    """2026-10-06: a fullscreen program taken for Home led to the player's info overlay,
+    whose times read as the guide. Down never found a row there; after a few tries the
+    controller now restarts from Roku Home instead of spending three minutes."""
+
+    def test_guide_times_without_a_row_recover_through_roku_home(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ecp = FakeEcp()
+            feedback = FakeFeedback()
+            observations = []
+
+            def detect(frame, channels, media_player):
+                observations.append(len(ecp.keys))
+                if 'Home' in ecp.keys:
+                    return {"state": AppState.LIVE_GUIDE, "evidence": "calibrated_guide_row",
+                            "focus": "program", "channel": "ESPN", "guide_index": 2}
+                return {"state": AppState.LIVE_GUIDE, "evidence": "ocr_guide_time_grid", "focus": None}
+            feedback.detect_youtube_tv_state = detect
+            controller = RokuStreamController(ControllerTests().config(Path(directory)), ecp=ecp,
+                                              feedback=feedback, sleeper=lambda _: None)
+            events = []
+            observation = controller._drive_to_live_guide("195316", events)
+            self.assertEqual(observation["focus"], "program")
+            self.assertEqual(ecp.keys, ["Down"] * RokuStreamController.ROWLESS_DOWNS + ["Home"])
+            self.assertEqual([e.get("action") for e in events if e["event"] == "state_action"],
+                             ["recover_to_roku_home"])
+
+    def test_a_toolbar_and_a_shelf_are_still_crossed_with_down(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ecp = FakeEcp()
+            feedback = FakeFeedback()
+
+            def detect(frame, channels, media_player):
+                if ecp.keys.count('Down') >= 2:
+                    return {"state": AppState.LIVE_GUIDE, "evidence": "calibrated_guide_row",
+                            "focus": "program", "channel": "ESPN", "guide_index": 2}
+                return {"state": AppState.LIVE_GUIDE, "evidence": "ocr_guide_time_grid", "focus": None}
+            feedback.detect_youtube_tv_state = detect
+            controller = RokuStreamController(ControllerTests().config(Path(directory)), ecp=ecp,
+                                              feedback=feedback, sleeper=lambda _: None)
+            controller._drive_to_live_guide("195316", [])
+            self.assertEqual(ecp.keys, ["Down", "Down"])

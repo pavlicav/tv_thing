@@ -347,14 +347,14 @@ def roku_round(base_url, target, token, args, seen_segments, samples,
     if lane["stream"].get("generation") == before["stream"].get("generation"):
         failures.append(f"{target}: the generation did not change")
 
-    round_start_count = len(seen_segments)
+    dwelt = []
     dwell_deadline = time.monotonic() + args.dwell_seconds
     while time.monotonic() < dwell_deadline:
-        collect_playlist(base_url, seen_segments, failures, args,
-                         playlist="roku.m3u8")
+        dwelt += collect_playlist(base_url, seen_segments, failures, args,
+                                  playlist="roku.m3u8")
         sample_host(base_url, args.server_pid, samples, failures)
         time.sleep(1)
-    return capture_id, latency, len(seen_segments) - round_start_count
+    return capture_id, latency, dwelt
 
 
 # The Roku lane's limits, set by the owner on 2026-10-06 when the Roku moved
@@ -379,12 +379,14 @@ def mean(values):
     return sum(values) / len(values) if values else 0.0
 
 
-def decode_generation(stream_id, seen_segments, segment_prefix="segment"):
-    """Decode one collected HLS generation in memory and return stderr."""
+def decode_generation(stream_id, seen_segments, segment_prefix="segment",
+                      uris=None):
+    """Decode one collected HLS generation (or the given segments of it) in
+    memory and return stderr."""
     prefix = f"{segment_prefix}_{stream_id}_"
     payload = b"".join(
         item["data"] for uri, item in sorted(seen_segments.items())
-        if uri.startswith(prefix)
+        if uri.startswith(prefix) and (uris is None or uri in uris)
     )
     if not payload:
         return False, "no media collected for generation"
@@ -480,6 +482,9 @@ def main(argv=None):
     latencies = []
     stream_ids = []
     round_counts = []
+    # The Roku keeps one capture through every navigation: each round's dwell
+    # (about ten seconds of 720p60) is decoded, not the whole session.
+    roku_samples = []
     # Per-lane segment prefixes: each lane writes its own playlist.
     segment_prefix = "analogseg" if args.cable_channel else "digitalseg"
     roku_token = None
@@ -501,12 +506,13 @@ def main(argv=None):
                 target = targets[index]
                 print(f"[{index + 1}/{args.retunes}] navigating the Roku to "
                       f"{target}", flush=True)
-                capture_id, latency, count = roku_round(
+                capture_id, latency, dwelt = roku_round(
                     args.url, target, roku_token, args, seen_segments,
                     samples, failures)
                 stream_ids.append(capture_id)
                 latencies.append(latency)
-                round_counts.append(count)
+                round_counts.append(len(dwelt))
+                roku_samples.append((capture_id, set(dwelt)))
             selected = []
         elif args.channel_id and args.cable_channel:
             raise RuntimeError(
@@ -604,15 +610,13 @@ def main(argv=None):
         failures.append(f"final status unavailable: {error}")
 
     decoded_generations = 0
-    # The Roku keeps one capture generation through every navigation; it is
-    # decoded once, and must not have restarted.
-    decode_ids = sorted({item for item in stream_ids if item}) \
-        if args.roku_target else stream_ids
-    for stream_id in decode_ids:
+    decode_sets = roku_samples if args.roku_target \
+        else [(stream_id, None) for stream_id in stream_ids]
+    for stream_id, uris in decode_sets:
         if not stream_id:
             continue
         decoded, decode_error = decode_generation(
-            stream_id, seen_segments, segment_prefix
+            stream_id, seen_segments, segment_prefix, uris
         )
         if decoded:
             decoded_generations += 1
@@ -660,8 +664,9 @@ def main(argv=None):
             (len({item for item in stream_ids if item}) == 1,
              f"one continuous Roku capture across navigations "
              f"({len(set(stream_ids))} seen)"),
-            (decoded_generations == 1,
-             f"clean software-decodable capture {decoded_generations}/1"),
+            (decoded_generations == args.retunes,
+             f"clean software-decodable dwell samples "
+             f"{decoded_generations}/{args.retunes}"),
         ]
     else:
         checks += [

@@ -107,7 +107,9 @@ class LocalOcr:
 
     @staticmethod
     def _resolve(configured: str) -> tuple[str, dict[str, str]]:
-        environment = dict(os.environ)
+        # One thread per OCR call: Tesseract's OpenMP otherwise spreads every
+        # small crop over all eight threads, in bursts beside the live encoders.
+        environment = {**os.environ, "OMP_THREAD_LIMIT": "1"}
         if configured != "auto":
             path = Path(configured).expanduser().resolve()
             if not path.is_file():

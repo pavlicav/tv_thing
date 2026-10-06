@@ -1664,7 +1664,10 @@ roku_capture_state = {"running": False, "stream_id": None, "error": None,
 
 
 def roku_tap_input(port=ROKU_TAP_PORT):
-    return (f"udp://127.0.0.1:{port}?fifo_size=65536&buffer_size=1048576"
+    # A short buffer (8192 packets, about 1.9 s at 6.5 Mbit/s): the verifier's
+    # frames are evidence of what is on screen *now*. A decoder too slow to
+    # keep up loses packets rather than drifting seconds behind the Roku.
+    return (f"udp://127.0.0.1:{port}?fifo_size=8192&buffer_size=1048576"
             "&overrun_nonfatal=1&timeout=5000000")
 
 

@@ -56,13 +56,22 @@ class LaneCaptureFeedback(VisualFeedback):
         self._reaper: threading.Thread | None = None
 
     # -- decoder lifetime -------------------------------------------------
+    # Frames handed to recognition per second. The controller waits a second
+    # or more between keys, so 15 fps keeps an observation 200 ms from its
+    # request while converting and piping a quarter of the 60 fps the HD PVR
+    # sends (166 MB/s of RGB into Python at the full rate).
+    FRAMES_PER_SECOND = 15
+
     def decoder_command(self, tap_url: str) -> list[str]:
         # The tap is already a clean transport stream from a running reader,
         # so the probe can be far smaller than a cold HD PVR open needs.
+        # Two threads and no input buffering: a decoder that keeps up adds no
+        # frames of delay, and one that cannot is not left seconds behind.
         return [self.config.ffmpeg_path, "-nostdin", "-hide_banner", "-loglevel", "error",
+                "-threads", "2", "-fflags", "nobuffer", "-flags", "low_delay",
                 "-probesize", "1000000", "-analyzeduration", "1500000",
                 "-f", "mpegts", "-i", tap_url, "-an",
-                "-vf", "bwdif=mode=send_frame:parity=auto:deint=interlaced",
+                "-vf", f"bwdif=mode=send_frame:parity=auto:deint=interlaced,fps={self.FRAMES_PER_SECOND}",
                 "-f", "image2pipe", "-vcodec", "ppm", "-flush_packets", "1", "pipe:1"]
 
     def _close_stream(self) -> None:
