@@ -197,8 +197,9 @@ TV_SEGMENT_STARTUP_TIMEOUT = float(os.environ.get(
 TV_SEGMENT_STALL_TIMEOUT = float(os.environ.get(
     "TV_THING_SEGMENT_STALL_TIMEOUT", "5"
 ))
+# The NVENC packagers trip here: below the card's 97 C slowdown (owner, 2026-10-06).
 TV_MAX_GPU_TEMP_C = float(os.environ.get(
-    "TV_THING_MAX_GPU_TEMP_C", "80"
+    "TV_THING_MAX_GPU_TEMP_C", "90"
 ))
 TV_HEALTH_POLL_SECONDS = float(os.environ.get(
     "TV_THING_HEALTH_POLL_SECONDS", "0.5"

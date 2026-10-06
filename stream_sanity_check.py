@@ -449,7 +449,11 @@ def main(argv=None):
     parser.add_argument("--max-cpu-peak", type=float, default=350)
     parser.add_argument("--max-rss-mib", type=float, default=512)
     parser.add_argument("--max-gpu-average", type=float, default=85)
-    parser.add_argument("--max-gpu-temp", type=float, default=80)
+    # Raised from 80 C by the owner on 2026-10-06. The Quadro K4200 slows down at
+    # 97 C and shuts down at 102 C (nvidia-smi -q -d TEMPERATURE); 80 C is only its
+    # rated "max operating" figure. vizelVision's master encodes on NVENC and holds
+    # the card near 86 C on its own, which failed a gate at 0% TV Thing GPU use.
+    parser.add_argument("--max-gpu-temp", type=float, default=90)
     parser.add_argument("--require-encoder")
     parser.add_argument(
         "--max-ffmpeg-processes", type=int, default=2,

@@ -15,6 +15,10 @@
 #      live NBC prepare/take/fallback through master control
 # Any failure after step 2 rolls both back and restarts the old services.
 set -uo pipefail
+# Bash reads a script as it runs, so editing this file during a run (as happened on
+# 2026-10-06 at 17:59, during the cool-down) made it resume mid-command. The braces
+# make bash read the whole script before running any of it.
+{
 
 TV=/home/vivian/tv_thing
 TV_WORKTREE=/home/vivian/tv_thing-roku
@@ -83,20 +87,6 @@ wait_for() {  # seconds, description, command...
         sleep 2
     done
     say "$what"
-}
-
-# The gates' GPU limit (80 C) guards TV Thing's own encoders. vizelVision's master
-# encodes on NVENC and keeps the card near 86 C, so a gate run right after stopping it
-# failed on heat TV Thing did not make (2026-10-06 17:28, 82 C at 0% GPU use). Gate a
-# cool card instead: it idles at 64-65 C.
-GPU_COOL_C=72
-gpu_temp() { nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits | head -1; }
-gpu_cool() { [ "$(gpu_temp)" -le "$GPU_COOL_C" ]; }
-wait_gpu_cool() {
-    say "GPU at $(gpu_temp) C; waiting for it to cool to ${GPU_COOL_C} C before gating"
-    wait_for 900 "GPU cooled" gpu_cool \
-        || fail "the GPU stayed above ${GPU_COOL_C} C for 15 minutes ($(gpu_temp) C)"
-    say "GPU at $(gpu_temp) C"
 }
 
 locks_clear() { [ "$(json http://127.0.0.1:8080/api/v1/tuner/lock "d['locks'].get('digital') is None and d['locks'].get('analog') is None")" = "True" ]; }
@@ -193,7 +183,6 @@ cp -p "$TV/streams/tuner_locks.json" "$LOGDIR/" 2>/dev/null
 stop_vizelvision
 say "Stopping production TV Thing"
 systemctl stop tv-thing.service || fail "could not stop tv-thing"
-wait_gpu_cool
 
 # --- 3. the candidate -------------------------------------------------------------------------
 say "Staging the candidate in $STAGE"
@@ -207,7 +196,7 @@ systemd-run --unit="$CANDIDATE" --collect --uid=vivian --gid=vivian \
     --setenv=TV_THING_STREAMS_DIR="$STAGE/streams" --setenv=TV_THING_RECORDINGS_DIR="$STAGE/recordings" \
     --setenv=TV_THING_TV_UDP_PORT=18420 --setenv=TV_THING_RECORD_TAP_PORT=18484 \
     --setenv=TV_THING_ROKU_TAP_PORT=18470 --setenv=TV_THING_EPG=0 \
-    --setenv=TV_THING_VIDEO_ENCODER=cpu --setenv=TV_THING_MAX_GPU_TEMP_C=80 \
+    --setenv=TV_THING_VIDEO_ENCODER=cpu --setenv=TV_THING_MAX_GPU_TEMP_C=90 \
     --setenv=TV_THING_RECORD_MIN_FREE_GB=1 --setenv=PYTHONUNBUFFERED=1 \
     "$PY" "$STAGE/server.py" || fail "could not start the candidate"
 wait_for 90 "The candidate's digital lane is ready" lane_ready http://127.0.0.1:8098 digital || fail "candidate digital lane"
@@ -231,7 +220,6 @@ systemctl start tv-thing.service || fail "tv-thing did not start"
 wait_for 120 "Production's digital lane is ready" lane_ready http://127.0.0.1:8080 digital || fail "production digital lane"
 wait_for 60 "Production's Roku capture is ready" lane_ready http://127.0.0.1:8080 roku || fail "production Roku capture"
 sleep 20
-wait_gpu_cool
 PID=$(systemctl show -p MainPID --value tv-thing)
 gate production-digital http://127.0.0.1:8080 "$PID" --retunes 3 || fail "production digital gate"
 gate production-roku http://127.0.0.1:8080 "$PID" "${ROKU_GATE[@]}" || fail "production Roku gate"
@@ -265,3 +253,5 @@ say "Live check: NBC through master control (prepare, take, 30 s on air, fallbac
 as_vivian rm -rf "$STAGE/streams" "$STAGE/recordings"
 say "DONE. TV Thing runs the Roku lane; vizelVision plays it. Up next is paused after the restart:"
 say "resume it on vizelVision's On Air page. Logs: $LOGDIR"
+exit
+}
