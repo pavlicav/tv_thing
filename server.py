@@ -3626,18 +3626,24 @@ def _lane_stream_payload(lane):
     failure = state.get("error") or health.get("reason")
     if health.get("ok") is False and not failure:
         failure = "Stream health check failed"
-    navigating = (lane == LANE_ROKU and roku is not None
-                  and roku.operation_view() is not None
-                  and roku.operation_view()["active"])
-    if lane in tuning_lanes or navigating:
+    # The Roku's picture keeps flowing while it navigates -- menus and all --
+    # so "ready" stays about the media. "navigating" says the selection is in
+    # motion; a lease holder fails closed on the generation, which changed
+    # when the navigation began.
+    operation = roku.operation_view() if lane == LANE_ROKU and roku is not None \
+        else None
+    navigating = bool(operation and operation["active"])
+    if lane in tuning_lanes:
         phase = "tuning"
     elif failure:
         phase = "failed"
+    elif navigating:
+        phase = "navigating"
     elif ready:
         phase = "ready"
     else:
         phase = "buffering" if active else "idle"
-    ready = ready and not failure and lane not in tuning_lanes and not navigating
+    ready = ready and not failure and lane not in tuning_lanes
     # A Roku lease must fail closed when the picture stops being the verified
     # selection, not only when the reader restarts (see roku_lane.py).
     generation = (roku.generation() if lane == LANE_ROKU and roku is not None

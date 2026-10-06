@@ -87,8 +87,8 @@ def test_main_ui_uses_versioned_api_for_all_video_sources():
     assert '`api/v1/sources/cable?' in INDEX
     assert '`api/v1/sources?' in INDEX
     assert '"api/v1/status", "api/status"' in INDEX
-    # Digital and analog cable are the two video sources that remain.
-    assert INDEX.count('"api/v1/tune",') == 2
+    # Digital, analog cable and the Roku are the three video sources.
+    assert INDEX.count('"api/v1/tune",') == 3
 
 
 def test_main_ui_falls_back_during_a_zero_downtime_server_restart():
@@ -277,8 +277,32 @@ def test_live_controls_do_not_advertise_dvr_seeking():
 
 def test_player_uses_lane_playlist_instead_of_shared_primary_alias():
     playback = section(INDEX, "function startTvPlayback", "function startFmPlayback")
-    assert 'state.playing === "cable" ? "analog" : "digital"' in playback
+    assert 'state.playing === "cable" ? "analog"' in playback
+    assert '(state.playing === "roku" ? "roku" : "digital")' in playback
     assert 'stream/live.m3u8' not in playback
+
+
+def test_roku_tab_lists_feeds_and_drives_the_remote_under_its_lock():
+    source_tabs = section(INDEX, 'id="source-tabs"', 'id="status-dot"')
+    assert source_tabs.index('id="tab-cable"') < source_tabs.index('id="tab-roku"')
+    roku = section(INDEX, "// ---------- Roku ----------", "// ---------- events ----------")
+    # Feeds come from the lane's sources; games follow the chosen date.
+    assert 'source.lane === "roku"' in INDEX
+    assert "api/v1/sources/${source.id}${query}" in roku
+    assert "date=${encodeURIComponent(state.roku.date)}" in roku
+    # Every change carries this page's own lock token, and a 423 is only ever
+    # overridden by a person in the override dialog.
+    assert "token: rokuToken()" in roku
+    assert "await confirmOverride(data.lock, action)" in roku
+    assert 'owner: ROKU_OWNER, duration_seconds: 3600' in roku
+    # The remote: ECP keys only, and the keyboard drives it while it shows.
+    remote = section(INDEX, 'id="roku-remote"', 'id="list"')
+    for key in ("Up", "Down", "Left", "Right", "Select", "Back", "Home", "Play"):
+        assert f'data-key="{key}"' in remote
+    assert "PowerOff" not in remote
+    assert 'ArrowUp: "Up"' in INDEX and 'Backspace: "Back"' in INDEX
+    # The Roku's picture never drives the legacy alias, and has no quality.
+    assert 'state.playing === "roku"' in section(INDEX, "function render()", "function matches")
 
 
 def test_live_player_runtime():

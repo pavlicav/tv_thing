@@ -316,6 +316,50 @@
       gap: 10px;
     }
     .panel-list { flex: 1; min-height: 0; }
+
+    /* ---- Roku tab ---- */
+    .roku-tools { display: flex; flex-direction: column; gap: 8px; }
+    .roku-tools-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .roku-lock-text {
+      flex: 1; min-width: 0; font-family: var(--stb-font); font-size: 11.5px;
+      color: var(--text-mute);
+    }
+    .roku-lock-text.mine { color: var(--accent); }
+    .roku-tools .field[type="date"] { flex: 1; min-width: 0; color-scheme: dark; }
+    .list-section {
+      position: sticky; top: 0; z-index: 1;
+      padding: 7px 14px; font-family: var(--stb-font); font-size: 10.5px;
+      font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+      color: var(--accent); background: var(--surface-2);
+      border-bottom: 1px solid var(--border);
+    }
+    .roku-remote {
+      display: grid; gap: 8px; padding: 12px 14px;
+      border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .remote-row { display: flex; gap: 6px; justify-content: center; }
+    .remote-pad {
+      display: grid; grid-template-columns: repeat(3, 46px);
+      grid-template-rows: repeat(3, 40px); gap: 4px; justify-content: center;
+    }
+    .remote-pad .btn, .remote-row .btn {
+      font-family: var(--stb-font); padding: 6px 8px; min-width: 46px;
+      justify-content: center;
+    }
+    .remote-pad .ok { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+    .remote-text { display: flex; gap: 6px; }
+    .remote-text .field, .remote-text select { flex: 1; min-width: 0; }
+    .remote-hint { font-size: 11px; color: var(--text-mute); text-align: center; }
+    /* A phone has no room for every tab beside the nav: the source tabs and
+       lock keep their size and the nav scrolls; the banner carries status. */
+    @media (max-width: 620px) {
+      .topbar-tools { flex-shrink: 0; gap: 6px; padding-left: 6px; }
+      .topbar-tools .segmented { flex-shrink: 0; }
+      .topbar-tools .segmented button { padding-left: 8px; padding-right: 8px; }
+      .topbar-tools .segmented { margin-right: 2px; }
+      .topbar-tools .status-pill { display: none; }
+      .lock-pill { max-width: 112px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    }
     .panel-foot {
       padding: 10px 14px;
       border-top: 1px solid var(--border);
@@ -449,6 +493,7 @@
         <div class="segmented source-tabs" id="source-tabs" role="tablist" aria-label="Source">
           <button role="tab" id="tab-tv" aria-selected="true">Digital</button>
           <button role="tab" id="tab-cable" aria-selected="false">Cable</button>
+          <button role="tab" id="tab-roku" aria-selected="false">Roku</button>
           <button role="tab" id="tab-radio" aria-selected="false" hidden>FM Radio</button>
         </div>
 
@@ -531,6 +576,50 @@
           <span class="section-label num" id="panel-count"></span>
         </div>
         <input class="field" id="filter" type="search" placeholder="Filter…" autocomplete="off">
+        <div class="roku-tools" id="roku-tools" hidden>
+          <div class="roku-tools-row">
+            <span class="roku-lock-text" id="roku-lock-text">Roku unlocked</span>
+            <button class="btn" id="roku-lock" type="button">Lock Roku</button>
+          </div>
+          <div class="roku-tools-row">
+            <label class="section-label" for="roku-date">Games on</label>
+            <input class="field" id="roku-date" type="date">
+            <button class="btn" id="roku-stop" type="button" hidden>Stop</button>
+          </div>
+        </div>
+      </div>
+      <div class="roku-remote" id="roku-remote" role="group" aria-label="Roku remote" hidden>
+        <div class="remote-row">
+          <button class="btn" data-key="Back" type="button" title="Back (Backspace)">Back</button>
+          <button class="btn" data-key="Home" type="button" title="Home">Home</button>
+          <button class="btn" data-key="Info" type="button" title="Options">✱</button>
+          <button class="btn" data-key="Search" type="button" title="Search">Search</button>
+        </div>
+        <div class="remote-pad">
+          <span></span>
+          <button class="btn" data-key="Up" type="button" aria-label="Up">▲</button>
+          <span></span>
+          <button class="btn" data-key="Left" type="button" aria-label="Left">◀</button>
+          <button class="btn ok" data-key="Select" type="button" aria-label="OK">OK</button>
+          <button class="btn" data-key="Right" type="button" aria-label="Right">▶</button>
+          <span></span>
+          <button class="btn" data-key="Down" type="button" aria-label="Down">▼</button>
+          <span></span>
+        </div>
+        <div class="remote-row">
+          <button class="btn" data-key="InstantReplay" type="button" title="Instant replay">↺</button>
+          <button class="btn" data-key="Rev" type="button" aria-label="Rewind">◀◀</button>
+          <button class="btn" data-key="Play" type="button" aria-label="Play or pause">▶❚❚</button>
+          <button class="btn" data-key="Fwd" type="button" aria-label="Fast forward">▶▶</button>
+        </div>
+        <form class="remote-text" id="roku-text-form">
+          <input class="field" id="roku-text" type="text" maxlength="64" placeholder="Type into the Roku…" autocomplete="off">
+          <button class="btn" type="submit">Send</button>
+        </form>
+        <div class="remote-text">
+          <select class="field" id="roku-apps" aria-label="Launch an app"><option value="">Launch an app…</option></select>
+        </div>
+        <div class="remote-hint">Arrow keys, Enter and Backspace work too.</div>
       </div>
       <div class="list panel-list scroll" id="list"></div>
       <div class="panel-foot">
@@ -565,7 +654,11 @@
 
     const els = {
       tabTv: $("tab-tv"), tabCable: $("tab-cable"),
-      tabRadio: $("tab-radio"),
+      tabRadio: $("tab-radio"), tabRoku: $("tab-roku"),
+      rokuTools: $("roku-tools"), rokuLockText: $("roku-lock-text"),
+      rokuLock: $("roku-lock"), rokuDate: $("roku-date"), rokuStop: $("roku-stop"),
+      rokuRemote: $("roku-remote"), rokuText: $("roku-text"),
+      rokuTextForm: $("roku-text-form"), rokuApps: $("roku-apps"),
       statusDot: $("status-dot"), statusText: $("status-text"),
       video: $("player"), placeholder: $("placeholder"),
       phTitle: $("placeholder-title"), phSub: $("placeholder-sub"),
@@ -607,6 +700,16 @@
       currentFreq: null,
       quality: "medium",
       filter: "",
+      locks: {},
+      roku: {
+        available: false,
+        sources: [],       // the Roku's feed sources, in order
+        items: {},         // source id -> its feeds
+        date: null,        // the day the game lists show
+        lane: null,        // /api/v1/status lanes.roku
+        apps: [],
+        lock: null,        // our own lock: {token, expires_at}, or null
+      },
     };
 
     let hls = null;
@@ -733,6 +836,33 @@
       } else if (state.playing === "cable") {
         num.textContent = state.currentCableChannel != null ? String(state.currentCableChannel) : "– –";
         body.innerHTML = '<div class="bn-none">Analog cable carries no guide</div>';
+      } else if (state.playing === "roku") {
+        const roku = (state.roku.lane && state.roku.lane.roku) || {};
+        const selection = roku.selection;
+        const operation = roku.operation;
+        num.textContent = rokuShortName(selection && selection.source_id);
+        let html = "";
+        if (operation && operation.active) {
+          html += `<div class="bn-row"><span class="bn-k">SEEK</span>` +
+            `<span class="bn-title">${escapeHtml(rokuTargetName(operation.target))}</span></div>` +
+            `<div class="bn-desc">${escapeHtml(operation.message || operation.phase || "Navigating")}</div>`;
+        } else if (selection && selection.manual) {
+          html += '<div class="bn-row"><span class="bn-k">NOW</span>' +
+            '<span class="bn-title">Manual Roku</span></div>' +
+            '<div class="bn-desc">Drive it with the remote beside the list.</div>';
+        } else if (selection) {
+          const route = selection.resolved_source && selection.resolved_source.label;
+          html += `<div class="bn-row"><span class="bn-k">NOW</span>` +
+            `<span class="bn-title">${escapeHtml(selection.name || selection.channel_id)}</span>` +
+            (route ? `<span class="bn-time">${escapeHtml(route)}</span>` : "") + `</div>` +
+            `<div class="bn-desc">Verified on screen ${escapeHtml(ago(selection.age_seconds))}.</div>`;
+        } else {
+          html += '<div class="bn-none">The Roku is showing something unverified</div>';
+        }
+        if (operation && !operation.active && operation.state === "failed") {
+          html += `<div class="bn-desc">Last navigation failed: ${escapeHtml(operation.message)}</div>`;
+        }
+        body.innerHTML = html;
       } else {
         num.textContent = "– –";
         body.innerHTML = '<div class="bn-none">Choose a channel</div>';
@@ -1021,6 +1151,8 @@
         const sources = data.sources || [];
         const cable = sources.find(source => source.id === "cable");
         if (cable) state.cableAvailable = cable.available !== false;
+        state.roku.sources = sources.filter(source => source.lane === "roku");
+        state.roku.available = state.roku.sources.length > 0;
         sourcePollMs = Math.max(
           1000,
           Number((data.source && data.source.poll_interval_ms)
@@ -1060,14 +1192,21 @@
       const tv = state.mode === "tv";
       const cable = state.mode === "cable";
       const radio = state.mode === "radio";
+      const rokuTab = state.mode === "roku";
       els.tabTv.setAttribute("aria-selected", String(tv));
       els.tabCable.setAttribute("aria-selected", String(cable));
       els.tabRadio.setAttribute("aria-selected", String(radio));
-      els.qualityGroup.classList.toggle("hidden", radio);
+      els.tabRoku.setAttribute("aria-selected", String(rokuTab));
+      els.tabRoku.hidden = !state.roku.available;
+      // The Roku sends its own picture: there is no quality to choose.
+      els.qualityGroup.classList.toggle("hidden", radio || state.playing === "roku");
       els.panelLabel.textContent = tv ? "Digital Channels"
-        : (cable ? "Analog Channels" : "Stations");
+        : (cable ? "Analog Channels" : (rokuTab ? "Roku Feeds" : "Stations"));
       els.filter.placeholder = tv ? "Filter digital channels…"
-        : (cable ? "Filter analog channels…" : "Filter stations…");
+        : (cable ? "Filter analog channels…"
+          : (rokuTab ? "Filter Roku feeds…" : "Filter stations…"));
+      els.rokuTools.hidden = !rokuTab;
+      renderRokuTools();
 
       const onRadio = state.playing === "fm";
       els.video.classList.toggle("hidden", onRadio);
@@ -1077,8 +1216,9 @@
 
       if (state.playing === null) {
         els.phTitle.textContent = tv ? "No Signal"
-          : (cable ? "Analog Idle" : "Radio Idle");
+          : (cable ? "Analog Idle" : (rokuTab ? "Roku" : "Radio Idle"));
         els.phSub.textContent = tv ? "Choose a channel to begin"
+          : rokuTab ? "Choose a feed, or Manual Roku to drive it yourself"
           : (cable ? (state.cableAvailable
               ? "Choose an analog channel to begin"
               : "Analog tuner not available")
@@ -1109,6 +1249,11 @@
           'and reload this page.</div>';
         els.list.appendChild(wrap);
         els.panelCount.textContent = "";
+        return;
+      }
+
+      if (state.mode === "roku") {
+        renderRokuList();
         return;
       }
 
@@ -1178,6 +1323,13 @@
     }
 
     function renderFoot() {
+      if (state.mode === "roku") {
+        const lane = state.roku.lane;
+        els.footLeft.textContent = lane && lane.stream && lane.stream.active
+          ? "Capture running" : "Capture stopped";
+        els.footRight.textContent = "HD PVR · H.264 copy";
+        return;
+      }
       if (state.mode === "tv") {
         els.footLeft.textContent = `${state.channels.length} channels`;
         els.footRight.textContent = "ATSC · 8VSB";
@@ -1259,6 +1411,8 @@
     });
 
     function showLock(lock) {
+      // Our own Roku lock is shown beside the remote, not as a warning.
+      if (lock && lock.lane === "roku" && state.roku.lock) lock = null;
       state.lock = lock || null;
       if (!lock) { els.lockPill.hidden = true; return; }
       const minutes = Math.max(1, Math.round(lock.seconds_remaining / 60));
@@ -1288,7 +1442,13 @@
           "api/v1/tuner/lock", "api/tuner/lock", { cache: "no-store" });
         if (!res.ok) return;
         const locks = (await res.json()).locks || {};
-        showLock(locks.digital || locks.analog || null);
+        state.locks = locks;
+        if (state.roku.lock && (!locks.roku || locks.roku.owner !== ROKU_OWNER)) {
+          forgetRokuLock();  // Expired, released elsewhere, or overridden.
+        }
+        showLock(state.mode === "roku" || state.playing === "roku"
+          ? locks.roku || null : locks.digital || locks.analog || null);
+        renderRokuTools();
       } catch (error) {
         // A missed poll is not worth surfacing; the next one is 15s away,
         // and any tune against a live lock is refused on the server anyway.
@@ -1301,7 +1461,7 @@
     // Follow external retunes and encoder recovery without issuing a tune.
     let streamPollBusy = false;
     async function pollStream() {
-      if (streamPollBusy || state.tuning || !["tv", "cable"].includes(state.playing)) return;
+      if (streamPollBusy || state.tuning || !["tv", "cable", "roku"].includes(state.playing)) return;
       streamPollBusy = true;
       const serial = state.tuneSerial;
       const playing = state.playing;
@@ -1310,19 +1470,25 @@
         if (!response.ok || state.tuning || serial !== state.tuneSerial || playing !== state.playing) return;
         const data = await response.json();
         if (state.tuning || serial !== state.tuneSerial || playing !== state.playing) return;
-        const lane = data.lanes && data.lanes[playing === "cable" ? "analog" : "digital"];
+        const lane = data.lanes && data.lanes[
+          playing === "cable" ? "analog" : (playing === "roku" ? "roku" : "digital")];
         if (!lane) return;
+        if (playing === "roku") {
+          state.roku.lane = lane;
+          renderRokuState();
+        }
         if (lane.stream.state === "failed") {
           liveMessage.textContent = lane.stream.error?.message || "Stream unavailable";
           return;
         }
         if (!lane.stream.ready || (lane.stream.id === state.streamId && !state.needsReconnect)) return;
         state.streamId = lane.stream.id;
-        state.quality = lane.quality;
+        if (playing !== "roku") state.quality = lane.quality;
         const selection = lane.selection || {};
         state.currentChannelId = playing === "tv" ? selection.id : null;
         state.currentCableChannel = playing === "cable" ? selection.channel : null;
-        const title = playing === "cable" ? `Cable ${selection.channel}` : selection.name;
+        const title = playing === "cable" ? `Cable ${selection.channel}`
+          : (playing === "roku" ? rokuTitle(lane) : selection.name);
         destroyHls();
         els.video.pause();
         els.video.removeAttribute("src");
@@ -1334,7 +1500,7 @@
         startTvPlayback(generation, 0, () => {
           if (serial !== state.tuneSerial || generation !== state.streamId) return;
           setStatus(title, "live");
-          setNowPlaying(title, lane.quality);
+          setNowPlaying(title, playing === "roku" ? "Roku · HD PVR" : lane.quality);
         });
       } catch (_) {
         // A brief failed status request must not interrupt healthy playback.
@@ -1524,7 +1690,8 @@
       streamId = streamId || state.streamId || String(Date.now());
       if (state.streamId && streamId !== state.streamId) return;
       state.needsReconnect = false;
-      const playlist = state.playing === "cable" ? "analog" : "digital";
+      const playlist = state.playing === "cable" ? "analog"
+        : (state.playing === "roku" ? "roku" : "digital");
       attachStream(`stream/${playlist}.m3u8?v=${encodeURIComponent(streamId)}`, els.video, () => {
         if (streamId !== state.streamId) return;
         if (attempt < 5) {
@@ -1631,17 +1798,414 @@
       if (signalTimer) { clearInterval(signalTimer); signalTimer = null; }
     }
 
+    // ---------- Roku ----------
+    //
+    // The Roku lane is the source Roku through the HD PVR. A feed navigates
+    // the Roku -- a minute or two for YouTube TV -- and the picture keeps
+    // playing meanwhile, menus and all. Manual Roku hands it to the remote.
+    // Locking the Roku keeps everyone else, vizelVision included, from
+    // moving it until you release it or the hour runs out.
+
+    const ROKU_OWNER = "Web remote";
+    const ROKU_LOCK_KEY = "tvthing.rokuLock";
+    const ROKU_SHORT = {
+      "youtube-tv": "YTTV", "mlb": "MLB", "thursday-night-football": "TNF",
+      "sunday-ticket": "NFL", "roku-manual": "RK",
+    };
+    let rokuPollTimer = null;
+    let rokuListKey = null;
+    let rokuItemsAt = 0;
+    let rokuAppsLoaded = false;
+
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(ROKU_LOCK_KEY) || "null");
+      if (saved && saved.token && saved.expires_at * 1000 > Date.now()) state.roku.lock = saved;
+    } catch (_) { /* Storage can be unavailable; the lock simply is not remembered. */ }
+
+    function rememberRokuLock(token, expiresAt) {
+      state.roku.lock = { token, expires_at: expiresAt };
+      try { sessionStorage.setItem(ROKU_LOCK_KEY, JSON.stringify(state.roku.lock)); } catch (_) {}
+    }
+
+    function forgetRokuLock() {
+      state.roku.lock = null;
+      try { sessionStorage.removeItem(ROKU_LOCK_KEY); } catch (_) {}
+    }
+
+    function rokuToken() {
+      const lock = state.roku.lock;
+      return lock && lock.expires_at * 1000 > Date.now() ? lock.token : undefined;
+    }
+
+    function rokuShortName(sourceId) { return ROKU_SHORT[sourceId] || "RK"; }
+
+    function rokuItem(target) {
+      if (!target) return null;
+      return (state.roku.items[target.source_id] || []).find(item => item.id === target.channel_id) || null;
+    }
+
+    function rokuTargetName(target) {
+      if (!target) return "…";
+      const item = rokuItem(target);
+      return item ? item.name : target.channel_id;
+    }
+
+    function rokuTitle(lane) {
+      const roku = (lane && lane.roku) || {};
+      if (roku.operation && roku.operation.active) return `Roku · ${rokuTargetName(roku.operation.target)}`;
+      if (roku.selection && roku.selection.manual) return "Manual Roku";
+      if (roku.selection) return roku.selection.name || roku.selection.channel_id;
+      return "Roku";
+    }
+
+    function ago(seconds) {
+      if (seconds == null) return "earlier";
+      if (seconds < 90) return "just now";
+      const minutes = Math.round(seconds / 60);
+      return minutes < 90 ? `${minutes} minutes ago` : `${Math.round(minutes / 60)} hours ago`;
+    }
+
+    function localDate() {
+      const now = new Date();
+      const pad = n => String(n).padStart(2, "0");
+      return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    }
+
+    function gameClock(item) {
+      if (item.state === "live" || item.state === "in") return "LIVE";
+      if (item.state === "final" || item.state === "post") return "FINAL";
+      if (!item.start_time) return "";
+      return new Date(item.start_time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    }
+
+    function renderRokuTools() {
+      if (els.rokuTools.hidden) return;
+      const held = state.locks && state.locks.roku;
+      const minutes = held ? Math.max(1, Math.round(held.seconds_remaining / 60)) : 0;
+      const mine = !!(state.roku.lock && held && held.owner === ROKU_OWNER);
+      els.rokuLockText.classList.toggle("mine", mine);
+      if (mine) {
+        els.rokuLockText.textContent = `You hold the Roku · ${minutes}m left`;
+        els.rokuLock.textContent = "Release";
+      } else if (held) {
+        els.rokuLockText.textContent = `${held.owner} holds the Roku · ${minutes}m`;
+        els.rokuLock.textContent = "Take over";
+      } else {
+        els.rokuLockText.textContent = "Unlocked: anyone can change it";
+        els.rokuLock.textContent = "Lock Roku";
+      }
+      if (!state.roku.date) state.roku.date = localDate();
+      if (document.activeElement !== els.rokuDate) els.rokuDate.value = state.roku.date;
+      const operation = state.roku.lane && state.roku.lane.roku && state.roku.lane.roku.operation;
+      els.rokuStop.hidden = !(operation && operation.active);
+    }
+
+    function renderRokuState() {
+      const roku = (state.roku.lane && state.roku.lane.roku) || {};
+      const manual = !!(roku.selection && roku.selection.manual);
+      els.rokuRemote.hidden = !(state.mode === "roku" && manual);
+      if (manual && !rokuAppsLoaded) loadRokuApps();
+      renderRokuTools();
+      if (state.mode === "roku") renderFoot();
+      if (state.playing === "roku") renderBanner();
+      // Re-render the list only when what it highlights changes, so a poll
+      // never steals keyboard focus or scrolls it.
+      const selection = roku.selection || {};
+      const operation = roku.operation || {};
+      const key = [selection.source_id, selection.channel_id, selection.date,
+                   operation.active && operation.target && operation.target.channel_id].join("|");
+      if (state.mode === "roku" && key !== rokuListKey) renderList();
+    }
+
+    function renderRokuList() {
+      const roku = (state.roku.lane && state.roku.lane.roku) || {};
+      const selection = roku.selection;
+      const operation = roku.operation;
+      rokuListKey = [selection && selection.source_id, selection && selection.channel_id,
+                     selection && selection.date,
+                     operation && operation.active && operation.target && operation.target.channel_id].join("|");
+      let total = 0;
+      for (const source of state.roku.sources) {
+        const items = (state.roku.items[source.id] || []).filter(item =>
+          matches(`${source.name} ${item.name} ${(item.aliases || []).join(" ")}`));
+        if (!items.length && (state.filter || !source.dated)) continue;
+        const header = document.createElement("div");
+        header.className = "list-section";
+        header.textContent = source.dated ? `${source.name} · ${state.roku.date}` : source.name;
+        els.list.appendChild(header);
+        if (!items.length) {
+          const empty = document.createElement("div");
+          empty.className = "empty";
+          empty.textContent = "Nothing on this day.";
+          els.list.appendChild(empty);
+          continue;
+        }
+        for (const item of items) {
+          total += 1;
+          const btn = document.createElement("button");
+          btn.className = "list-item";
+          const current = !!(selection && selection.source_id === source.id
+            && selection.channel_id === item.id
+            && (!source.dated || selection.date === state.roku.date));
+          const moving = !!(operation && operation.active && operation.target
+            && operation.target.source_id === source.id && operation.target.channel_id === item.id);
+          btn.setAttribute("aria-current", String(current));
+          let key = rokuShortName(source.id), sub = "", tag = moving ? "MOVING" : "";
+          if (source.dated) {
+            key = gameClock(item) || key;
+            const route = item.route && item.route.label;
+            sub = [item.status, route].filter(Boolean).join(" · ");
+            btn.disabled = item.playable === false;
+          } else if (source.id === "youtube-tv") {
+            sub = (item.aliases || []).join(" · ");
+          } else {
+            sub = item.note || "";
+          }
+          btn.innerHTML =
+            `<span class="item-key">${escapeHtml(key)}</span>` +
+            `<span class="item-body"><span class="item-name">${escapeHtml(item.name)}</span>` +
+            (sub ? `<span class="item-sub">${escapeHtml(sub)}</span>` : "") + `</span>` +
+            (tag ? `<span class="item-tag">${tag}</span>` : "");
+          btn.addEventListener("click", () => tuneRoku(source, item));
+          els.list.appendChild(btn);
+        }
+      }
+      els.panelCount.textContent = String(total);
+      if (!state.roku.sources.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "The Roku lane is not configured.";
+        els.list.appendChild(empty);
+      }
+    }
+
+    async function loadRokuItems(force) {
+      if (!force && Date.now() - rokuItemsAt < 60000) return;
+      rokuItemsAt = Date.now();
+      if (!state.roku.date) state.roku.date = localDate();
+      await Promise.all(state.roku.sources.map(async source => {
+        const query = source.dated ? `?date=${encodeURIComponent(state.roku.date)}` : "";
+        try {
+          const res = await fetch(`api/v1/sources/${source.id}${query}`, { cache: "no-store" });
+          const data = await res.json();
+          state.roku.items[source.id] = res.ok ? (data.items || []) : [];
+        } catch (_) {
+          // Keep what was listed; a schedule outage is not worth an alarm.
+        }
+      }));
+      if (state.mode === "roku") renderList();
+    }
+
+    async function loadRokuApps() {
+      rokuAppsLoaded = true;
+      try {
+        const res = await fetch("api/v1/roku/apps", { cache: "no-store" });
+        const data = await res.json();
+        if (!res.ok) { rokuAppsLoaded = false; return; }
+        els.rokuApps.innerHTML = '<option value="">Launch an app…</option>' +
+          (data.apps || []).map(app =>
+            `<option value="${escapeHtml(app.id)}">${escapeHtml(app.name)}</option>`).join("");
+      } catch (_) { rokuAppsLoaded = false; }
+    }
+
+    async function rokuPost(path, body, action) {
+      const send = extra => fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, token: rokuToken(), ...extra }),
+      });
+      let res = await send({});
+      let data = await res.json().catch(() => ({}));
+      if (res.status === 423 && data.lock) {
+        showLock(data.lock);
+        if (!await confirmOverride(data.lock, action)) return { res, data, declined: true };
+        res = await send({ override: true });
+        data = await res.json().catch(() => ({}));
+        if (res.ok) showLock(null);
+      }
+      return { res, data, declined: false };
+    }
+
+    async function pollRoku() {
+      try {
+        const res = await fetch("api/v1/status", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        state.roku.lane = data.lanes && data.lanes.roku;
+        state.locks = data.locks || state.locks;
+        renderRokuState();
+        if (state.playing === "roku" && !state.tuning) {
+          const lane = state.roku.lane || {};
+          const operation = lane.roku && lane.roku.operation;
+          const title = rokuTitle(lane);
+          if (operation && operation.active) {
+            setStatus(title, "busy");
+            setNowPlaying(title, operation.message || "Navigating…");
+          } else if (operation && operation.state === "failed" && !lane.selection) {
+            setStatus(operation.message || "The Roku could not find it", "error");
+            setNowPlaying(title, "Navigation failed");
+          } else if (lane.stream && lane.stream.ready) {
+            setStatus(title, "live");
+            setNowPlaying(title, "Roku · HD PVR");
+          }
+        }
+      } catch (_) {
+        // The next poll is a moment away.
+      }
+    }
+
+    function syncRokuPolling() {
+      const wanted = state.mode === "roku" || state.playing === "roku";
+      if (wanted && !rokuPollTimer) {
+        pollRoku();
+        rokuPollTimer = setInterval(pollRoku, 1500);
+      } else if (!wanted && rokuPollTimer) {
+        clearInterval(rokuPollTimer);
+        rokuPollTimer = null;
+      }
+    }
+
+    async function watchRoku(streamId, tuneSerial) {
+      // The Roku's capture runs continuously; attach once per generation.
+      if (state.playing === "roku" && state.streamId === streamId && hls) return;
+      state.playing = "roku";
+      state.streamId = streamId;
+      render();
+      syncRokuPolling();
+      await waitForTvStream(streamId);
+      if (tuneSerial !== state.tuneSerial) return;
+      destroyHls();
+      els.video.removeAttribute("src");
+      els.video.load();
+      startTvPlayback(streamId, 0, () => {
+        if (tuneSerial !== state.tuneSerial) return;
+        const title = rokuTitle(state.roku.lane);
+        setStatus(title, "live");
+        setNowPlaying(title, "Roku · HD PVR");
+      });
+    }
+
+    async function tuneRoku(source, item) {
+      const tuneSerial = ++state.tuneSerial;
+      state.currentChannelId = null;
+      state.currentCableChannel = null;
+      state.currentFreq = null;
+      const manual = source.id === "roku-manual";
+      setStatus(manual ? "Manual Roku" : `Finding ${item.name}…`, "busy");
+      state.tuning = true;
+      try {
+        const body = { source: source.id, channel_id: item.id };
+        if (source.dated) body.date = state.roku.date;
+        const { res, data, declined } = await rokuPost("api/v1/tune", body, `put ${item.name} on the Roku`);
+        if (tuneSerial !== state.tuneSerial) return;
+        if (declined) {
+          setStatus("Roku locked", "error");
+          return;
+        }
+        if (!res.ok || !data.ok) {
+          const message = apiErrorMessage(data, "The Roku would not change");
+          setStatus(message, "error");
+          setNowPlaying(item.name, message);
+          return;
+        }
+        state.tuning = false;
+        await pollRoku();
+        if (!data.stream || !data.stream.id) throw new Error("The Roku capture is not running");
+        setNowPlaying(rokuTitle(state.roku.lane),
+                      data.reused ? "Already on the Roku" : (manual ? "Use the remote" : "Navigating…"));
+        await watchRoku(data.stream.id, tuneSerial);
+      } catch (e) {
+        if (tuneSerial !== state.tuneSerial) return;
+        setStatus("The Roku would not change", "error");
+        setNowPlaying(item.name, e.message || "Failed");
+      } finally {
+        if (tuneSerial === state.tuneSerial) state.tuning = false;
+      }
+    }
+
+    async function rokuSend(path, body, action) {
+      const { res, data, declined } = await rokuPost(path, body, action);
+      if (declined) return false;
+      if (!res.ok) {
+        setStatus(apiErrorMessage(data, "The Roku did not take that"), "error");
+        return false;
+      }
+      const lane = state.roku.lane;
+      if (state.playing !== "roku" && lane && lane.stream && lane.stream.id) {
+        watchRoku(lane.stream.id, ++state.tuneSerial);
+      }
+      pollRoku();
+      return true;
+    }
+
+    els.rokuRemote.querySelectorAll("[data-key]").forEach(button => {
+      button.addEventListener("click", () =>
+        rokuSend("api/v1/roku/keypress", { key: button.dataset.key }, "use the remote"));
+    });
+    els.rokuTextForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      const text = els.rokuText.value;
+      if (!text) return;
+      if (await rokuSend("api/v1/roku/text", { text }, "type on the Roku")) els.rokuText.value = "";
+    });
+    els.rokuApps.addEventListener("change", async () => {
+      const appId = els.rokuApps.value;
+      els.rokuApps.value = "";
+      if (appId) await rokuSend("api/v1/roku/launch", { app_id: appId }, "launch an app");
+    });
+    els.rokuStop.addEventListener("click", () =>
+      rokuSend("api/v1/roku/cancel", {}, "stop the Roku's navigation"));
+    els.rokuDate.addEventListener("change", () => {
+      if (!els.rokuDate.value) return;
+      state.roku.date = els.rokuDate.value;
+      loadRokuItems(true);
+    });
+    els.rokuLock.addEventListener("click", async () => {
+      const held = state.locks && state.locks.roku;
+      if (state.roku.lock && held && held.owner === ROKU_OWNER) {
+        await fetch("api/v1/tuner/lock/release", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lane: "roku", token: rokuToken() }),
+        });
+        forgetRokuLock();
+        pollLock();
+        return;
+      }
+      const body = { lane: "roku", owner: ROKU_OWNER, duration_seconds: 3600, reason: "Manual Roku" };
+      const claim = extra => fetch("api/v1/tuner/lock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, ...extra }),
+      });
+      let res = await claim({});
+      let data = await res.json().catch(() => ({}));
+      if (res.status === 423 && data.lock) {
+        if (!await confirmOverride(data.lock, "take the Roku for yourself")) return;
+        res = await claim({ override: true });
+        data = await res.json().catch(() => ({}));
+      }
+      if (res.ok && data.token) rememberRokuLock(data.token, data.lock.expires_at);
+      else setStatus(apiErrorMessage(data, "Could not lock the Roku"), "error");
+      pollLock();
+    });
+
     // ---------- events ----------
 
     function selectSource(mode) {
       state.mode = mode;
       state.filter = "";
       els.filter.value = "";
+      if (mode === "roku") loadRokuItems(false);
+      syncRokuPolling();
       render();
+      renderRokuState();
+      pollLock();
     }
 
     els.tabTv.addEventListener("click", () => selectSource("tv"));
     els.tabCable.addEventListener("click", () => selectSource("cable"));
+    els.tabRoku.addEventListener("click", () => selectSource("roku"));
     els.tabRadio.addEventListener("click", () => selectSource("radio"));
 
     els.filter.addEventListener("input", () => {
@@ -1667,6 +2231,15 @@
     document.addEventListener("keydown", (e) => {
       const tag = e.target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (!els.rokuRemote.hidden && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const key = { ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left",
+                      ArrowRight: "Right", Enter: "Select", Backspace: "Back" }[e.key];
+        if (key && tag !== "BUTTON" && tag !== "SELECT") {
+          e.preventDefault();
+          rokuSend("api/v1/roku/keypress", { key }, "use the remote");
+          return;
+        }
+      }
       if (e.key === "/") { e.preventDefault(); els.filter.focus(); }
       else if (state.mode === "radio" && e.key === "ArrowLeft") stepFrequency(-1);
       else if (state.mode === "radio" && e.key === "ArrowRight") stepFrequency(1);
