@@ -22,7 +22,8 @@ Each lane's `stream` retains `id`, `active`, `ready`, `playlist_path`, and
 `health`, and adds:
 
 * `generation`: alias of `id`; changes when the encoder generation changes.
-* `state`: `idle`, `tuning`, `buffering`, `ready`, or `failed`.
+* `state`: `idle`, `tuning`, `buffering`, `ready`, `navigating` (Roku only), or
+  `failed`.
 * `error`: null or an object with `code` and `message`.
 * `playback`: available protocol/URL/content-type descriptors; currently HLS.
 * `shared`: true.
@@ -95,6 +96,73 @@ its restart. Expired locks confer no ownership; acquire again before tuning.
   active lock requires the correct token. Recovery of the selected channel
   continues while locked; the lock prevents competing changes, not recovery.
 
+## The Roku lane
+
+The `roku` lane is the source Roku (10.0.0.240) through a Hauppauge HD PVR.
+Its stream is the HD PVR's own H.264 (CBR 6.5 Mbit/s, 1280×720 at 60 fps,
+a keyframe every 0.53 s) and AAC, copied to `stream/roku.m3u8` in 0.5 s
+segments: no transcode, no `quality`. The capture runs all the time, so the
+stream is usually `ready`, whatever the Roku shows, menus included. The
+Roku has its own lock (`lane: "roku"`), independent of the tuners, and is
+not a video lane for the legacy `/stream/live.m3u8` alias.
+
+What the Roku shows is the lane's `selection`; `lanes.roku.roku` adds
+`operation` (the last navigation), `player` (ECP's active app and player,
+refreshed in the background), `generation` and `reuse_max_age_seconds`.
+
+* **Sources** (`GET api/v1/sources/<id>`, games with `?date=YYYY-MM-DD`):
+  `youtube-tv` (channels in Live-guide order, with aliases), `mlb` (the
+  day's games and the route each would take: a national YouTube TV channel
+  or MLB.TV), `thursday-night-football` (Prime Video), `sunday-ticket`
+  (Sunday-afternoon CBS/FOX games), and `roku-manual`. Every item has an
+  `id` (the `channel_id` to tune) and a `name`; games carry `game`,
+  `state`, `start_time` and `playable`.
+* **Tune**: POST `api/v1/tune` `{"source": "youtube-tv", "channel_id": "ESPN",
+  "token": …}` (games add `"date"`). **200** with `reused: true` when the Roku
+  already shows that verified selection, recently and on the current capture,
+  or after the still-playing check below passes (`resumed: true`). Otherwise
+  **202** and an `operation`: the Roku navigates (YouTube TV takes 40–125 s,
+  Sunday Ticket up to about 4 min). Poll `lanes.roku.roku.operation` until its
+  `state` is `succeeded`, `failed` or `cancelled`. Options: `force: true`
+  always navigates; `navigate: false` never does, answering **409**
+  `not_prepared` instead; `resume: false` skips the still-playing check.
+* **Generation**: `stream.generation` is `<capture id>.<serial>`. It changes
+  when a navigation starts, when the remote moves the Roku, and when the
+  capture restarts. A holder of the roku lane must fail closed when it
+  changes, then tune again: an unchanged Roku comes back `reused` without
+  navigating.
+* **Selection**: `source_id`, `channel_id`, `date` (games), `name`,
+  `verified_at`, `age_seconds`, `reusable`, `app` (the app it was verified
+  in), `resolved_source` (`provider` and `label`), or `{"manual": true}` for
+  Manual Roku. Null means the Roku shows something unverified.
+* **Still playing**: POST `api/v1/roku/check` asks whether the verified
+  selection still plays: the same app, its player playing, and a moving
+  picture within 4 s. A pass renews the verification on the current capture.
+  It never presses a key and needs no lock.
+* **Remote**: POST `api/v1/roku/keypress` `{"key"}` (`Home`, `Back`, `Up`,
+  `Down`, `Left`, `Right`, `Select`, `Play`, `Rev`, `Fwd`, `InstantReplay`,
+  `Info`, `Search`, `Backspace`, `Enter`), `api/v1/roku/text` `{"text"}`
+  (up to 64 characters), and `api/v1/roku/launch` `{"app_id"}` (from GET
+  `api/v1/roku/apps`). Any of them makes the selection Manual Roku. They
+  answer **409** while a navigation runs; stop it first with POST
+  `api/v1/roku/cancel`.
+* Every change (tune, remote, cancel, `api/v1/roku/calibrate`) honours the
+  roku lock exactly like a tuner change: **423** with the public lock, and an
+  `override` only from a person.
+* GET `api/v1/roku` is the engineering view: capture, signal and the 720p60
+  calibration target, verifier, ECP. GET `api/v1/roku/preview` is an MJPEG
+  stream of what the verifier sees; it keeps the decoder running.
+
+Example: hold the Roku for a take, as vizelVision does.
+
+```json
+POST api/v1/tuner/lock  {"lane":"roku","owner":"VizelVision master","duration_seconds":90}
+POST api/v1/tune        {"source":"youtube-tv","channel_id":"NBC","token":"<token>"}
+GET  api/v1/status      -> lanes.roku.roku.operation.state == "succeeded",
+                           lanes.roku.selection.channel_id == "NBC",
+                           lanes.roku.stream.ready, lanes.roku.stream.generation
+```
+
 ## Operator override and trust boundary
 
 This API is currently for trusted LAN callers and has no authentication.
@@ -114,11 +182,14 @@ an explicit API version change.
 
 ## Recording
 
-The VCR records the digital lane into the DLNA media library. A running
-recording holds the digital tuner lock as owner `VCR`; clients should treat it
-like any other lock and not override it without asking the person.
+The VCR records the digital lane and the Roku lane into the DLNA media
+library. A running recording holds that lane's lock as owner `VCR`; clients
+should treat it like any other lock and not override it without asking the
+person. Each lane records one thing at a time, and the two lanes record side
+by side.
 
-* GET `api/v1/recordings`: `active` (or null), `timers` (scheduled and
+* GET `api/v1/recordings`: `active` (or null), `active_recordings` (every
+  lane's), `timers` (scheduled and
   recording), `history`, `rules`, `library` (finished files), `storage`
   (`ready`, `free_bytes`, and `problems[]` each with a `fix`).
   A library file named `<tape> (no ads).mp4` is an ad-free copy made by the
@@ -139,8 +210,22 @@ like any other lock and not override it without asking the person.
   half. It is meant for tapes made for analysis. A live-encoder restart
   splits the tape into pieces, which are joined when it ends.
   
-  201 returns `timer`. An overlapping timer is **409** `conflict` carrying the
-  clashing timer. There is one digital tuner, so any overlap conflicts.
+  Roku timers add `"lane": "roku"`:
+  * `{"lane": "roku", "mode": "manual", "target": {"source_id", "channel_id",
+    "date"?}, "start", "end", "title"?}`: a YouTube TV channel, a game, or
+    `roku-manual` (whatever is on) at a time.
+  * `{"lane": "roku", "mode": "otr", "end"?}`: what the Roku shows now, for
+    half an hour unless `end` says otherwise.
+
+  A Roku timer takes the roku lock as `VCR` and navigates when it starts.
+  If someone else holds the Roku on that very target, it tapes without the
+  lock and stops if the holder moves away. Otherwise it waits and retries.
+  It copies `stream/roku.m3u8` from near the live edge once the target is
+  verified on screen: H.264 and AAC, about 2.9 GB an hour, never transcoded.
+
+  201 returns `timer`. An overlapping timer on the same lane is **409**
+  `conflict` carrying the clashing timer. There is one digital tuner and one
+  source Roku, so any overlap on a lane conflicts.
 * GET `api/v1/recordings/search?q=`: upcoming guide airings whose title
   contains `q`, each with `scheduled` and `conflict`.
 * POST `api/v1/recordings/cancel` `{"id"}`: clears a timer, or stops the
@@ -152,4 +237,5 @@ like any other lock and not override it without asking the person.
   it instead (`Content-Disposition: attachment`).
 * POST `api/v1/recordings/erase` `{"name"}` deletes one library file.
 
-`api/v1/status` carries `recording`: the active timer, or null.
+`api/v1/status` carries `recording`: the active timer (digital first), or
+null.

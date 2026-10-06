@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "TV Thing core integration API",
-    "version": "1.0.0",
-    "description": "Core control contract. API.md defines ownership, retry, addressing, and trusted-LAN rules. Additional discovery and diagnostic endpoints are listed by GET /api/v1."
+    "version": "1.1.0",
+    "description": "Core control contract. API.md defines ownership, retry, addressing, and trusted-LAN rules. Additional discovery and diagnostic endpoints are listed by GET /api/v1. 1.1.0 adds the roku lane: Roku sources, asynchronous Roku tunes (202 with an operation), the Roku remote, the still-playing check, and Roku recordings."
   },
   "servers": [
     {
@@ -306,6 +306,16 @@
                 }
               }
             }
+          },
+          "202": {
+            "description": "Roku: navigation started. Poll /status lanes.roku.roku.operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TuneResult"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -411,6 +421,485 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Release"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources/{roku_source}": {
+      "get": {
+        "summary": "Feeds of one Roku source; games are listed for ?date=YYYY-MM-DD.",
+        "parameters": [
+          {
+            "name": "roku_source",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "youtube-tv",
+                "mlb",
+                "thursday-night-football",
+                "sunday-ticket",
+                "roku-manual"
+              ]
+            }
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "source and items[] ({id, name, ...})",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Roku lane not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/roku/keypress": {
+      "post": {
+        "summary": "Press one remote key; the selection becomes Manual Roku.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "key"
+                ],
+                "properties": {
+                  "key": {
+                    "enum": [
+                      "Home",
+                      "Back",
+                      "Up",
+                      "Down",
+                      "Left",
+                      "Right",
+                      "Select",
+                      "Play",
+                      "Rev",
+                      "Fwd",
+                      "InstantReplay",
+                      "Info",
+                      "Search",
+                      "Backspace",
+                      "Enter"
+                    ]
+                  },
+                  "token": {
+                    "type": "string"
+                  },
+                  "override": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/roku/text": {
+      "post": {
+        "summary": "Type text into the Roku (ECP literal keys).",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "token": {
+                    "type": "string"
+                  },
+                  "override": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/roku/launch": {
+      "post": {
+        "summary": "Launch an installed app (see GET /roku/apps).",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "app_id"
+                ],
+                "properties": {
+                  "app_id": {
+                    "type": "string"
+                  },
+                  "token": {
+                    "type": "string"
+                  },
+                  "override": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/roku/cancel": {
+      "post": {
+        "summary": "Stop the running navigation.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  },
+                  "override": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/roku/check": {
+      "post": {
+        "summary": "Is the verified selection still playing? A pass renews it without a key press.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "See error.code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Failure"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
               }
             }
           }
@@ -541,7 +1030,12 @@
           "source": {
             "enum": [
               "digital",
-              "cable"
+              "cable",
+              "youtube-tv",
+              "mlb",
+              "thursday-night-football",
+              "sunday-ticket",
+              "roku-manual"
             ]
           },
           "channel_id": {
@@ -566,6 +1060,26 @@
           "override": {
             "type": "boolean",
             "default": false
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "description": "Roku game sources: the game's date."
+          },
+          "force": {
+            "type": "boolean",
+            "default": false,
+            "description": "Roku: navigate even if already verified."
+          },
+          "navigate": {
+            "type": "boolean",
+            "default": true,
+            "description": "Roku: false answers 409 not_prepared instead of navigating."
+          },
+          "resume": {
+            "type": "boolean",
+            "default": true,
+            "description": "Roku: try the still-playing check before navigating."
           }
         },
         "required": [
@@ -619,7 +1133,8 @@
           "lane": {
             "enum": [
               "digital",
-              "analog"
+              "analog",
+              "roku"
             ]
           },
           "owner": {
@@ -659,7 +1174,8 @@
           "lane": {
             "enum": [
               "digital",
-              "analog"
+              "analog",
+              "roku"
             ]
           },
           "token": {
@@ -698,6 +1214,55 @@
           "token",
           "lock"
         ]
+      },
+      "RokuOperation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "target": {
+            "type": "object"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "phase": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "started_at": {
+            "type": "number"
+          },
+          "finished_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        }
       }
     }
   }
