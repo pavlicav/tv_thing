@@ -235,6 +235,8 @@ def vcr(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "RECORDINGS_FILE", tmp_path / "recordings.json")
     monkeypatch.setattr(server, "recording_schedule", None)
     monkeypatch.setattr(server, "active_recording", None)
+    monkeypatch.setattr(server, "roku_recording", None)
+    monkeypatch.setattr(server, "roku", None)
     monkeypatch.setattr(server, "_recording_retry_at", {})
     monkeypatch.setattr(server, "_rules_expanded_for", None)
     monkeypatch.setattr(server, "tuner_locks", {})
@@ -278,8 +280,14 @@ def vcr(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "finalize_recording", finalize)
 
     class Inline:
-        def __init__(self, target, daemon=None, args=()):
+        def __init__(self, target, daemon=None, args=(), name=None):
             self.target, self.args = target, args
+
+        def is_alive(self):
+            return False
+
+        def join(self, timeout=None):
+            pass
 
         def start(self):
             self.target(*self.args)
@@ -754,3 +762,144 @@ def test_a_from_live_copy_that_dies_on_its_own_stream_resumes(vcr, live):
     resumed = server.find_timer(timer["id"])
     assert resumed["status"] == "scheduled"
     assert "resuming" in resumed["note"]
+
+
+# ---------------------------------------------------------------------------
+# The Roku lane's VCR
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def roku_vcr(vcr, monkeypatch):
+    from types import SimpleNamespace
+
+    import roku_lane
+    from test_roku_lane import GAME, NFL, Config, FakeController
+
+    capture = {"running": True, "stream_id": "cap-1", "tap_url": "udp://127.0.0.1:1"}
+    controller = FakeController(capture)
+    lane = roku_lane.RokuLane(
+        Config(), controller,
+        baseball=SimpleNamespace(game=lambda pk, day: dict(GAME),
+                                 games=lambda day: {"date": day, "games": [dict(GAME)]}),
+        sports=SimpleNamespace(game=lambda *a: dict(NFL),
+                               games=lambda league, day: {"date": day, "games": [dict(NFL)]}),
+        capture_source=lambda: dict(capture), playing_seconds=.1, sleep=lambda _: None)
+    monkeypatch.setattr(server, "roku", lane)
+    server.lanes["roku"]["stream_id"] = "cap-1"
+    real_ready = server.lane_stream_ready
+    monkeypatch.setattr(server, "lane_stream_ready",
+                        lambda name: name == "roku" or real_ready(name))
+    return {**vcr, "lane": lane, "controller": controller}
+
+
+def schedule_roku(seconds=600, **extra):
+    now = time.time()
+    body = {"lane": "roku", "mode": "manual",
+            "target": {"source_id": "youtube-tv", "channel_id": "espn"},
+            "start": now - 1, "end": now + seconds, **extra}
+    payload, status = server.create_recording(body)
+    assert status == 201, payload
+    return payload["timer"]
+
+
+def test_roku_and_digital_timers_never_conflict(roku_vcr):
+    schedule_now(1800)
+    timer = schedule_roku(1800)
+    assert timer["lane"] == "roku" and timer["from_live"] is True
+    assert timer["target"] == {"source_id": "youtube-tv", "channel_id": "ESPN"}
+    assert timer["channel_name"] == "YouTube TV ESPN"
+    now = time.time()
+    payload, status = server.create_recording({
+        "lane": "roku", "mode": "manual", "start": now + 60, "end": now + 900,
+        "target": {"source_id": "youtube-tv", "channel_id": "NBC"}})
+    assert status == 409 and "one source Roku" in payload["error"]["message"]
+    payload, status = server.create_recording({
+        "lane": "roku", "mode": "manual", "start": now, "end": now + 900,
+        "target": {"source_id": "youtube-tv", "channel_id": "HBO"}})
+    assert status == 404
+
+
+def test_a_roku_recording_navigates_then_copies_from_the_live_edge(roku_vcr):
+    schedule_roku()
+    server.recording_tick()
+    held = server.active_lock(server.LANE_ROKU)
+    assert held["owner"] == "VCR"
+    assert roku_vcr["controller"].plays == ["ESPN"]
+    assert server.roku_recording["signal"] in ("tuning", "ok")
+    server.recording_tick()
+    proc = server.roku_recording["proc"]
+    assert proc is not None
+    assert str(server.lane_playlist_path(server.LANE_ROKU)) in proc.cmd
+    assert proc.cmd[proc.cmd.index("-live_start_index") + 1] == "-3"
+    assert "copy" in proc.cmd and "libx264" not in proc.cmd
+    # Nothing but the VCR may move the Roku now.
+    _payload, status = server.perform_roku_tune({"source": "youtube-tv", "channel_id": "NBC"})
+    assert status == 423
+
+
+def test_a_roku_recording_ends_when_the_roku_is_moved_off_it(roku_vcr):
+    schedule_roku()
+    server.recording_tick()
+    server.recording_tick()
+    assert server.roku_recording["proc"] is not None
+    # Someone overrides the lock and takes the remote.
+    server.release_tuner_lock({"lane": "roku", "override": True})
+    server.recording_tick()
+    assert server.roku_recording is None
+    timer = server.recordings_payload()["history"][0]
+    assert timer["status"] == "partial" and "taken over" in timer["note"]
+
+
+def test_the_vcr_shares_a_roku_someone_else_holds_on_its_target(roku_vcr):
+    lane = roku_vcr["lane"]
+    lane.tune({"source_id": "youtube-tv", "channel_id": "ESPN"})
+    payload, _ = server.acquire_tuner_lock(
+        {"lane": "roku", "owner": "VizelVision master", "duration_seconds": 600})
+    schedule_roku()
+    server.recording_tick()
+    assert server.roku_recording["shared"] is True
+    assert server.roku_recording["token"] is None
+    assert server.active_lock(server.LANE_ROKU)["owner"] == "VizelVision master"
+    assert roku_vcr["controller"].plays == ["ESPN"]  # It never moved the Roku.
+    server.recording_tick()
+    assert server.roku_recording["proc"] is not None
+    # The holder moves on: the shared tape ends, the holder's lock stays.
+    lane.tune({"source_id": "youtube-tv", "channel_id": "NBC", "token": payload["token"]})
+    server.recording_tick()
+    assert server.roku_recording is None
+    assert server.active_lock(server.LANE_ROKU)["owner"] == "VizelVision master"
+
+
+def test_the_vcr_waits_when_a_holder_shows_something_else(roku_vcr):
+    server.acquire_tuner_lock({"lane": "roku", "owner": "Web remote", "duration_seconds": 600})
+    timer = schedule_roku()
+    server.recording_tick()
+    assert server.roku_recording is None
+    stored = next(t for t in server.recordings_payload()["timers"] if t["id"] == timer["id"])
+    assert stored["status"] == "scheduled" and "Web remote" in stored["note"]
+    assert roku_vcr["controller"].plays == []
+
+
+def test_digital_and_roku_record_side_by_side(roku_vcr):
+    schedule_now()
+    schedule_roku()
+    server.recording_tick()
+    server.recording_tick()
+    assert server.active_recording is not None and server.roku_recording is not None
+    payload = server.recordings_payload()
+    assert {t["lane"] for t in payload["active_recordings"]} == {"digital", "roku"}
+    assert server.active_lock(server.LANE_DIGITAL)["owner"] == "VCR"
+    assert server.active_lock(server.LANE_ROKU)["owner"] == "VCR"
+
+
+def test_one_touch_tapes_what_the_roku_shows(roku_vcr):
+    roku_vcr["lane"].tune({"source_id": "youtube-tv", "channel_id": "NBC"})
+    payload, status = server.create_recording({"lane": "roku", "mode": "otr"})
+    assert status == 201
+    timer = payload["timer"]
+    assert timer["target"] == {"source_id": "youtube-tv", "channel_id": "NBC"}
+    assert timer["end"] - timer["start"] == pytest.approx(recorder.OTR_DEFAULT_SECONDS, abs=2)
+    roku_vcr["lane"].keypress("Down")
+    payload, status = server.create_recording({"lane": "roku", "mode": "otr",
+                                               "end": time.time() + 3600})
+    assert status == 409  # The first one-touch tape still has the Roku.

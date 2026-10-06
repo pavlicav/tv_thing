@@ -1847,6 +1847,14 @@ def roku_call(action):
         return roku_unavailable()
     try:
         return action()
+    except RokuStreamError as exc:
+        return roku_error(exc)
+
+
+def roku_error(exc):
+    """The API response for a roku_lane / roku_control error."""
+    try:
+        raise exc
     except ChannelNotFoundError as exc:
         return api_v1_error(str(exc), 404, "unknown_channel",
                             extra={"details": exc.details})
@@ -2072,7 +2080,8 @@ RECORDER_STOP_TIMEOUT = 8.0
 ACTIVE_OR_FINISHING = (*recorder.ACTIVE, "finishing")
 
 recording_schedule = None       # loaded on first use; guarded by `lock`
-active_recording = None         # owned by recording_worker()
+active_recording = None         # owned by recording_worker(): the digital tape
+roku_recording = None           # ...and the Roku lane's, which can run alongside
 recording_wakeup = threading.Event()
 _recording_retry_at = {}        # timer id -> monotonic time of next attempt
 _rules_expanded_for = None      # guide generated_at the rules last saw
@@ -2109,6 +2118,24 @@ def save_recording_schedule():
 def find_timer(timer_id):
     return next((timer for timer in recording_state()["timers"]
                  if timer["id"] == timer_id), None)
+
+
+def current_recording(lane):
+    """The recording running on one lane, or None."""
+    return roku_recording if lane == LANE_ROKU else active_recording
+
+
+def _set_current_recording(lane, current):
+    global active_recording, roku_recording
+    if lane == LANE_ROKU:
+        roku_recording = current
+    else:
+        active_recording = current
+
+
+def running_recordings():
+    return [current for current in (active_recording, roku_recording)
+            if current is not None]
 
 
 def recording_tap_ports(channel):
@@ -2207,7 +2234,8 @@ def recording_view(timer, now=None):
             if key not in ("part", "lock_token", "pieces", "stem")}
     view["seconds_until_start"] = max(0, round(timer["start"] - now))
     view["seconds_remaining"] = max(0, round(timer["end"] - max(now, timer["start"])))
-    current = active_recording
+    view["lane"] = recorder.timer_lane(timer)
+    current = current_recording(view["lane"])
     if current and current["timer_id"] == timer["id"]:
         size = 0
         for part in [*map(Path, timer.get("pieces") or []), current["part"]]:
@@ -2227,13 +2255,14 @@ def recordings_payload():
         state = recording_state()
         timers = [recording_view(timer, now) for timer in state["timers"]]
         rules = [dict(rule) for rule in state["rules"]]
-        current = active_recording
-        active_id = current["timer_id"] if current else None
-    active = next((timer for timer in timers if timer["id"] == active_id), None)
+        active_ids = [current["timer_id"] for current in running_recordings()]
+    running = [timer for timer in timers if timer["id"] in active_ids]
     return {
         "api_version": API_VERSION,
         "now": int(now),
-        "active": active,
+        # The digital tape first, for clients that show only one.
+        "active": running[0] if running else None,
+        "active_recordings": running,
         "timers": [timer for timer in timers
                    if timer["status"] in recorder.ACTIVE],
         "history": sorted(
@@ -2251,6 +2280,7 @@ def recordings_payload():
             "audio": f"AAC stereo {recorder.AUDIO_KBPS} kbps",
             "container": "MP4",
             "from_live": "the live stream's own H.264 and AAC, copied",
+            "roku": "the HD PVR's own H.264 and AAC, copied (about 2.9 GB an hour)",
         },
         "padding": {"before_seconds": recorder.GUIDE_PRE_PAD_SECONDS,
                     "after_seconds": recorder.GUIDE_POST_PAD_SECONDS},
@@ -2260,7 +2290,7 @@ def recordings_payload():
 
 def recording_summary():
     """What is being taped right now, for status documents."""
-    current = active_recording
+    current = active_recording or roku_recording
     if not current:
         return None
     with lock:
@@ -2278,14 +2308,17 @@ def _channel_by(channel_id=None, number=None):
 
 def _schedule_timer(timer):
     """Add a timer unless it collides with one that has the tuner then."""
+    lane = recorder.timer_lane(timer)
     with lock:
         state = recording_state()
         clash = recorder.find_conflict(state["timers"], timer["start"],
-                                       timer["end"])
+                                       timer["end"], lane=lane)
         if clash:
             return api_v1_error(
-                f"that overlaps {recorder.describe(clash)}; the card has one "
-                "digital tuner", 409, "conflict",
+                f"that overlaps {recorder.describe(clash)}; "
+                + ("there is one source Roku" if lane == LANE_ROKU
+                   else "the card has one digital tuner"),
+                409, "conflict",
                 extra={"conflict": recording_view(clash)},
             )
         state["timers"].append(timer)
@@ -2301,6 +2334,8 @@ def create_recording(body):
     if not isinstance(body, dict):
         return api_v1_error("JSON object required", 400)
     mode = body.get("mode", "manual")
+    if body.get("lane") == LANE_ROKU:
+        return create_roku_recording(body, mode)
     # Copy the live lane instead of encoding the broadcast again; see
     # recorder.py.
     from_live = body.get("from_live") is True
@@ -2384,6 +2419,76 @@ def create_recording(body):
 
     return api_v1_error('mode must be "manual", "guide", or "otr"', 400,
                         "invalid_mode")
+
+
+def _recording_window(body, now, default_seconds=None):
+    """Validated (start, end) from a body, or an error response."""
+    try:
+        start = float(body.get("start", now))
+        end = float(body["end"]) if body.get("end") is not None \
+            else start + default_seconds if default_seconds else float(body["end"])
+    except (KeyError, TypeError, ValueError):
+        return None, api_v1_error("start and end must be Unix times", 400,
+                                  "invalid_time")
+    if not (math.isfinite(start) and math.isfinite(end)):
+        return None, api_v1_error("start and end must be finite", 400,
+                                  "invalid_time")
+    if end <= now:
+        return None, api_v1_error("that time has already passed", 400,
+                                  "in_the_past")
+    start = max(start, now)
+    if end - start < recorder.MIN_RECORDING_SECONDS:
+        return None, api_v1_error("a recording must be at least a minute long",
+                                  400, "too_short")
+    if end - start > RECORDING_MAX_SECONDS:
+        return None, api_v1_error(
+            f"a recording can be at most "
+            f"{RECORDING_MAX_SECONDS / 3600:g} hours", 400, "too_long")
+    return (start, end), None
+
+
+def create_roku_recording(body, mode):
+    """A Roku timer: a channel or game at a time, or whatever is on now.
+
+    The tape is a copy of the Roku lane's stream, so it needs no encoder.
+    A timer navigates the Roku when it starts, holding the roku lock as the
+    VCR; ``otr`` tapes what the Roku shows now, without moving it.
+    """
+    if roku is None:
+        return roku_unavailable()
+    now = time.time()
+    if mode == "otr":
+        selection = roku.selection_view()
+        target = ({key: selection[key] for key in ("source_id", "channel_id", "date")
+                   if key in selection}
+                  if selection and not selection.get("manual")
+                  else {"source_id": roku_lane.MANUAL, "channel_id": "manual"})
+        name = (selection or {}).get("name") or "Manual Roku"
+        window, error = _recording_window(
+            {"start": now, "end": body.get("end")}, now,
+            default_seconds=recorder.OTR_DEFAULT_SECONDS)
+    elif mode == "manual":
+        try:
+            target, game = roku.normalize(body.get("target") or body)
+        except RokuStreamError as exc:
+            return roku_error(exc)
+        name = (game or {}).get("title") or (
+            "Manual Roku" if target["source_id"] == roku_lane.MANUAL
+            else f"{roku_lane.SOURCES[target['source_id']][0]} {target['channel_id']}")
+        window, error = _recording_window(body, now)
+    else:
+        return api_v1_error('a Roku recording\'s mode must be "manual" or "otr"',
+                            400, "invalid_mode")
+    if error:
+        return error
+    start, end = window
+    title = str(body.get("title") or "").strip()[:120] or (
+        name if target["source_id"] in roku_lane.GAME_SOURCES else None)
+    return _schedule_timer(recorder.make_timer(
+        {"id": target["channel_id"], "number": None, "name": name},
+        start, end, title=title, kind=mode, now=now,
+        lane=LANE_ROKU, target=target,
+    ))
 
 
 def cancel_recording(body):
@@ -2496,6 +2601,8 @@ def _start_recorder_process(timer):
     storage = recording_storage_status()
     if not storage["ready"]:
         return storage["problems"][0]["message"]
+    if recorder.timer_lane(timer) == LANE_ROKU:
+        return _start_roku_recorder(timer)
 
     # A guide refresh would refuse the lock as busy; a timer outranks it the
     # way a person tuning does.
@@ -2603,6 +2710,101 @@ def _start_recorder_process(timer):
     return None
 
 
+def roku_on_target(target):
+    """Whether the Roku lane shows a timer's target right now.
+
+    A Manual Roku target tapes whatever is on the Roku; any other must be
+    the verified selection, never a menu on the way to it.
+    """
+    if roku is None:
+        return False
+    if target.get("source_id") == roku_lane.MANUAL:
+        return True
+    selection = roku.selection_view()
+    return bool(selection and not selection.get("manual")
+                and roku_lane.same_target(selection, target))
+
+
+def _start_roku_recorder(timer):
+    """Claim the Roku as the VCR and put the timer's target on it.
+
+    When someone else holds the Roku -- vizelVision's master, a person at
+    the remote -- the VCR tapes it without the lock if it already shows the
+    target, and otherwise waits and retries rather than taking it away.
+    """
+    if roku is None:
+        return "the Roku lane is not configured"
+    target = dict(timer.get("target") or {})
+    now = time.time()
+    payload, status = acquire_tuner_lock({
+        "lane": LANE_ROKU,
+        "owner": RECORDING_OWNER,
+        "duration_seconds": max(60, timer["end"] - now + 30),
+        "reason": f"recording {recorder.describe(timer)}",
+        "token": timer.get("lock_token"),
+    })
+    token, shared = None, False
+    if status == 200:
+        token = payload["token"]
+    elif status == 423 and roku_on_target(target):
+        shared = True
+    else:
+        return payload["error"]["message"]
+
+    # A Manual Roku timer tapes whatever is on; anything else is navigated
+    # to, unless it is already verified there (or is being shared).
+    if token and target.get("source_id") != roku_lane.MANUAL:
+        tune_status, result = roku_call(lambda: roku.tune(dict(target)))
+        if tune_status not in (200, 202):
+            release_tuner_lock({"lane": LANE_ROKU, "token": token})
+            return result["error"]["message"]
+
+    try:
+        stem = Path(timer["stem"]) if timer.get("stem") else \
+            recorder.unique_stem(RECORDINGS_DIR,
+                                 recorder.recording_basename(timer))
+    except OSError as error:
+        if token:
+            release_tuner_lock({"lane": LANE_ROKU, "token": token})
+        return str(error)
+    current = {
+        "lane": LANE_ROKU,
+        "timer_id": timer["id"],
+        "channel_id": timer["channel_id"],
+        "target": target,
+        "proc": None,
+        "tap_port": None,
+        # The Roku is always taped from its live stream: _tend_live_copy()
+        # starts once the target is verified on screen.
+        "from_live": True,
+        "generation": None,
+        "part": _next_piece(timer, stem),
+        "stem": stem,
+        "token": token,
+        "shared": shared,
+        "started_at": time.time(),
+        "last_size": 0,
+        "last_growth": time.monotonic(),
+        "signal": "tuning",
+        "overruns": 0,
+    }
+    _set_current_recording(LANE_ROKU, current)
+    with lock:
+        timer.update({
+            "status": "recording",
+            "note": "sharing the Roku with its holder" if shared else None,
+            "started_at": timer.get("started_at") or int(time.time()),
+            "part": str(current["part"]),
+            "stem": str(stem),
+            "lock_token": token,
+            "attempts": timer.get("attempts", 0) + 1,
+        })
+        save_recording_schedule()
+    print(f"VCR: recording the Roku ({recorder.describe(timer)}) "
+          f"to {current['part'].name}" + (" while sharing it" if shared else ""))
+    return None
+
+
 def _next_piece(timer, stem):
     """The first unused piece file for ``timer`` under ``stem``."""
     index = len(timer.get("pieces") or []) + 1
@@ -2643,12 +2845,14 @@ def _tend_live_copy(current):
     copy that dies on its own generation is left to the caller, which
     resumes it like a crashed encoder.
     """
+    lane = current.get("lane", LANE_DIGITAL)
     with lock:
-        state = lanes[LANE_DIGITAL]
+        state = lanes[lane]
         generation = state["stream_id"]
-        ready = generation is not None \
-            and (state["selection"] or {}).get("id") == current["channel_id"] \
-            and lane_stream_ready(LANE_DIGITAL)
+        on_target = roku_on_target(current["target"]) if lane == LANE_ROKU \
+            else (state["selection"] or {}).get("id") == current["channel_id"]
+        ready = generation is not None and on_target \
+            and lane_stream_ready(lane)
     if current["proc"] is not None:
         if generation == current["generation"]:
             return
@@ -2660,7 +2864,8 @@ def _tend_live_copy(current):
         return
     try:
         proc = _spawn_recorder(recorder.build_live_copy_command(
-            lane_playlist_path(LANE_DIGITAL), current["part"]))
+            lane_playlist_path(lane), current["part"],
+            start_index=-3 if lane == LANE_ROKU else 0))
     except OSError as error:
         print(f"VCR: could not start the live copy: {error}")
         return
@@ -2894,19 +3099,19 @@ def _finishing(timer, part=None):
             Path(stem) if stem else None)
 
 
-def _end_active_recording(status, note, resume=False):
+def _end_active_recording(status, note, resume=False, lane=LANE_DIGITAL):
     """Stop the running recording and hand its file to the finalizer.
 
     With ``resume`` the file is kept as a piece and the timer starts the
     next one when it can; the pieces are joined when the timer ends.
     """
-    global active_recording
-    current = active_recording
+    current = current_recording(lane)
     if current is None:
         return
     _stop_recorder_process(current)
-    active_recording = None
-    release_tuner_lock({"lane": LANE_DIGITAL, "token": current["token"]})
+    _set_current_recording(lane, None)
+    if current["token"]:
+        release_tuner_lock({"lane": lane, "token": current["token"]})
     parts, stem = [current["part"]], None
     with lock:
         timer = find_timer(current["timer_id"])
@@ -2927,6 +3132,67 @@ def _end_active_recording(status, note, resume=False):
     print(f"VCR: stopped ({note or status})")
     if not resume:
         _finish_timer(current["timer_id"], parts, status, note, stem)
+
+
+def _check_roku_recording(now):
+    """Decide whether the running Roku recording should keep going."""
+    current = roku_recording
+
+    def end(status, note, resume=False):
+        return _end_active_recording(status, note, resume=resume, lane=LANE_ROKU)
+    with lock:
+        timer = find_timer(current["timer_id"])
+        stop_requested = bool(timer and timer.get("stop_requested"))
+        held = active_lock(LANE_ROKU)
+    if timer is None:
+        return end("partial", "the timer was removed")
+    if stop_requested:
+        return end("done", "stopped early")
+    if now >= timer["end"]:
+        return end("done", None)
+    if current["token"] and (held is None or held.get("token") != current["token"]):
+        owner = held["owner"] if held else "someone"
+        return end("partial", f"the Roku was taken over by {owner}")
+    target = current["target"]
+    on_target = roku_on_target(target)
+    operation = roku.operation_view() if roku is not None else None
+    navigating = bool(operation and operation["active"]
+                      and roku_lane.same_target(operation["target"], target))
+    if not on_target and not navigating:
+        if current["proc"] is not None or current["last_size"]:
+            who = held["owner"] if held else "someone"
+            return end("partial", f"the Roku was moved off it by {who}")
+        if operation and roku_lane.same_target(operation["target"], target) \
+                and operation["state"] in ("failed", "cancelled"):
+            resume = timer.get("attempts", 1) < RECORDING_MAX_ATTEMPTS
+            return end("partial", f"the Roku could not find it: {operation['message']}"
+                       + ("; trying again" if resume else ""), resume=resume)
+        if current["shared"]:
+            return end("partial", "the Roku's holder moved it before taping began")
+        current["signal"] = "tuning"
+        return None
+    _tend_live_copy(current)
+    if current["proc"] is not None and current["proc"].poll() is not None:
+        resume = timer.get("attempts", 1) < RECORDING_MAX_ATTEMPTS
+        return end("partial",
+                   f"the recorder stopped unexpectedly (exit "
+                   f"{current['proc'].returncode})"
+                   + ("; resuming" if resume else ""), resume=resume)
+    storage = recording_storage_status()
+    if storage["free_bytes"] is not None \
+            and storage["free_bytes"] < RECORDING_STOP_FREE_BYTES:
+        return end("partial", "the disk is nearly full")
+    try:
+        size = current["part"].stat().st_size
+    except OSError:
+        size = 0
+    if size > current["last_size"]:
+        current["last_size"] = size
+        current["last_growth"] = time.monotonic()
+        current["signal"] = "ok"
+    elif time.monotonic() - current["last_growth"] > RECORDING_STALL_SECONDS:
+        current["signal"] = "lost"
+    return None
 
 
 def _check_active_recording(now):
@@ -2984,13 +3250,14 @@ def recording_tick(now=None):
     now = time.time() if now is None else now
     if active_recording is not None:
         _check_active_recording(now)
+    if roku_recording is not None:
+        _check_roku_recording(now)
 
     with lock:
         state = recording_state()
+        running = {current["timer_id"] for current in running_recordings()}
         changed = bool(recorder.expire_missed(
-            [timer for timer in state["timers"]
-             if not (active_recording
-                     and timer["id"] == active_recording["timer_id"])],
+            [timer for timer in state["timers"] if timer["id"] not in running],
             now,
         ))
         guide = None
@@ -3014,26 +3281,32 @@ def recording_tick(now=None):
         if changed:
             state["timers"] = recorder.prune_history(state["timers"])
             save_recording_schedule()
-        due = None if active_recording else recorder.due_timer(
-            state["timers"], now)
+        # Each lane tapes one thing at a time; the lanes run side by side.
+        due = [
+            timer for timer in (
+                recorder.due_timer(state["timers"], now, lane=lane)
+                for lane in (LANE_DIGITAL, LANE_ROKU)
+                if current_recording(lane) is None
+            ) if timer is not None
+        ]
 
     for timer_id, parts, stem, note in leftovers:
         _finish_timer(timer_id, parts, "partial", note, stem)
 
-    if due is None:
-        return
-    if time.monotonic() < _recording_retry_at.get(due["id"], 0):
-        return
-    error = _start_recorder_process(due)
-    if error:
-        _recording_retry_at[due["id"]] = time.monotonic() + RECORDING_RETRY_SECONDS
-        with lock:
-            if due.get("note") != error:
-                due["note"] = error
-                save_recording_schedule()
-        print(f"VCR: could not start {recorder.describe(due)}: {error}")
-    else:
-        _recording_retry_at.pop(due["id"], None)
+    for timer in due:
+        if time.monotonic() < _recording_retry_at.get(timer["id"], 0):
+            continue
+        error = _start_recorder_process(timer)
+        if error:
+            _recording_retry_at[timer["id"]] = \
+                time.monotonic() + RECORDING_RETRY_SECONDS
+            with lock:
+                if timer.get("note") != error:
+                    timer["note"] = error
+                    save_recording_schedule()
+            print(f"VCR: could not start {recorder.describe(timer)}: {error}")
+        else:
+            _recording_retry_at.pop(timer["id"], None)
 
 
 def recording_worker():
@@ -3081,19 +3354,18 @@ def recover_recordings():
                 leftovers.append((timer["id"], parts, stem))
                 timer["note"] = "interrupted by a server restart"
                 if token:
-                    stale_tokens.append(token)
+                    stale_tokens.append((recorder.timer_lane(timer), token))
         save_recording_schedule()
-    for token in stale_tokens:
-        release_tuner_lock({"lane": LANE_DIGITAL, "token": token})
+    for lane, token in stale_tokens:
+        release_tuner_lock({"lane": lane, "token": token})
     for timer_id, parts, stem in leftovers:
         _finish_timer(timer_id, parts, "partial",
                       "interrupted by a server restart", stem)
 
 
 def shutdown_recording():
-    """On exit: close the file cleanly and leave it for recover_recordings()."""
-    current = active_recording
-    if current is not None:
+    """On exit: close the files cleanly and leave them for recover_recordings()."""
+    for current in running_recordings():
         # systemd kills the unit 5 s after asking; the transport stream is
         # playable even if ffmpeg does not get to finish.
         _stop_recorder_process(current, timeout=2)

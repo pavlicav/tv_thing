@@ -115,14 +115,22 @@ def overlaps(start_a, end_a, start_b, end_b):
     return start_a < end_b and start_b < end_a
 
 
-def find_conflict(timers, start, end, exclude_id=None):
-    """The live timer that already has the one digital tuner then, or None.
+def timer_lane(timer):
+    """The lane a timer records from. Timers from before the Roku lane are digital."""
+    return timer.get("lane") or "digital"
 
-    The card has a single ATSC front-end, so any two recordings that overlap
-    in time conflict, whatever their channels.
+
+def find_conflict(timers, start, end, exclude_id=None, lane="digital"):
+    """The live timer that already has this lane's one tuner then, or None.
+
+    The card has a single ATSC front-end and there is a single source Roku,
+    so two recordings on one lane that overlap in time conflict, whatever
+    their channels. Recordings on different lanes never do.
     """
     for timer in timers:
         if timer["id"] == exclude_id or timer.get("status") not in ACTIVE:
+            continue
+        if timer_lane(timer) != lane:
             continue
         if overlaps(start, end, timer["start"], timer["end"]):
             return timer
@@ -130,12 +138,19 @@ def find_conflict(timers, start, end, exclude_id=None):
 
 
 def make_timer(channel, start, end, *, title=None, kind="manual",
-               program=None, rule_id=None, from_live=False, now=None):
-    """A new scheduled timer. ``start`` and ``end`` include any padding."""
+               program=None, rule_id=None, from_live=False, now=None,
+               lane="digital", target=None):
+    """A new scheduled timer. ``start`` and ``end`` include any padding.
+
+    A Roku timer (``lane="roku"``) names its Roku ``target`` -- a YouTube TV
+    channel, a game, or Manual Roku -- and always copies the lane's stream.
+    """
     now = time.time() if now is None else now
     return {
         "id": new_id(),
         "kind": kind,
+        "lane": lane,
+        "target": target,
         "channel_id": channel["id"],
         "channel_number": channel.get("number"),
         "channel_name": channel.get("name"),
@@ -144,7 +159,7 @@ def make_timer(channel, start, end, *, title=None, kind="manual",
         "title": title or None,
         "program": program,
         "rule_id": rule_id,
-        "from_live": bool(from_live),
+        "from_live": bool(from_live) or lane == "roku",
         "status": "scheduled",
         "note": None,
         "file": None,
@@ -275,17 +290,23 @@ def expand_rules(schedule, guide, channels, now):
 
 
 def describe(timer):
-    title = timer.get("title") or f"CH {timer.get('channel_number')}"
+    title = timer.get("title") or (
+        f"CH {timer['channel_number']}" if timer.get("channel_number")
+        else timer.get("channel_name") or "Recording")
     stamp = datetime.fromtimestamp(timer["start"]).strftime("%a %H:%M")
     return f"{title} ({stamp})"
 
 
-def due_timer(timers, now):
-    """The scheduled timer whose window contains ``now``, earliest first."""
+def due_timer(timers, now, lane=None):
+    """The scheduled timer whose window contains ``now``, earliest first.
+
+    With ``lane``, only that lane's timers are considered.
+    """
     due = [
         timer for timer in timers
         if timer.get("status") == "scheduled"
         and timer["start"] <= now < timer["end"]
+        and (lane is None or timer_lane(timer) == lane)
     ]
     return min(due, key=lambda timer: timer["start"]) if due else None
 
@@ -535,17 +556,20 @@ def build_record_command(input_url, output_path):
     ]
 
 
-def build_live_copy_command(playlist_path, output_path):
+def build_live_copy_command(playlist_path, output_path, start_index=0):
     """Copy the live lane's HLS into a transport stream, without re-encoding.
 
     It reads one generation's playlist from its first listed segment, so a
     recording that moves on to a restarted live stream loses only the gap,
     and one starting on a running stream also keeps the dozen seconds
     before. Stopped with ``q`` like the encoding recorder.
+
+    The Roku's playlist keeps the navigation that led to a verified channel,
+    so its copies start near the live edge instead (``start_index=-3``).
     """
     return [
         "ffmpeg", "-hide_banner", "-loglevel", "warning", "-y",
-        "-live_start_index", "0",
+        "-live_start_index", str(start_index),
         "-i", str(playlist_path),
         "-map", "0:v:0", "-map", "0:a:0?",
         "-c", "copy",
