@@ -26,9 +26,18 @@ RestartSec=5
 TimeoutStopSec=5
 # The digital and analog lanes each run their own H.264 encoder, so the
 # quota and memory ceiling cover two concurrent transcodes.
+#
+# Since 2026-10-06 the unit also carries the source Roku (roku_lane.py): the
+# HD PVR capture (a stream copy), the screen-recognition decoder while the
+# Roku navigates, OCR, and the Roku VCR's copy. That work moved here from
+# vizelVision's units; it was not added to the house. The owner raised the
+# memory and task ceilings for it, and an OOM kill of one child (the 0.4 GB
+# MPEG-2 frames of 2026-09) must no longer take the whole unit down: each
+# child has its own supervisor that restarts it.
 CPUQuota=400%
-MemoryMax=1200M
-TasksMax=128
+MemoryMax=1800M
+TasksMax=192
+OOMPolicy=continue
 # The 16 MB soft cap kills a runaway HLS segment early. Only the VCR's
 # recorder processes raise their own soft limit, to TV_THING_RECORD_MAX_GB
 # (16 GB); everything else keeps the 16 MB cap.

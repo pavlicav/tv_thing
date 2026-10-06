@@ -293,6 +293,88 @@ def tune_and_observe(base_url, channel, args, seen_segments, samples,
     return stream_id, latency, round_segments
 
 
+def roku_round(base_url, target, token, args, seen_segments, samples,
+               failures):
+    """Navigate the Roku to one target and watch its lane.
+
+    The Roku's capture never restarts for a navigation, so a round measures
+    request-to-verified (the navigation) rather than request-to-first-segment,
+    and requires the capture generation to stay the same throughout.
+    """
+    source, _, channel_id = target.partition(":")
+    started = time.monotonic()
+    before = http_json(base_url, "/api/v1/status")["lanes"]["roku"]
+    payload = {"source": source, "channel_id": channel_id, "token": token,
+               "force": True}
+    if source not in ("youtube-tv", "roku-manual"):
+        payload["date"] = time.strftime("%Y-%m-%d")
+    tune = http_json(base_url, "/api/v1/tune", method="POST",
+                     payload=payload, timeout=20)
+    if not tune.get("ok"):
+        error = tune.get("error", "tune rejected")
+        raise RuntimeError(error.get("message") if isinstance(error, dict)
+                           else error)
+    capture_id = (tune.get("stream") or {}).get("id")
+    deadline = started + args.max_request_seconds
+    verified, lane, next_sample = False, before, 0.0
+    while time.monotonic() < deadline:
+        collect_playlist(base_url, seen_segments, failures, args,
+                         playlist="roku.m3u8")
+        lane = http_json(base_url, "/api/v1/status", timeout=3)["lanes"]["roku"]
+        operation = (lane.get("roku") or {}).get("operation") or {}
+        if operation.get("state") == "succeeded":
+            verified = True
+            break
+        if operation.get("state") in ("failed", "cancelled"):
+            failures.append(f"{target}: navigation {operation['state']}: "
+                            f"{operation.get('message')}")
+            break
+        if time.monotonic() >= next_sample:
+            sample_host(base_url, args.server_pid, samples, failures)
+            next_sample = time.monotonic() + 1
+        time.sleep(0.5)
+    latency = time.monotonic() - started
+    if not verified and latency >= args.max_request_seconds:
+        failures.append(f"{target} was not verified within "
+                        f"{args.max_request_seconds:g}s")
+    selection = lane.get("selection") or {}
+    if verified and str(selection.get("channel_id", "")).casefold() \
+            != channel_id.casefold():
+        failures.append(f"{target}: lane shows {selection.get('channel_id')}")
+    if lane["stream"].get("id") != capture_id:
+        failures.append(f"{target}: the capture restarted during navigation "
+                        f"({capture_id} -> {lane['stream'].get('id')})")
+    if lane["stream"].get("generation") == before["stream"].get("generation"):
+        failures.append(f"{target}: the generation did not change")
+
+    round_start_count = len(seen_segments)
+    dwell_deadline = time.monotonic() + args.dwell_seconds
+    while time.monotonic() < dwell_deadline:
+        collect_playlist(base_url, seen_segments, failures, args,
+                         playlist="roku.m3u8")
+        sample_host(base_url, args.server_pid, samples, failures)
+        time.sleep(1)
+    return capture_id, latency, len(seen_segments) - round_start_count
+
+
+# The Roku lane's limits, set by the owner on 2026-10-06 when the Roku moved
+# from vizelVision into TV Thing -- a deliberate policy for a different
+# stream, not a relaxation of the tuner lanes' limits:
+#   * the HD PVR encodes CBR 6.5 Mbit/s H.264 + AAC itself and TV Thing copies
+#     it; its logo templates were calibrated at that bitrate, so it is not
+#     lowered to fit the 4 Mbit/s tuner cap: media and wall rate <= 8 Mbit/s,
+#     segments <= 1.5 MB and <= 3 s (0.5 s HLS on a 0.533 s GOP);
+#   * a YouTube TV navigation took 39-124 s in vizelVision's history, so the
+#     request limit is request-to-verified <= 150 s, not request-to-segment.
+ROKU_DEFAULTS = {
+    "max_request_seconds": 150, "max_media_mbps": 8, "max_wall_mbps": 8,
+    "max_segment_bytes": 1_500_000, "max_segment_duration": 3,
+    # The tuner lane's packager, the Roku capture, and the verifier while
+    # the Roku navigates.
+    "max_ffmpeg_processes": 3,
+}
+
+
 def mean(values):
     return sum(values) / len(values) if values else 0.0
 
@@ -373,7 +455,23 @@ def main(argv=None):
              "so the default tolerates the other lane's encoder.",
     )
     parser.add_argument("--min-segments-per-round", type=int, default=3)
+    parser.add_argument(
+        "--roku-target", action="append", default=[],
+        help="gate the Roku lane: SOURCE:ID, e.g. youtube-tv:NBC (repeat). "
+             "Applies the Roku lane's own limits (ROKU_DEFAULTS) to any "
+             "limit not given explicitly, and holds the roku lock while it runs.",
+    )
+    parser.add_argument("--lock-owner", default="stream gate")
+    explicit = {
+        action.dest for action in parser._actions
+        if any(option in (argv if argv is not None else sys.argv[1:])
+               for option in action.option_strings)
+    }
     args = parser.parse_args(argv)
+    if args.roku_target:
+        for key, value in ROKU_DEFAULTS.items():
+            if key not in explicit:
+                setattr(args, key, value)
 
     started = time.monotonic()
     failures = []
@@ -384,9 +482,33 @@ def main(argv=None):
     round_counts = []
     # Per-lane segment prefixes: each lane writes its own playlist.
     segment_prefix = "analogseg" if args.cable_channel else "digitalseg"
+    roku_token = None
 
     try:
-        if args.channel_id and args.cable_channel:
+        if args.roku_target:
+            segment_prefix = "rokuseg"
+            if args.channel_id or args.cable_channel:
+                raise RuntimeError("--roku-target gates the Roku lane alone")
+            claim = http_json(args.url, "/api/v1/tuner/lock", method="POST",
+                              payload={"lane": "roku", "owner": args.lock_owner,
+                                       "duration_seconds": 1800,
+                                       "reason": "real-stream gate"})
+            roku_token = claim.get("token")
+            if not roku_token:
+                raise RuntimeError(f"could not lock the Roku: {claim.get('error')}")
+            targets = args.roku_target * max(1, -(-args.retunes // len(args.roku_target)))
+            for index in range(args.retunes):
+                target = targets[index]
+                print(f"[{index + 1}/{args.retunes}] navigating the Roku to "
+                      f"{target}", flush=True)
+                capture_id, latency, count = roku_round(
+                    args.url, target, roku_token, args, seen_segments,
+                    samples, failures)
+                stream_ids.append(capture_id)
+                latencies.append(latency)
+                round_counts.append(count)
+            selected = []
+        elif args.channel_id and args.cable_channel:
             raise RuntimeError(
                 "--channel-id and --cable-channel are mutually exclusive"
             )
@@ -434,7 +556,7 @@ def main(argv=None):
                 selected = [first, sibling]
         if len(selected) < 2:
             selected = selected * 2
-        for index in range(args.retunes):
+        for index in range(args.retunes if not args.roku_target else 0):
             channel = selected[index % len(selected)]
             print(
                 f"[{index + 1}/{args.retunes}] tuning "
@@ -449,6 +571,13 @@ def main(argv=None):
             round_counts.append(count)
     except Exception as error:
         failures.append(str(error))
+    finally:
+        if roku_token:
+            try:
+                http_json(args.url, "/api/v1/tuner/lock/release", method="POST",
+                          payload={"lane": "roku", "token": roku_token})
+            except Exception as error:   # noqa: BLE001 - report, do not mask
+                failures.append(f"could not release the Roku lock: {error}")
 
     elapsed = max(time.monotonic() - started, 0.001)
     total_bytes = sum(item["bytes"] for item in seen_segments.values())
@@ -475,7 +604,11 @@ def main(argv=None):
         failures.append(f"final status unavailable: {error}")
 
     decoded_generations = 0
-    for stream_id in stream_ids:
+    # The Roku keeps one capture generation through every navigation; it is
+    # decoded once, and must not have restarted.
+    decode_ids = sorted({item for item in stream_ids if item}) \
+        if args.roku_target else stream_ids
+    for stream_id in decode_ids:
         if not stream_id:
             continue
         decoded, decode_error = decode_generation(
@@ -491,7 +624,8 @@ def main(argv=None):
 
     checks = [
         (latencies and max(latencies) <= args.max_request_seconds,
-         f"request-to-stream max {max(latencies, default=float('inf')):.3f}s"),
+         f"request-to-{'verified' if args.roku_target else 'stream'} max "
+         f"{max(latencies, default=float('inf')):.3f}s"),
         (round_counts and min(round_counts) >= args.min_segments_per_round,
          f"segments per round {round_counts}"),
         (media_mbps <= args.max_media_mbps,
@@ -520,12 +654,23 @@ def main(argv=None):
          f"GPU utilization average {mean(gpu_values):.1f}%"),
         (max(temp_values, default=0) <= args.max_gpu_temp,
          f"GPU temperature peak {max(temp_values, default=0):.1f} C"),
-        (len({item for item in stream_ids if item}) == args.retunes,
-         f"fresh stream generations {len(set(stream_ids))}/{args.retunes}"),
-        (decoded_generations == args.retunes,
-         f"clean software-decodable generations "
-         f"{decoded_generations}/{args.retunes}"),
     ]
+    if args.roku_target:
+        checks += [
+            (len({item for item in stream_ids if item}) == 1,
+             f"one continuous Roku capture across navigations "
+             f"({len(set(stream_ids))} seen)"),
+            (decoded_generations == 1,
+             f"clean software-decodable capture {decoded_generations}/1"),
+        ]
+    else:
+        checks += [
+            (len({item for item in stream_ids if item}) == args.retunes,
+             f"fresh stream generations {len(set(stream_ids))}/{args.retunes}"),
+            (decoded_generations == args.retunes,
+             f"clean software-decodable generations "
+             f"{decoded_generations}/{args.retunes}"),
+        ]
     if args.cable_channel:
         source_mode = (status.get("source") or {}).get("kind") \
             if args.api_version == "v1" else status.get("mode")
