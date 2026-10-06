@@ -9,6 +9,7 @@ large media, stalls, or reports an internal safety trip.
 
 import argparse
 import json
+import signal
 import subprocess
 import sys
 import time
@@ -34,6 +35,51 @@ def http_bytes(base_url, path, method="GET", payload=None, timeout=5):
 
 def http_json(base_url, path, method="GET", payload=None, timeout=5):
     return json.loads(http_bytes(base_url, path, method, payload, timeout))
+
+
+def claim_lane(base_url, lane, owner, reason, duration_seconds):
+    """Lock a lane for the gate; return its token. Never overrides a holder."""
+    try:
+        claim = http_json(base_url, "/api/v1/tuner/lock", method="POST",
+                          payload={"lane": lane, "owner": owner,
+                                   "duration_seconds": duration_seconds,
+                                   "reason": reason})
+    except urllib.error.HTTPError as error:
+        try:
+            held = (json.loads(error.read()).get("lock") or {}).get("owner")
+        except ValueError:
+            held = None
+        raise RuntimeError(f"could not lock the {lane} lane"
+                           + (f": {held} holds it" if held else f": {error}"))
+    if not claim.get("token"):
+        raise RuntimeError(f"could not lock the {lane} lane: {claim.get('error')}")
+    return claim["token"]
+
+
+def wait_roku_idle(base_url, token, timeout=120):
+    """Start from a quiet Roku: no navigation, and the verifier's decoder closed.
+
+    A navigation begun just before the gate locked the lane is cancelled under
+    the gate's token; the decoder closes itself a minute after its last frame.
+    """
+    deadline = time.monotonic() + timeout
+    cancelled = False
+    while True:
+        view = http_json(base_url, "/api/v1/roku")
+        operation = ((view.get("lane") or {}).get("roku") or {}).get("operation") or {}
+        decoding = ((view.get("calibration") or {}).get("capture") or {}).get("decoding")
+        if not operation.get("active") and not decoding:
+            return
+        if operation.get("active") and not cancelled:
+            print("Cancelling a Roku navigation that began before the gate", flush=True)
+            http_json(base_url, "/api/v1/roku/cancel", method="POST",
+                      payload={"token": token})
+            cancelled = True
+        if time.monotonic() >= deadline:
+            raise RuntimeError("the Roku did not go idle before the gate "
+                               f"(navigating={bool(operation.get('active'))}, "
+                               f"verifier decoding={bool(decoding)})")
+        time.sleep(2)
 
 
 def playlist_segments(text):
@@ -214,7 +260,7 @@ def sample_host(base_url, server_pid, samples, failures, api_version="v1"):
 
 
 def tune_and_observe(base_url, channel, args, seen_segments, samples,
-                     failures):
+                     failures, token=None):
     started = time.monotonic()
     cable = "cable_channel" in channel
     if args.api_version == "v1":
@@ -225,6 +271,8 @@ def tune_and_observe(base_url, channel, args, seen_segments, samples,
         payload["channel" if cable else "channel_id"] = (
             channel["cable_channel"] if cable else channel["id"]
         )
+        if token:
+            payload["token"] = token
         tune = http_json(
             base_url, "/api/v1/tune", method="POST",
             payload=payload,
@@ -491,20 +539,30 @@ def main(argv=None):
     roku_samples = []
     # Per-lane segment prefixes: each lane writes its own playlist.
     segment_prefix = "analogseg" if args.cable_channel else "digitalseg"
-    roku_token = None
+    # Lane -> token. The gate locks every lane, so that nobody else retunes or
+    # navigates while it measures: on 2026-10-06 a Roku feed picked in a browser
+    # mid-gate added the verifier's decoder and OCR to a digital run.
+    tokens = {}
+    # A terminated gate still releases its locks (they outlive a server restart).
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 
     try:
+        if args.api_version == "v1":
+            lanes = http_json(args.url, "/api/v1/status").get("lanes") or {}
+            for lane, info in lanes.items():
+                if isinstance(info, dict) and info.get("available", True):
+                    tokens[lane] = claim_lane(
+                        args.url, lane, args.lock_owner,
+                        "real-stream gate: nothing else moves while it measures", 1800)
+            if "roku" in tokens:
+                wait_roku_idle(args.url, tokens["roku"])
         if args.roku_target:
             segment_prefix = "rokuseg"
             if args.channel_id or args.cable_channel:
                 raise RuntimeError("--roku-target gates the Roku lane alone")
-            claim = http_json(args.url, "/api/v1/tuner/lock", method="POST",
-                              payload={"lane": "roku", "owner": args.lock_owner,
-                                       "duration_seconds": 1800,
-                                       "reason": "real-stream gate"})
-            roku_token = claim.get("token")
+            roku_token = tokens.get("roku")
             if not roku_token:
-                raise RuntimeError(f"could not lock the Roku: {claim.get('error')}")
+                raise RuntimeError("the server has no Roku lane")
             targets = args.roku_target * max(1, -(-args.retunes // len(args.roku_target)))
             for index in range(args.retunes):
                 target = targets[index]
@@ -566,6 +624,7 @@ def main(argv=None):
                 selected = [first, sibling]
         if len(selected) < 2:
             selected = selected * 2
+        tuned_lane = "analog" if args.cable_channel else "digital"
         for index in range(args.retunes if not args.roku_target else 0):
             channel = selected[index % len(selected)]
             print(
@@ -574,7 +633,8 @@ def main(argv=None):
                 flush=True,
             )
             stream_id, latency, count = tune_and_observe(
-                args.url, channel, args, seen_segments, samples, failures
+                args.url, channel, args, seen_segments, samples, failures,
+                token=tokens.get(tuned_lane),
             )
             stream_ids.append(stream_id)
             latencies.append(latency)
@@ -582,12 +642,12 @@ def main(argv=None):
     except Exception as error:
         failures.append(str(error))
     finally:
-        if roku_token:
+        for lane, token in tokens.items():
             try:
                 http_json(args.url, "/api/v1/tuner/lock/release", method="POST",
-                          payload={"lane": "roku", "token": roku_token})
+                          payload={"lane": lane, "token": token})
             except Exception as error:   # noqa: BLE001 - report, do not mask
-                failures.append(f"could not release the Roku lock: {error}")
+                failures.append(f"could not release the {lane} lock: {error}")
 
     elapsed = max(time.monotonic() - started, 0.001)
     total_bytes = sum(item["bytes"] for item in seen_segments.values())
