@@ -11,6 +11,7 @@ import pytest
 
 import dvb_source
 import recorder
+import roku_lane
 import server
 
 CHANNELS = [
@@ -785,6 +786,8 @@ def roku_vcr(vcr, monkeypatch):
                                games=lambda league, day: {"date": day, "games": [dict(NFL)]}),
         capture_source=lambda: dict(capture), playing_seconds=.1, sleep=lambda _: None)
     monkeypatch.setattr(server, "roku", lane)
+    # The fake config names no HD PVR; take it as plugged in.
+    monkeypatch.setattr(server, "roku_sources_available", lambda: True)
     server.lanes["roku"]["stream_id"] = "cap-1"
     real_ready = server.lane_stream_ready
     monkeypatch.setattr(server, "lane_stream_ready",
@@ -903,3 +906,71 @@ def test_one_touch_tapes_what_the_roku_shows(roku_vcr):
     payload, status = server.create_recording({"lane": "roku", "mode": "otr",
                                                "end": time.time() + 3600})
     assert status == 409  # The first one-touch tape still has the Roku.
+
+
+# ---------------------------------------------------------------------------
+# The VCR's inputs: what its SOURCE menu offers
+# ---------------------------------------------------------------------------
+
+def test_without_a_roku_the_vcr_lists_the_digital_tuner_alone(vcr):
+    inputs = server.recordings_payload()["inputs"]
+    assert [entry["lane"] for entry in inputs] == ["digital"]
+    digital = inputs[0]
+    assert digital["modes"] == ["manual", "guide", "otr"]
+    assert [source["items_path"] for source in digital["sources"]] == ["/api/v1/sources/digital"]
+
+
+def test_the_vcr_lists_the_roku_and_its_feeds(roku_vcr):
+    inputs = {entry["lane"]: entry for entry in server.recordings_payload()["inputs"]}
+    assert list(inputs) == ["digital", "roku"]
+    roku = inputs["roku"]
+    assert roku["modes"] == ["manual", "otr"] and roku["available"] is True
+    assert roku["shares_with_holder"] is True and roku["lead_seconds"] >= 60
+    sources = {source["id"]: source for source in roku["sources"]}
+    assert list(sources) == list(roku_lane.SOURCES)
+    assert sources["youtube-tv"]["dated"] is False and sources["youtube-tv"]["typical_seconds"] is None
+    assert sources["mlb"]["dated"] is True and 2 * 3600 < sources["mlb"]["typical_seconds"] < 4 * 3600
+    assert sources["sunday-ticket"]["typical_seconds"] == sources["thursday-night-football"]["typical_seconds"]
+
+
+def test_an_input_names_who_else_holds_it(roku_vcr):
+    assert all(entry["held_by"] is None for entry in server.recordings_payload()["inputs"])
+    server.acquire_tuner_lock({"lane": "roku", "owner": "VizelVision master", "duration_seconds": 600})
+    inputs = {entry["lane"]: entry for entry in server.recordings_payload()["inputs"]}
+    assert inputs["roku"]["held_by"] == "VizelVision master"
+    assert inputs["digital"]["held_by"] is None
+    # The VCR's own hold is not someone else's.
+    server.release_tuner_lock({"lane": "roku", "override": True})
+    schedule_roku()
+    server.recording_tick()
+    assert server.active_lock(server.LANE_ROKU)["owner"] == "VCR"
+    inputs = {entry["lane"]: entry for entry in server.recordings_payload()["inputs"]}
+    assert inputs["roku"]["held_by"] is None
+
+
+def test_every_input_takes_the_vcr_pages_one_timer_shape(roku_vcr):
+    """The page posts lane, source_id, channel_id and a game's date flat."""
+    now = time.time()
+    payload, status = server.create_recording({
+        "lane": "digital", "mode": "manual", "source_id": "digital",
+        "channel_id": "wjla_7_1", "start": now + 60, "end": now + 1800})
+    assert status == 201, payload
+    assert payload["timer"]["lane"] == "digital" and payload["timer"]["channel_id"] == "wjla_7_1"
+
+    payload, status = server.create_recording({
+        "lane": "roku", "mode": "manual", "source_id": "mlb", "channel_id": "823254",
+        "date": "2026-10-06", "start": now + 60, "end": now + 3 * 3600})
+    assert status == 201, payload
+    timer = payload["timer"]
+    assert timer["target"] == {"source_id": "mlb", "channel_id": "823254", "date": "2026-10-06"}
+    assert timer["title"] == "Phillies at Braves"
+
+
+def test_a_lane_that_cannot_record_is_refused(vcr):
+    now = time.time()
+    for lane in ("analog", "fm", "nope"):
+        payload, status = server.create_recording({
+            "lane": lane, "mode": "manual", "channel_id": "wjla_7_1",
+            "start": now + 60, "end": now + 1800})
+        assert status == 400 and payload["error"]["code"] == "invalid_lane", lane
+    assert server.recordings_payload()["timers"] == []

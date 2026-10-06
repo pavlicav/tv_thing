@@ -2261,6 +2261,50 @@ def recording_view(timer, now=None):
     return view
 
 
+def recording_inputs():
+    """The VCR's inputs: every lane that can record, and what it can tape.
+
+    The VCR page builds its SOURCE menu from this list, so another tuner or
+    a capture card that learns to record appears there by being listed
+    here. Each source is a catalog under /api/v1/sources; ``modes`` are the
+    POST api/v1/recordings modes the input takes; ``held_by`` is whoever
+    other than the VCR holds the lane, since a timer waits for them (or,
+    with ``shares_with_holder``, tapes alongside a holder already showing
+    its target); ``lead_seconds`` is how long a timer can take to reach its
+    target before the tape starts.
+    """
+    def held_by(lane):
+        entry = active_lock(lane)
+        return entry["owner"] if entry and entry["owner"] != RECORDING_OWNER \
+            else None
+
+    inputs = [{
+        "lane": LANE_DIGITAL,
+        "name": "Digital tuner",
+        "available": True,
+        "modes": ["manual", "guide", "otr"],
+        "lead_seconds": 0,
+        "shares_with_holder": False,
+        "held_by": held_by(LANE_DIGITAL),
+        "sources": [{"id": "digital", "name": "Broadcast", "dated": False,
+                     "typical_seconds": None,
+                     "items_path": "/api/v1/sources/digital"}],
+    }]
+    if roku is not None:
+        available = roku_sources_available()
+        inputs.append({
+            "lane": LANE_ROKU,
+            "name": "Roku",
+            "available": available,
+            "modes": ["manual", "otr"],
+            "lead_seconds": roku_lane.NAVIGATION_SECONDS,
+            "shares_with_holder": True,
+            "held_by": held_by(LANE_ROKU),
+            "sources": roku.source_list(available),
+        })
+    return inputs
+
+
 def recordings_payload():
     now = time.time()
     with lock:
@@ -2272,6 +2316,7 @@ def recordings_payload():
     return {
         "api_version": API_VERSION,
         "now": int(now),
+        "inputs": recording_inputs(),
         # The digital tape first, for clients that show only one.
         "active": running[0] if running else None,
         "active_recordings": running,
@@ -2346,8 +2391,13 @@ def create_recording(body):
     if not isinstance(body, dict):
         return api_v1_error("JSON object required", 400)
     mode = body.get("mode", "manual")
-    if body.get("lane") == LANE_ROKU:
+    lane = body.get("lane") or LANE_DIGITAL
+    if lane == LANE_ROKU:
         return create_roku_recording(body, mode)
+    if lane != LANE_DIGITAL:
+        return api_v1_error(
+            f"lane must be {LANE_DIGITAL} or {LANE_ROKU}; no other lane records",
+            400, "invalid_lane")
     # Copy the live lane instead of encoding the broadcast again; see
     # recorder.py.
     from_live = body.get("from_live") is True
@@ -4439,9 +4489,14 @@ class TVHandler(SimpleHTTPRequestHandler):
                             {"mode": "guide", "channel_number": "7.1",
                              "event_start": 1790190000},
                             {"mode": "otr"},
+                            {"lane": "roku", "mode": "manual",
+                             "target": {"source_id": "youtube-tv",
+                                        "channel_id": "ESPN"},
+                             "start": 1790190000, "end": 1790193600},
+                            {"lane": "roku", "mode": "otr"},
                         ],
                         "note": ("timers, series rules, and the library; "
-                                 "recordings take the digital tuner"),
+                                 "inputs[] lists the lanes that record"),
                     },
                     "recordings_search": {
                         "method": "GET", "path": "/api/v1/recordings/search",

@@ -28,6 +28,7 @@ from datetime import date
 
 from roku_control.errors import (ConfigError, ControlBusyError, CueCancelledError, EcpError,
                                  NavigationError, RokuStreamError)
+from roku_control.sports import TYPICAL
 
 LANE = "roku"
 YOUTUBE_TV = "youtube-tv"
@@ -46,6 +47,11 @@ SOURCES = {
     MANUAL: ("Manual Roku", "manual"),
 }
 GAME_SOURCES = (MLB, THURSDAY_NIGHT_FOOTBALL, SUNDAY_TICKET)
+# The league each game source lists, for how long its games usually run.
+GAME_LEAGUES = {MLB: "mlb", THURSDAY_NIGHT_FOOTBALL: "nfl", SUNDAY_TICKET: "nfl"}
+# How long the Roku can take to reach a target and verify it: YouTube TV
+# took 39-124 s and Sunday Ticket 93-205 s when measured on 2026-10-06.
+NAVIGATION_SECONDS = 210
 
 # What the on-screen remote may send. Power and volume are left out: the
 # source Roku's HDMI goes to the capture card, not a television.
@@ -477,6 +483,9 @@ class RokuLane:
                  "items": kind, "available": available,
                  "selector": "channel_id" if source_id != MANUAL else None,
                  "dated": source_id in GAME_SOURCES,
+                 # First pitch or kickoff to the final, as the schedule projects it.
+                 "typical_seconds": (int(TYPICAL[GAME_LEAGUES[source_id]].total_seconds())
+                                     if source_id in GAME_LEAGUES else None),
                  "items_path": f"/api/v1/sources/{source_id}"}
                 for source_id, (name, kind) in SOURCES.items()]
 

@@ -279,9 +279,20 @@
       padding: 2px 6px; min-width: 0;
       border-radius: 0;
     }
-    .osd-field:focus { background: rgba(255,255,255,.14); outline: none; }
-    select.osd-field { max-width: 100%; appearance: none; -webkit-appearance: none; padding-right: 14px; }
+    .osd-field:focus { background-color: rgba(255,255,255,.14); outline: none; }
+    select.osd-field {
+      max-width: 100%; appearance: none; -webkit-appearance: none; padding-right: 22px;
+      /* A drop-down's caret, drawn as two triangles */
+      background-image:
+        linear-gradient(45deg, transparent 50%, currentColor 50%),
+        linear-gradient(135deg, currentColor 50%, transparent 50%);
+      background-position: calc(100% - 12px) 55%, calc(100% - 7px) 55%;
+      background-size: 5px 5px;
+      background-repeat: no-repeat;
+    }
     select.osd-field option { background: var(--osd-blue-lo); color: #fff; }
+    select.osd-field optgroup { background: var(--osd-blue-lo); color: var(--osd-hi); }
+    select.osd-field option:disabled { color: rgba(255,255,255,.45); }
     input.osd-field[type="time"] { color-scheme: dark; width: 9.5em; }
     input.osd-field::placeholder { color: rgba(255,255,255,.45); }
     .osd-field.wide { flex: 1; min-width: 10em; }
@@ -443,7 +454,7 @@
 
         <div class="door" id="door" aria-hidden="true">
           <span class="door-label vhs">VHS</span>
-          <span class="door-label">DIGITAL TUNER</span>
+          <span class="door-label" id="door-input">DIGITAL TUNER</span>
         </div>
 
         <div class="vfd" role="status" aria-live="polite" aria-label="Recorder display">
@@ -471,7 +482,7 @@
 
       <div class="deck-bottom">
         <div class="keys">
-          <button class="key key-rec" id="k-rec" title="One Touch Recording: tape the digital channel now, until the programme ends">
+          <button class="key key-rec" id="k-rec" title="One Touch Recording: tape what the source shows now">
             <span class="glyph">●</span>REC
           </button>
           <button class="key" id="k-stop" title="Stop the recording in progress">
@@ -509,6 +520,9 @@
               <span class="hint">OFF BEFORE ON = NEXT DAY</span>
             </div>
             <form id="f-manual" class="osd-grid" autocomplete="off">
+              <label class="k" for="m-src">SOURCE</label>
+              <div class="osd-field-row"><select class="osd-field" id="m-src"></select></div>
+
               <label class="k" for="m-ch">CH</label>
               <div class="osd-field-row">
                 <button type="button" class="osd-btn osd-step" id="m-ch-down" aria-label="Previous channel">◀</button>
@@ -536,6 +550,7 @@
               <button class="osd-btn primary" id="m-enter" type="submit" form="f-manual">ENTER</button>
               <span class="osd-note" id="m-summary">—</span>
             </div>
+            <p class="osd-note" id="m-note" hidden style="margin-top: 14px; text-transform: none; letter-spacing: .02em"></p>
           </section>
 
           <!-- 2: by guide name -->
@@ -608,12 +623,26 @@
 const $ = (id) => document.getElementById(id);
 const API = "api/v1/recordings";
 
+// A server from before the SOURCE menu lists no inputs: it records the
+// digital tuner alone.
+const DIGITAL_INPUT = {
+  lane: "digital", name: "Digital tuner", available: true, held_by: null,
+  modes: ["manual", "guide", "otr"], lead_seconds: 0, shares_with_holder: false,
+  sources: [{ id: "digital", name: "Broadcast", dated: false, items_path: "/api/v1/sources/digital" }],
+};
+const CATALOG_SECONDS = 300;        // how long a channel or game list is reused
+const GAME_OVERRUN_SECONDS = 1800;  // extra innings, overtime, a long review
+
 let state = null;          // last GET api/v1/recordings
-let channels = [];
+let inputs = [DIGITAL_INPUT];  // the lanes that record, from the server
+let inputLane = "digital"; // SOURCE: the input PROG and REC tape from
 let clockSkew = 0;         // server clock minus browser clock, seconds
 let reachable = false;
 let dayOffset = 0;         // manual timer: days from today
 let lastQuery = "";
+const catalogs = new Map();    // source id (and day, for games) -> { at, items }
+const choices = new Map();     // CH option value -> { source, item, day }
+const lastChoice = {};         // lane -> the CH option last chosen there
 
 // ---------- helpers ----------
 
@@ -669,6 +698,21 @@ function fmtBytes(bytes) {
 }
 const chLabel = (number) => String(number || "--").replace(".", "-");
 
+const currentInput = () => inputs.find((input) => input.lane === inputLane) || inputs[0];
+const inputName = (lane) => (inputs.find((input) => input.lane === (lane || "digital")) || { name: lane }).name;
+// What a timer tapes: its channel number, or else the input it records from.
+const timerSource = (timer) =>
+  timer.channel_number ? chLabel(timer.channel_number) : `${inputName(timer.lane)} ·`;
+// The CH window shows a channel number, or two letters of the input's name.
+const vfdChannel = (timer) =>
+  timer.channel_number ? chLabel(timer.channel_number) : inputName(timer.lane).slice(0, 2);
+
+function dayIso(offset) {
+  const d = new Date(serverNow() * 1000);
+  d.setDate(d.getDate() + offset);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 function say(message, isError = false) {
   const node = $("osd-msg");
   node.textContent = message || "";
@@ -718,7 +762,7 @@ function drawSegments(svg, text) {
       x += 5;
       continue;
     }
-    const lit = GLYPHS[ch] ?? GLYPHS[ch.toUpperCase()] ?? "";
+    const lit = GLYPHS[ch] ?? GLYPHS[ch.toUpperCase()] ?? GLYPHS[ch.toLowerCase()] ?? "";
     for (const [name, [sx, sy, w, h]] of Object.entries(SEGMENTS)) {
       const seg = document.createElementNS(ns, "rect");
       seg.setAttribute("x", sx); seg.setAttribute("y", sy);
@@ -744,9 +788,22 @@ function setMarquee(text) {
   });
 }
 
+function runningRecordings() {
+  if (!state) return [];
+  return state.active_recordings || (state.active ? [state.active] : []);
+}
+
+// The tape the deck shows and STOP stops: the one on the chosen SOURCE,
+// or else whichever is running.
+function shownRecording() {
+  const running = runningRecordings();
+  return running.find((timer) => timer.lane === currentInput().lane) || running[0] || null;
+}
+
 function renderDeck() {
   const now = serverNow();
-  const active = state && state.active;
+  const running = runningRecordings();
+  const active = shownRecording();
   const armed = state ? state.timers.filter((t) => t.status === "scheduled") : [];
 
   $("i-rec").classList.toggle("lit", Boolean(active));
@@ -779,10 +836,12 @@ function renderDeck() {
     drawSegments(clock, `${h}:${pad(m)}:${pad(s)}`);
     clock.classList.add("red");
     $("clock-label").textContent = "COUNTER";
-    drawSegments($("seg-ch"), chLabel(active.channel_number));
+    drawSegments($("seg-ch"), vfdChannel(active));
     const left = fmtLength(Math.max(0, active.end - now));
-    const signal = active.signal === "lost" ? " · NO SIGNAL" : "";
-    setMarquee(`REC ${active.title || active.channel_name || ""} · ${left} LEFT${signal}`);
+    const signal = { lost: " · NO SIGNAL", tuning: " · TUNING" }[active.signal] || "";
+    const others = running.filter((timer) => timer.id !== active.id)
+      .map((timer) => ` · ALSO REC ${inputName(timer.lane)}`).join("");
+    setMarquee(`REC ${active.title || active.channel_name || ""} · ${left} LEFT${signal}${others}`);
     return;
   }
   clock.classList.remove("red");
@@ -792,7 +851,7 @@ function renderDeck() {
   drawSegments(clock, `${String(hours).padStart(2, " ")}:${pad(d.getMinutes())}`);
   $("clock-label").textContent = d.getHours() < 12 ? "CLOCK  AM" : "CLOCK  PM";
   const next = armed[0];
-  drawSegments($("seg-ch"), next ? chLabel(next.channel_number) : "--");
+  drawSegments($("seg-ch"), next ? vfdChannel(next) : "--");
   if (next) {
     setMarquee(`NEXT ${fmtDay(next.start)} ${fmtClock(next.start)} · ${next.title || next.channel_name || ""}`);
   } else if (state && !state.storage.ready) {
@@ -825,31 +884,177 @@ document.addEventListener("keydown", (event) => {
   if (index >= 0 && $("confirm").hidden) showTab(TABS[index]);
 });
 
-// ---------- 1: channel and time ----------
+// ---------- 1: source, channel and time ----------
+//
+// SOURCE picks the input -- the digital tuner, the Roku, whatever else the
+// server lists as able to record -- and CH lists what that input can tape:
+// broadcast channels, or the Roku's YouTube TV channels and the DATE's games.
 
-function fillChannels() {
+// Returns whether the input in use changed. The one chosen is kept while
+// it is missing (the server unreachable, say), and used again when it is back.
+function fillInputs(list) {
+  const before = currentInput().lane;
+  inputs = list && list.length ? list : [DIGITAL_INPUT];
+  const select = $("m-src");
+  const key = inputs.map((input) => `${input.lane} ${input.name} ${input.available}`).join("|");
+  if (select.dataset.key !== key) {
+    select.dataset.key = key;
+    select.replaceChildren(...inputs.map((input) => {
+      const option = el("option", null, input.available ? input.name : `${input.name} (offline)`);
+      option.value = input.lane;
+      return option;
+    }));
+  }
+  select.value = currentInput().lane;
+  renderInput();
+  return currentInput().lane !== before;
+}
+
+function renderInput() {
+  const input = currentInput();
+  const name = input.name;
+  $("door-input").textContent = name.toUpperCase();
+  $("k-rec").title = `One Touch Recording: tape what the ${name} shows now`;
+  $("k-rec").disabled = !input.modes.includes("otr");
+  const notes = [];
+  if (!input.available) notes.push(`The ${name} is offline; its timers will fail until it is back.`);
+  if (input.held_by) {
+    notes.push(`${input.held_by} has the ${name} now. A timer waits for it to let go` +
+      (input.shares_with_holder ? ", unless it is already showing the timer's channel: then they share it." : "."));
+  }
+  if (input.lead_seconds >= 60) {
+    notes.push(`The ${name} can take up to ${Math.ceil(input.lead_seconds / 60)} minutes to reach a channel, ` +
+      "and the tape starts once it is there, so set ON a few minutes early." +
+      (input.sources.some((source) => source.dated) ? " Choosing a game sets ON and OFF around it." : ""));
+  }
+  $("m-note").textContent = notes.join(" ");
+  $("m-note").hidden = !notes.length;
+}
+
+$("m-src").addEventListener("change", () => {
+  inputLane = $("m-src").value;
+  try { localStorage.setItem("vcr-input", inputLane); } catch (_) { /* private mode */ }
+  renderInput();
+  renderDeck();
+  loadChannels();
+});
+
+async function sourceItems(source, day) {
+  const key = source.dated ? `${source.id} ${day}` : source.id;
+  const cached = catalogs.get(key);
+  if (cached && Date.now() - cached.at < CATALOG_SECONDS * 1000) return cached.items;
+  try {
+    const query = source.dated ? `?date=${day}` : "";
+    const data = await api(source.items_path.replace(/^\//, "") + query);
+    catalogs.set(key, { at: Date.now(), items: data.items || [] });
+    return data.items || [];
+  } catch (_) {
+    return cached ? cached.items : null;    // null: it could not be listed
+  }
+}
+
+async function loadChannels() {
+  const serial = ++loadChannels.serial;
+  const input = currentInput();
+  const day = dayIso(dayOffset);
+  const groups = await Promise.all(input.sources.map(async (source) =>
+    ({ source, day, items: await sourceItems(source, day) })));
+  // A newer SOURCE or DATE may have asked again while this one waited.
+  if (serial === loadChannels.serial) fillChannels(input, groups);
+}
+loadChannels.serial = 0;
+
+function gameClock(item) {
+  if (item.state === "live") return "LIVE";
+  if (item.state === "final") return "FINAL";
+  return item.start_time ? fmtClock(Date.parse(item.start_time) / 1000) : "--:--";
+}
+
+function itemLabel(source, item) {
+  if (item.number) return `${chLabel(item.number)}  ${item.name}`;
+  return source.dated ? `${gameClock(item)}  ${item.name}` : item.name;
+}
+
+function fillChannels(input, groups) {
   const select = $("m-ch");
-  const previous = select.value;
-  select.replaceChildren(...channels.map((channel) => {
-    const option = el("option", null, `${chLabel(channel.number)}  ${channel.name}`);
-    option.value = channel.id;
+  const wanted = lastChoice[input.lane];
+  const blank = (text) => {
+    const option = el("option", null, text);
+    option.disabled = true;
     return option;
-  }));
-  if (previous && channels.some((c) => c.id === previous)) select.value = previous;
+  };
+  choices.clear();
+  const nodes = [];
+  for (const { source, day, items } of groups) {
+    const options = items === null ? [blank("COULD NOT LIST")]
+      : !items.length && source.dated ? [blank("NOTHING THIS DAY")]
+      : items.map((item) => {
+        const option = el("option", null, itemLabel(source, item));
+        option.value = `${source.id}/${item.id}`;
+        option.disabled = item.playable === false;
+        choices.set(option.value, { source, item, day });
+        return option;
+      });
+    if (groups.length === 1) { nodes.push(...options); continue; }
+    const group = el("optgroup");
+    group.label = source.dated ? `${source.name} · ${fmtDay(Date.parse(`${day}T12:00`) / 1000)}` : source.name;
+    group.append(...options);
+    nodes.push(group);
+  }
+  select.replaceChildren(...nodes);
+  if (wanted && choices.has(wanted)) {
+    select.value = wanted;
+  } else {
+    const first = [...select.options].find((option) => !option.disabled);
+    select.value = first ? first.value : "";
+  }
+  updateManualSummary();
+}
+
+// Choosing a game sets ON a few minutes before the first pitch or kickoff,
+// so the Roku is there in time, and OFF well past its usual length.
+function presetGameTimes(source, item) {
+  const start = Date.parse(item.start_time) / 1000;
+  if (!Number.isFinite(start)) return;
+  const step = 300;    // on the five minutes, as a person would set it
+  const on = Math.floor((start - (currentInput().lead_seconds || 0)) / step) * step;
+  const off = Math.ceil((start + (source.typical_seconds || 3 * 3600) + GAME_OVERRUN_SECONDS) / step) * step;
+  const midnight = (unix) => new Date(unix * 1000).setHours(0, 0, 0, 0);
+  dayOffset = Math.max(0, Math.min(13, Math.round((midnight(on) - midnight(serverNow())) / 86400000)));
+  const hhmm = (unix) => { const d = new Date(unix * 1000); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  $("m-on").value = hhmm(on);
+  $("m-off").value = hhmm(off);
+}
+
+function chooseChannel() {
+  const value = $("m-ch").value;
+  lastChoice[currentInput().lane] = value;
+  const choice = choices.get(value);
+  if (choice && choice.source.dated) presetGameTimes(choice.source, choice.item);
   updateManualSummary();
 }
 
 function stepChannel(delta) {
-  const select = $("m-ch");
-  if (!select.options.length) return;
-  select.selectedIndex = (select.selectedIndex + delta + select.options.length) % select.options.length;
-  updateManualSummary();
+  const options = [...$("m-ch").options].filter((option) => !option.disabled);
+  if (!options.length) return;
+  const at = options.findIndex((option) => option.selected);
+  $("m-ch").value = options[(at + delta + options.length) % options.length].value;
+  chooseChannel();
 }
+
+function stepDay(delta) {
+  dayOffset = Math.max(0, Math.min(13, dayOffset + delta));
+  updateManualSummary();
+  // Games are listed by day; channels are the same every day.
+  if (currentInput().sources.some((source) => source.dated)) loadChannels();
+}
+
 $("m-ch-down").addEventListener("click", () => stepChannel(-1));
 $("m-ch-up").addEventListener("click", () => stepChannel(1));
-$("m-day-down").addEventListener("click", () => { dayOffset = Math.max(0, dayOffset - 1); updateManualSummary(); });
-$("m-day-up").addEventListener("click", () => { dayOffset = Math.min(13, dayOffset + 1); updateManualSummary(); });
-["m-ch", "m-on", "m-off"].forEach((id) => $(id).addEventListener("input", updateManualSummary));
+$("m-day-down").addEventListener("click", () => stepDay(-1));
+$("m-day-up").addEventListener("click", () => stepDay(1));
+$("m-ch").addEventListener("input", chooseChannel);
+["m-on", "m-off"].forEach((id) => $(id).addEventListener("input", updateManualSummary));
 
 function manualWindow() {
   const on = $("m-on").value, off = $("m-off").value;
@@ -877,21 +1082,30 @@ function updateManualSummary() {
   $("m-date").textContent = dayOffset === 0 ? `${fmtDay(d)} TODAY` : fmtDay(d);
   const span = manualWindow();
   if (!span) { $("m-summary").textContent = "SET ON AND OFF TIMES"; return; }
-  const channel = channels.find((c) => c.id === $("m-ch").value);
+  const choice = choices.get($("m-ch").value);
+  const what = !choice ? "CH --"
+    : choice.item.number ? `CH ${chLabel(choice.item.number)}` : choice.item.name;
   $("m-summary").textContent =
-    `CH ${chLabel(channel && channel.number)} · ${fmtDay(span.start)} ${fmtClock(span.start)}–${fmtClock(span.end)} · ${fmtLength(span.end - span.start)}`;
+    `${what} · ${fmtDay(span.start)} ${fmtClock(span.start)}–${fmtClock(span.end)} · ${fmtLength(span.end - span.start)}`;
 }
 
 $("f-manual").addEventListener("submit", async (event) => {
   event.preventDefault();
   const span = manualWindow();
   if (!span) { say("SET ON AND OFF TIMES", true); return; }
+  const choice = choices.get($("m-ch").value);
+  if (!choice) { say("PICK A CHANNEL", true); return; }
+  // One shape for every input: the digital tuner reads channel_id, the
+  // Roku the whole target, and a game also its listing's day.
+  const body = {
+    lane: currentInput().lane, mode: "manual",
+    source_id: choice.source.id, channel_id: choice.item.id,
+    start: span.start, end: span.end, title: $("m-title").value.trim() || null,
+  };
+  if (choice.source.dated) body.date = choice.day;
   $("m-enter").disabled = true;
   try {
-    const result = await api(API, {
-      mode: "manual", channel_id: $("m-ch").value,
-      start: span.start, end: span.end, title: $("m-title").value.trim() || null,
-    });
+    const result = await api(API, body);
     say(`PROGRAM SET · ${fmtDay(result.timer.start)} ${fmtClock(result.timer.start)}`);
     $("m-title").value = "";
     await load();
@@ -1020,7 +1234,7 @@ function timerRow(timer, live) {
   row.append(
     el("span", "when", `${fmtDay(timer.start)}`),
     el("span", "ch", `${fmtClock(timer.start)}–${fmtClock(timer.end)}`),
-    el("span", "t", `${chLabel(timer.channel_number)} ${timer.title || timer.channel_name || ""}`),
+    el("span", "t", `${timerSource(timer)} ${timer.title || timer.channel_name || ""}`),
   );
   const acts = el("span", "acts");
   const [cls, label] = STATUS_TAGS[timer.status] || ["tag", timer.status.toUpperCase()];
@@ -1093,9 +1307,11 @@ function renderTapes() {
   list.replaceChildren(...(rows.length ? rows : [el("li", "empty", "NO TAPES YET")]));
   const storage = state.storage;
   $("tapes-hint").textContent = storage.free_bytes != null ? `${fmtBytes(storage.free_bytes)} FREE` : "";
+  const roku = state.encoding.roku && inputs.some((input) => input.lane === "roku");
   $("tapes-note").textContent =
     `Play or save a tape here, or find it in the Media Library (DLNA) under Video › Folders › ${storage.directory.split("/").pop()}. ` +
     `Encoded as ${state.encoding.video}, ${state.encoding.audio}, in ${state.encoding.container}. ` +
+    (roku ? `Roku tapes are ${state.encoding.roku}. ` : "") +
     "Jeopardy! tapes get an AD-FREE copy a few minutes after they finish, cut at the station's black frames " +
     "between show and break; the original, ads and all, is kept.";
 }
@@ -1210,17 +1426,19 @@ function renderProblems() {
 
 $("k-rec").addEventListener("click", async () => {
   try {
-    const data = await api(API, { mode: "otr" });
+    const data = await api(API, { lane: currentInput().lane, mode: "otr" });
     const timer = data.timer;
-    say(`ONE TOUCH REC · CH ${chLabel(timer.channel_number)} UNTIL ${fmtClock(timer.end)}`);
+    const where = timer.channel_number ? `CH ${chLabel(timer.channel_number)}` : inputName(timer.lane);
+    say(`ONE TOUCH REC · ${where} UNTIL ${fmtClock(timer.end)}`);
     await load();
   } catch (error) { say(error.message, true); }
 });
 
 $("k-stop").addEventListener("click", async () => {
-  if (!state || !state.active) return;
+  const active = shownRecording();
+  if (!active) return;
   try {
-    await api(`${API}/cancel`, { id: state.active.id });
+    await api(`${API}/cancel`, { id: active.id });
     say("STOPPING · FILING TAPE");
     await load();
   } catch (error) { say(error.message, true); }
@@ -1233,6 +1451,7 @@ async function load() {
     state = await api(API);
     clockSkew = state.now - Date.now() / 1000;
     reachable = true;
+    if (fillInputs(state.inputs)) loadChannels();
     renderProblems();
     renderTimers();
     renderRules();
@@ -1243,25 +1462,19 @@ async function load() {
   renderDeck();
 }
 
-async function loadChannels() {
-  try {
-    const data = await api("api/v1/sources/digital");
-    channels = data.items || [];
-  } catch (_) {
-    try { channels = await api("api/channels"); } catch (__) { channels = []; }
-  }
-  fillChannels();
-}
-
 (async function start() {
   let saved = null;
-  try { saved = localStorage.getItem("vcr-tab"); } catch (_) { /* private mode */ }
+  try {
+    saved = localStorage.getItem("vcr-tab");
+    inputLane = localStorage.getItem("vcr-input") || inputLane;
+  } catch (_) { /* private mode */ }
   // A link can open a screen directly: vcr.html#timers, vcr.html#tapes.
   const linked = location.hash.slice(1);
   showTab(TABS.includes(linked) ? linked : TABS.includes(saved) ? saved : "ctime");
   presetManualTimes();
+  await load();               // the inputs come with the schedule
+  if (!reachable) fillInputs(null);
   await loadChannels();
-  await load();
   const params = new URLSearchParams(location.search);
   if (params.get("q")) {
     $("q").value = params.get("q");

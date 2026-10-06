@@ -188,10 +188,19 @@ should treat it like any other lock and not override it without asking the
 person. Each lane records one thing at a time, and the two lanes record side
 by side.
 
-* GET `api/v1/recordings`: `active` (or null), `active_recordings` (every
-  lane's), `timers` (scheduled and
+* GET `api/v1/recordings`: `inputs`, `active` (or null), `active_recordings`
+  (every lane's), `timers` (scheduled and
   recording), `history`, `rules`, `library` (finished files), `storage`
   (`ready`, `free_bytes`, and `problems[]` each with a `fix`).
+  `inputs` lists the lanes that can record, in menu order, each with `lane`,
+  `name`, `available`, `modes` (the POST modes it takes), `held_by` (the
+  lock owner other than the VCR, or null), `shares_with_holder` (whether a
+  timer tapes alongside a holder already showing its target instead of
+  waiting), `lead_seconds` (how long a timer can take to reach its target
+  before the tape starts), and `sources`: catalogs under `api/v1/sources`,
+  each with `id`, `name`, `items_path`, `dated` (listed per `?date=`), and
+  `typical_seconds` (a game's usual length, or null). The VCR page builds
+  its SOURCE menu from this list.
   A library file named `<tape> (no ads).mp4` is an ad-free copy made by the
   ad stripper, which runs outside TV Thing. Such a file carries `ad_strip`:
   `source` (the original's name), `recorded_seconds`, `kept_seconds` and
@@ -216,6 +225,12 @@ by side.
     `roku-manual` (whatever is on) at a time.
   * `{"lane": "roku", "mode": "otr", "end"?}`: what the Roku shows now, for
     half an hour unless `end` says otherwise.
+
+  The `target` fields may also be given flat, beside `lane`. The VCR page
+  sends every manual timer as `{"lane", "mode": "manual", "source_id",
+  "channel_id", "date"?, "start", "end", "title"?}`, using an item from one
+  of that input's `sources`; the digital lane reads `channel_id` alone. Any
+  other `lane` is **400** `invalid_lane`.
 
   A Roku timer takes the roku lock as `VCR` and navigates when it starts.
   If someone else holds the Roku on that very target, it tapes without the

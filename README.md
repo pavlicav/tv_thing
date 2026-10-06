@@ -116,7 +116,7 @@ Browse to `http://<server-ip>:8080` on any device on your LAN.
 - Live HLS playback via [hls.js](https://github.com/video-dev/hls.js) — bundled locally, no internet required
 - Scan page (`/rescan.html`) shows RF progress, then labels each locked RF channel with its PSIP virtual channels and station names as they are identified
 - Guide page (`/guide.html`) is a scrolling time grid of the broadcast schedule: click a programme for details, click a channel to watch it
-- VCR page (`/vcr.html`) records digital channels to the DLNA media library, programmed by channel and time or by guide name (see [Recording](#recording-the-vcr))
+- VCR page (`/vcr.html`) records digital channels or the Roku to the DLNA media library, programmed by source, channel and time or by guide name (see [Recording](#recording-the-vcr))
 
 ---
 
@@ -538,9 +538,19 @@ timers three ways:
 
 | Mode | How | Window |
 |---|---|---|
-| **CH/TIME** | channel, date, ON and OFF, like a deck's timer menu | exactly as entered; OFF before ON runs past midnight |
+| **CH/TIME** | source, channel, date, ON and OFF, like a deck's timer menu | exactly as entered; OFF before ON runs past midnight |
 | **GUIDE NAME** | search the broadcast guide, then **ONCE** or **EVERY** | the airing, 1 min early and 2 min late |
-| **REC** (One Touch) | the digital channel now playing | to the end of the current programme, or 30 min |
+| **REC** (One Touch) | what the chosen source shows now | digital: to the end of the current programme, or 30 min; Roku: 30 min |
+
+**SOURCE** picks the input: the digital tuner, or the Roku. Its CH list is the
+broadcast channels, or the Roku's YouTube TV channels, the DATE's games
+(baseball, Thursday Night Football, Sunday Ticket) and Manual Roku (whatever
+is on). Choosing a game sets ON a few minutes before the start, since the Roku
+takes up to 3.5 minutes to get there, and OFF half an hour past its usual
+length. The menu is built from `inputs` in `GET api/v1/recordings`, so a lane
+that learns to record (another tuner, a capture card) is listed there and
+needs no page change. Digital and Roku timers run side by side; see
+"The Roku lane" in `API.md` for how a Roku timer navigates and shares.
 
 **EVERY** stores a rule (title, pinned to that channel) and sets a timer for
 each matching airing as guides arrive. The guide page's programme detail has

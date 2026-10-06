@@ -335,6 +335,32 @@ def test_vcr_offers_both_channel_time_and_guide_name_programming():
     assert "api/v1/recordings/search" in VCR or "${API}/search" in VCR
 
 
+def test_the_vcr_source_menu_comes_from_the_servers_inputs():
+    form = section(VCR, 'id="f-manual"', "</form>")
+    assert form.index('for="m-src"') < form.index('for="m-ch"')
+    assert "fillInputs(state.inputs)" in section(VCR, "async function load()", "(async function start")
+    # An older server lists no inputs; the page then records the digital tuner.
+    assert "const DIGITAL_INPUT" in VCR and "[DIGITAL_INPUT]" in VCR
+
+
+def test_vcr_timers_and_one_touch_record_the_chosen_source():
+    submit = section(VCR, '$("f-manual").addEventListener("submit"', "function presetManualTimes")
+    assert "lane: currentInput().lane" in submit
+    assert "source_id: choice.source.id, channel_id: choice.item.id" in submit
+    assert "body.date = choice.day" in submit
+    rec = section(VCR, '$("k-rec").addEventListener', '$("k-stop").addEventListener')
+    assert 'lane: currentInput().lane, mode: "otr"' in rec
+    stop = section(VCR, '$("k-stop").addEventListener', "// ---------- loading")
+    assert "shownRecording()" in stop and "state.active.id" not in stop
+
+
+def test_vcr_lists_games_for_the_chosen_date():
+    listing = section(VCR, "async function sourceItems", "function gameClock")
+    assert "source.dated ? `?date=${day}`" in listing
+    assert "serial === loadChannels.serial" in listing
+    assert "loadChannels()" in section(VCR, "function stepDay", "function manualWindow")
+
+
 def test_vcr_script_only_queries_elements_defined_before_it():
     import re
 
