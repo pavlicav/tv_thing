@@ -1988,8 +1988,8 @@ def api_v1_roku_payload():
     from roku_control.calibration import calibration_status
     try:
         calibration = calibration_status(roku.feedback)
-    except RokuStreamError as exc:
-        calibration = {"error": str(exc)}
+    except Exception as exc:   # noqa: BLE001 - diagnostics never fail the page
+        calibration = {"error": f"{type(exc).__name__}: {exc}"}
     return {
         "api_version": API_VERSION,
         "configured": True,

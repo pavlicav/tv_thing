@@ -214,3 +214,12 @@ def test_roku_routes_answer_503_when_unconfigured(api, monkeypatch):
     assert code == 200 and status["lanes"]["roku"]["available"] is False
     code, roku = request("/api/v1/roku")
     assert code == 200 and roku["configured"] is False
+
+
+def test_roku_engineering_view_survives_a_failing_probe(roku_api):
+    request, lane = roku_api
+    code, view = request("/api/v1/roku")
+    assert code == 200 and view["configured"] is True
+    assert "error" in view["calibration"]  # The fake capture has no signal probe.
+    assert view["lane"]["id"] == "roku" and view["channels"] == ["NBC", "ESPN"]
+    assert "Select" in view["remote_keys"]

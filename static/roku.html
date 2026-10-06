@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Roku · TV Thing</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="app.css">
+  <style>
+    body { min-height: 100vh; background: var(--bg); }
+    .kv-row dd { overflow-wrap: anywhere; }
+    .ok { color: var(--ok); }
+    .bad { color: var(--err); }
+    .mute { color: var(--text-mute); }
+    .preview { margin-top: 12px; width: 100%; aspect-ratio: 16 / 9; background: #000;
+               border: 1px solid var(--border); border-radius: var(--r-md); object-fit: contain; }
+    .form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+    .form label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-mute); }
+    .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    pre { margin: 12px 0 0; padding: 12px; max-height: 320px; overflow: auto; font: 12px/1.5 var(--mono);
+          background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md);
+          color: var(--text-dim); white-space: pre-wrap; }
+    .card + .card { margin-top: 14px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./"><span class="brand-mark"></span><span>TV Thing</span></a>
+    <nav class="nav" aria-label="Pages">
+      <a class="navlink" href="./">Watch</a>
+      <a class="navlink" href="guide.html">Guide</a>
+      <a class="navlink" href="vcr.html">VCR</a>
+      <a class="navlink" href="cable.html">Cable</a>
+      <a class="navlink" href="rescan.html">Scan</a>
+      <a class="navlink" href="dx.html">DX</a>
+      <a class="navlink" href="roku.html" aria-current="page">Roku</a>
+      <a class="navlink" href="about.html">About</a>
+    </nav>
+  </header>
+
+  <main class="page">
+    <h1>Roku</h1>
+    <p class="lede">The source Roku, seen through the Hauppauge HD PVR: what it is showing,
+      how it is captured, and the screen calibration its navigation relies on.
+      Watch and drive it from the Roku tab on the Watch page.</p>
+
+    <h2>Now</h2>
+    <div class="grid-2">
+      <div class="card"><dl class="kv" id="now"></dl></div>
+      <div class="card"><dl class="kv" id="roku"></dl></div>
+    </div>
+
+    <h2>Capture</h2>
+    <div class="card"><dl class="kv" id="capture"></dl></div>
+
+    <h2>What the verifier sees</h2>
+    <div class="card">
+      <p class="mute">Screen recognition decodes the capture only while it needs frames. Showing
+        this preview keeps that decoder running (about half a core) until you hide it.</p>
+      <div class="actions">
+        <button class="btn" id="preview-toggle" type="button">Show</button>
+      </div>
+      <img class="preview" id="preview" alt="The Roku's picture, as the verifier sees it" hidden>
+    </div>
+
+    <h2>Calibration</h2>
+    <div class="card">
+      <p class="mute">Calibrations read the screen as it is now; opening a network page moves the
+        Roku. They respect the Roku's lock: lock it on the Watch page first, or confirm taking it over.</p>
+      <form class="form" id="calibrate">
+        <label>Action
+          <select class="field" id="kind">
+            <option value="verify">Check the selected guide row</option>
+            <option value="guide">Save the selected guide row's logo</option>
+            <option value="current-network">Open and save the selected row's network page</option>
+            <option value="network">Save the open network page's logo</option>
+            <option value="profile">Save the selected profile as the safety profile</option>
+            <option value="sunday-ticket">Save the Sunday Ticket logo for a game</option>
+          </select>
+        </label>
+        <label>Channel <select class="field" id="channel"></select></label>
+        <label>Game ID (Sunday Ticket) <input class="field" id="game" inputmode="numeric" placeholder="ESPN game ID"></label>
+        <label>Date <input class="field" id="date" type="date"></label>
+      </form>
+      <div class="actions">
+        <button class="btn btn-accent" id="run" type="button">Run</button>
+      </div>
+      <pre id="result" hidden></pre>
+    </div>
+  </main>
+
+  <script>
+  (() => {
+    "use strict";
+    const $ = id => document.getElementById(id);
+    const LOCK_KEY = "tvthing.rokuLock";
+    let channelsLoaded = false;
+
+    const escapeHtml = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    })[c]);
+
+    function rows(el, pairs) {
+      el.innerHTML = pairs.map(([key, value, cls]) =>
+        `<div class="kv-row"><dt>${escapeHtml(key)}</dt>` +
+        `<dd class="${cls || ""}">${escapeHtml(value == null || value === "" ? "—" : value)}</dd></div>`).join("");
+    }
+
+    function token() {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(LOCK_KEY) || "null");
+        return saved && saved.expires_at * 1000 > Date.now() ? saved.token : undefined;
+      } catch (_) { return undefined; }
+    }
+
+    async function refresh() {
+      let data;
+      try {
+        const res = await fetch("api/v1/roku", { cache: "no-store" });
+        data = await res.json();
+      } catch (_) {
+        rows($("now"), [["Server", "unreachable", "bad"]]);
+        return;
+      }
+      if (!data.configured) {
+        rows($("now"), [["Roku lane", "not configured (roku.json is missing)", "bad"]]);
+        return;
+      }
+      const lane = data.lane || {};
+      const roku = lane.roku || {};
+      const selection = roku.selection;
+      const operation = roku.operation;
+      const stream = lane.stream || {};
+      rows($("now"), [
+        ["Showing", selection ? (selection.manual ? "Manual Roku" : selection.name) : "unverified"],
+        ["Verified", selection && !selection.manual ? `${Math.round(selection.age_seconds)} s ago` +
+          (selection.reusable ? " · reusable" : " · needs a check") : null],
+        ["Route", selection && selection.resolved_source && selection.resolved_source.label],
+        ["Generation", roku.generation],
+        ["Navigation", operation ? `${operation.state}: ${operation.message || operation.phase || ""}` : "none yet",
+         operation && operation.state === "failed" ? "bad" : ""],
+      ]);
+      const player = (roku.player && roku.player.data) || {};
+      rows($("roku"), [
+        ["Roku", data.roku_url],
+        ["Active app", player.app ? `${player.app.name} (${player.app.id})` : (roku.player && roku.player.error) || null],
+        ["Player", player.media_player ? player.media_player.state : null],
+        ["Checked", roku.player && roku.player.age_seconds != null ? `${roku.player.age_seconds} s ago` : null],
+      ]);
+      const calibration = data.calibration || {};
+      const signal = calibration.signal || {};
+      const target = calibration.target || {};
+      const verifier = calibration.capture || {};
+      rows($("capture"), [
+        ["Device", calibration.device ? `${calibration.device.label} · ${calibration.device.path}` : null,
+         calibration.device && calibration.device.state !== "ready" ? "bad" : ""],
+        ["Signal", signal.label, signal.state === "locked" ? "ok" : "bad"],
+        ["Calibrated for", target.label ? `${target.label} · ${target.matches ? "matches" : "does not match"}` : null,
+         target.matches ? "ok" : "bad"],
+        ["Capture", stream.active ? `running · ${stream.state}` : "stopped", stream.active ? "ok" : "bad"],
+        ["Stream", stream.id],
+        ["Health", stream.health && stream.health.ok === false ? stream.health.reason : "ok",
+         stream.health && stream.health.ok === false ? "bad" : ""],
+        ["Probe", calibration.error, "bad"],
+        ["Verifier", verifier.decoding ? "decoding" : "idle"],
+        ["Last verifier failure", verifier.last_stream_failure && verifier.last_stream_failure.error],
+      ]);
+      if (!channelsLoaded) {
+        channelsLoaded = true;
+        $("channel").innerHTML = (data.channels || []).map(name =>
+          `<option>${escapeHtml(name)}</option>`).join("");
+      }
+    }
+
+    $("preview-toggle").addEventListener("click", () => {
+      const img = $("preview");
+      if (img.hidden) {
+        img.src = `api/v1/roku/preview?_=${Date.now()}`;
+        img.hidden = false;
+        $("preview-toggle").textContent = "Hide";
+      } else {
+        img.removeAttribute("src");  // Closing the stream lets the verifier idle.
+        img.hidden = true;
+        $("preview-toggle").textContent = "Show";
+      }
+    });
+
+    $("run").addEventListener("click", async () => {
+      const body = { kind: $("kind").value, channel: $("channel").value,
+                     game_id: $("game").value.trim(), date: $("date").value || undefined,
+                     token: token() };
+      const result = $("result");
+      result.hidden = false;
+      result.textContent = "Running…";
+      const send = extra => fetch("api/v1/roku/calibrate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, ...extra }),
+      });
+      let res = await send({});
+      let data = await res.json().catch(() => ({}));
+      if (res.status === 423 && data.lock) {
+        const ok = window.confirm(`${data.lock.owner} holds the Roku. Take it over to run this calibration? ` +
+                                  "That interrupts whatever it is doing.");
+        if (!ok) { result.textContent = "Left alone: the Roku is locked."; return; }
+        res = await send({ override: true });
+        data = await res.json().catch(() => ({}));
+      }
+      result.textContent = JSON.stringify(data, null, 2);
+      refresh();
+    });
+
+    $("date").value = new Date().toISOString().slice(0, 10);
+    refresh();
+    setInterval(refresh, 5000);
+  })();
+  </script>
+</body>
+</html>
