@@ -343,15 +343,39 @@ def test_the_vcr_source_menu_comes_from_the_servers_inputs():
     assert "const DIGITAL_INPUT" in VCR and "[DIGITAL_INPUT]" in VCR
 
 
-def test_vcr_timers_and_one_touch_record_the_chosen_source():
+def test_vcr_timers_record_the_chosen_source():
     submit = section(VCR, '$("f-manual").addEventListener("submit"', "function presetManualTimes")
     assert "lane: currentInput().lane" in submit
     assert "source_id: choice.source.id, channel_id: choice.item.id" in submit
     assert "body.date = choice.day" in submit
-    rec = section(VCR, '$("k-rec").addEventListener', '$("k-stop").addEventListener')
-    assert 'lane: currentInput().lane, mode: "otr"' in rec
-    stop = section(VCR, '$("k-stop").addEventListener', "// ---------- loading")
-    assert "shownRecording()" in stop and "state.active.id" not in stop
+
+
+def test_the_shelf_has_a_recorder_per_input():
+    build = section(VCR, "function buildShelf()", "function pressKey(")
+    assert "units = inputs.map(" in build
+    assert 'const LOOKS = { roku: "settop" }' in VCR       # the Roku is a cable box
+    assert "LOOKS[input.lane] || \"vcr\"" in build           # anything else is a VCR
+    for look in ("vcr", "settop"):
+        start = VCR.index(f'<template id="unit-{look}">')
+        template = VCR[start:VCR.index("</template>", start)]
+        for key in ("rec", "stop", "prog", "tapes"):
+            assert f'data-key="{key}"' in template, (look, key)
+        for part in ("name", "seg-clock", "text", "text-inner", "i-rec", "i-timer", "led-power"):
+            assert f'data-part="{part}"' in template, (look, part)
+    assert VCR.index('<template id="unit-settop">') < VCR.index("<script>")
+
+
+def test_each_recorder_tapes_and_stops_its_own_lane():
+    press = section(VCR, "function pressKey(", "function renderShelf()")
+    assert 'key === "rec") oneTouch(unit.lane)' in press
+    assert 'key === "stop") stopRecording(unit.lane)' in press
+    assert "selectInput(unit.lane)" in press                # PROG puts it on the TV
+    rec = section(VCR, "async function oneTouch(lane)", "async function stopRecording(lane)")
+    assert '{ lane, mode: "otr" }' in rec
+    stop = section(VCR, "async function stopRecording(lane)", "// ---------- loading")
+    assert "laneOf(timer) === lane" in stop
+    render = section(VCR, "function renderUnit(unit)", "// ---------- tabs")
+    assert "laneOf(timer) === unit.lane" in render and "laneOf(t) === unit.lane" in render
 
 
 def test_vcr_lists_games_for_the_chosen_date():

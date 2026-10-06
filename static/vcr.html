@@ -26,7 +26,7 @@
     body { background: #0b0c0e; }
 
     .room {
-      max-width: 1040px;
+      max-width: 1440px;
       margin: 0 auto;
       padding: 28px 16px 64px;
       display: flex;
@@ -216,10 +216,138 @@
     .led.on.red { background: #ff3b4e; box-shadow: 0 0 8px #ff3b4e; }
     .led.on.green { background: #5cff8a; box-shadow: 0 0 8px #5cff8a; }
     .led.on.amber { background: #ffb13b; box-shadow: 0 0 8px #ffb13b; }
+    .led.on.yellow { background: #ffe95a; box-shadow: 0 0 8px #ffe95a; }
+
+    /* ---------- The shelf: one recorder per input ---------- */
+
+    .shelf {
+      position: relative;
+      display: flex;
+      /* Lines stack upward: a unit with no room beside the VCR sits on it. */
+      flex-wrap: wrap-reverse;
+      justify-content: center;
+      align-items: flex-start;    /* the cross start, which wrap-reverse puts at the bottom */
+      gap: 14px 18px;
+      padding-bottom: 21px;       /* the feet stand on the board */
+    }
+    .shelf::after {               /* the board */
+      content: "";
+      position: absolute; left: -12px; right: -12px; bottom: 0; height: 14px;
+      border-radius: 2px;
+      background:
+        repeating-linear-gradient(90deg, rgba(0,0,0,.16) 0 1px, transparent 1px 11px),
+        linear-gradient(180deg, #5a3d27 0%, #3d281a 45%, #24170e 100%);
+      box-shadow: inset 0 1px 0 rgba(255,220,180,.18), 0 16px 24px -12px rgba(0,0,0,.9);
+    }
+    .shelf .deck { flex: 1 1 860px; max-width: 1040px; }
+    .shelf .settop { flex: 0 1 500px; }
+    .unit { cursor: pointer; }
+    .unit button { cursor: pointer; }
+    /* The one the TV shows */
+    .unit[aria-current="true"] { outline: 2px solid rgba(255, 233, 90, .4); outline-offset: 5px; }
+
+    /* ---------- A set-top box: the cable DVR ---------- */
+
+    .settop {
+      position: relative;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 14px;
+      padding: 15px 16px 14px;
+      border-radius: 5px 5px 4px 4px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.06), transparent 24%),
+        repeating-linear-gradient(90deg, rgba(255,255,255,.012) 0 1px, transparent 1px 4px),
+        linear-gradient(180deg, #24252a 0%, #16171a 60%, #0e0f11 100%);
+      border: 1px solid #000;
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.14),
+        inset 0 -2px 0 rgba(0,0,0,.55),
+        0 18px 30px -18px rgba(0,0,0,.9),
+        0 2px 0 #050506;
+    }
+    .settop::after {           /* the feet */
+      content: "";
+      position: absolute;
+      left: 24px; right: 24px; bottom: -7px; height: 7px;
+      background:
+        linear-gradient(#050506, #050506) left / 44px 100% no-repeat,
+        linear-gradient(#050506, #050506) right / 44px 100% no-repeat;
+      border-radius: 0 0 3px 3px;
+    }
+    .settop-brand { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+    .settop-name {
+      font: 900 17px/1 var(--font); letter-spacing: .16em;
+      color: #d4d7dd; text-shadow: 0 1px 0 #000;
+    }
+    .settop-model { font: 700 8px/1.3 var(--font); letter-spacing: .22em; color: #767b84; white-space: nowrap; }
+    .settop-power { position: absolute; top: 7px; right: 8px; line-height: 0; }
+    .settop-power .led { margin: 0; width: 5px; height: 5px; }
+
+    .settop-window {
+      position: relative; overflow: hidden; min-width: 0;
+      display: grid; grid-template-columns: auto 1fr; align-items: center;
+      gap: 5px 12px;
+      padding: 8px 12px 7px;
+      border-radius: 4px;
+      background:
+        radial-gradient(120% 100% at 50% 0%, rgba(255,60,40,.06), transparent 60%),
+        linear-gradient(180deg, #160707, #060202);
+      border: 1px solid #000;
+      box-shadow: inset 0 0 16px rgba(0,0,0,.95), 0 1px 0 rgba(255,255,255,.07);
+    }
+    .settop-window::after {    /* the smoked acrylic's sheen */
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      background: linear-gradient(165deg, rgba(255,255,255,.07), transparent 42%);
+    }
+    .lamps {
+      display: grid; gap: 3px;
+      font: 800 7.5px/1 var(--font); letter-spacing: .16em; color: rgba(255,90,60,.24);
+    }
+    .lamp { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+    .lamp::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: rgba(255,70,50,.14); }
+    .lamp.lit { color: #ff6a4d; text-shadow: 0 0 5px rgba(255,80,50,.7); }
+    .lamp.lit::before { background: #ff3b30; box-shadow: 0 0 6px #ff3b30; }
+    .lamp.amber.lit { color: var(--vfd-amber); text-shadow: 0 0 5px rgba(255,197,107,.6); }
+    .lamp.amber.lit::before { background: #ffb13b; box-shadow: 0 0 6px #ffb13b; }
+    svg.seg.settop-clock { height: 30px; justify-self: end; }
+    svg.seg.settop-clock .on { fill: #ff3b30; filter: drop-shadow(0 0 3px rgba(255,50,40,.8)); }
+    svg.seg.settop-clock .off { fill: rgba(255,50,40,.07); }
+    .settop-text {
+      grid-column: 1 / -1;
+      font: 700 11px/1.2 var(--mono); letter-spacing: .14em;
+      color: #ff6a4d; text-shadow: 0 0 5px rgba(255,80,50,.6);
+      text-transform: uppercase;
+      white-space: nowrap; overflow: hidden; min-height: 14px;
+    }
+    .settop-text span { display: inline-block; }
+    .settop-text.scroll span { animation: marquee 12s linear infinite; padding-left: 100%; }
+
+    .settop-keys { display: grid; grid-template-columns: auto auto; gap: 7px; }
+    .nub {
+      font: 800 9px/1 var(--font); letter-spacing: .14em; text-transform: uppercase;
+      color: #b7bbc3;
+      height: 24px; min-width: 58px; padding: 0 9px;
+      display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+      border-radius: 12px; border: 1px solid #000;
+      background: linear-gradient(180deg, #3b3d43, #24252a);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 2px 0 #060607, 0 3px 4px rgba(0,0,0,.5);
+      transition: transform .06s, box-shadow .06s;
+    }
+    .nub:hover:not(:disabled) { color: #fff; }
+    .nub:active:not(:disabled) {
+      transform: translateY(2px);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 #060607, 0 1px 2px rgba(0,0,0,.5);
+    }
+    .nub:disabled { opacity: .45; cursor: not-allowed; }
+    .nub .glyph { font-size: 10px; }
+    .nub-rec .glyph { color: #ff3b4e; text-shadow: 0 0 5px rgba(255,59,78,.6); }
 
     /* ---------- The TV and its on-screen display ---------- */
 
     .tv {
+      align-self: center; width: 100%; max-width: 1040px;
       border-radius: 22px;
       padding: 22px 22px 14px;
       background: linear-gradient(180deg, #2b2c30, #1a1b1e);
@@ -395,6 +523,7 @@
       display: flex; align-items: center; gap: 12px; margin-top: 12px;
       font: 800 10px/1 var(--font); letter-spacing: .25em; color: #6c717a;
     }
+    .tv-chin span { white-space: nowrap; }
     .tv-chin .grille { flex: 1; height: 10px; background: repeating-linear-gradient(90deg, #0d0e10 0 3px, transparent 3px 6px); border-radius: 2px; }
 
     [hidden] { display: none !important; }
@@ -413,6 +542,10 @@
       .leds { margin-left: 0; }
       .key { min-width: 0; flex: 1 1 28%; }
       .keys { width: 100%; }
+      .chin-brand { display: none; }
+      .settop { grid-template-columns: 1fr; padding: 13px 12px 12px; }
+      .settop-keys { grid-template-columns: repeat(4, 1fr); }
+      .nub { min-width: 0; }
       svg.seg { height: 34px; }
       svg.seg.small { height: 24px; }
       .tv { padding: 12px 10px 10px; border-radius: 14px; }
@@ -442,64 +575,7 @@
   </header>
 
   <main class="room">
-    <section class="deck" aria-label="Video recorder">
-      <div class="deck-top">
-        <div class="badge">
-          <div>
-            <div class="chrome">TV THING</div>
-            <div class="model">VR-1996 · <b>4</b>-HEAD HI-FI</div>
-          </div>
-          <div class="stripes" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-        </div>
-
-        <div class="door" id="door" aria-hidden="true">
-          <span class="door-label vhs">VHS</span>
-          <span class="door-label" id="door-input">DIGITAL TUNER</span>
-        </div>
-
-        <div class="vfd" role="status" aria-live="polite" aria-label="Recorder display">
-          <div class="vfd-icons" aria-hidden="true">
-            <span class="ico rec" id="i-rec">● REC</span>
-            <span class="ico amber" id="i-timer">⏲ TIMER</span>
-            <span class="ico" id="i-otr">OTR</span>
-            <span class="ico" id="i-prog">PROG</span>
-            <span class="ico" id="i-play">▶ PLAY</span>
-            <span class="ico" id="i-hifi">HI-FI</span>
-          </div>
-          <div class="vfd-main">
-            <div class="vfd-cell">
-              <small>CH</small>
-              <svg class="seg small" id="seg-ch" aria-hidden="true"></svg>
-            </div>
-            <div class="vfd-cell vfd-clock">
-              <small id="clock-label">CLOCK</small>
-              <svg class="seg" id="seg-clock" aria-hidden="true"></svg>
-            </div>
-          </div>
-          <div class="vfd-text" id="vfd-text"><span id="vfd-text-inner">— —</span></div>
-        </div>
-      </div>
-
-      <div class="deck-bottom">
-        <div class="keys">
-          <button class="key key-rec" id="k-rec" title="One Touch Recording: tape what the source shows now">
-            <span class="glyph">●</span>REC
-          </button>
-          <button class="key" id="k-stop" title="Stop the recording in progress">
-            <span class="glyph">■</span>STOP
-          </button>
-          <button class="key" id="k-prog" title="Program a timer by channel and time">PROG</button>
-          <button class="key" id="k-name" title="Find a programme by its guide name">NAME</button>
-          <button class="key" id="k-timers" title="Timers set">TIMER</button>
-          <button class="key" id="k-tapes" title="Recordings in the media library">TAPES</button>
-        </div>
-        <div class="leds" aria-hidden="true">
-          <span><span class="led green" id="led-power"></span>POWER</span>
-          <span><span class="led amber" id="led-timer"></span>TIMER</span>
-          <span><span class="led red" id="led-rec"></span>REC</span>
-        </div>
-      </div>
-    </section>
+    <section class="shelf" id="shelf" aria-label="Recorders"></section>
 
     <section class="tv" aria-label="On-screen programming">
       <div class="crt">
@@ -615,9 +691,95 @@
           <div class="play-ind" id="play-ind" aria-hidden="true">▶ PLAY</div>
         </div>
       </div>
-      <div class="tv-chin" aria-hidden="true"><span>COLOR TV</span><span class="grille"></span><span>● POWER</span></div>
+      <div class="tv-chin" aria-hidden="true"><span class="chin-brand">COLOR TV</span><span class="grille"></span><span id="tv-input"></span><span>● POWER</span></div>
     </section>
   </main>
+
+  <!-- One recorder per input, cloned onto the shelf: a VCR... -->
+  <template id="unit-vcr">
+    <section class="unit deck">
+      <div class="deck-top">
+        <div class="badge">
+          <div>
+            <div class="chrome">TV THING</div>
+            <div class="model">VR-1996 · <b>4</b>-HEAD HI-FI</div>
+          </div>
+          <div class="stripes" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+        </div>
+
+        <div class="door" data-part="door" aria-hidden="true">
+          <span class="door-label vhs">VHS</span>
+          <span class="door-label" data-part="name"></span>
+        </div>
+
+        <div class="vfd" role="status" aria-live="polite" aria-label="Recorder display">
+          <div class="vfd-icons" aria-hidden="true">
+            <span class="ico rec" data-part="i-rec">● REC</span>
+            <span class="ico amber" data-part="i-timer">⏲ TIMER</span>
+            <span class="ico" data-part="i-otr">OTR</span>
+            <span class="ico" data-part="i-prog">PROG</span>
+            <span class="ico" data-part="i-play">▶ PLAY</span>
+            <span class="ico" data-part="i-hifi">HI-FI</span>
+          </div>
+          <div class="vfd-main">
+            <div class="vfd-cell">
+              <small>CH</small>
+              <svg class="seg small" data-part="seg-ch" aria-hidden="true"></svg>
+            </div>
+            <div class="vfd-cell vfd-clock">
+              <small data-part="clock-label">CLOCK</small>
+              <svg class="seg" data-part="seg-clock" aria-hidden="true"></svg>
+            </div>
+          </div>
+          <div class="vfd-text" data-part="text"><span data-part="text-inner">— —</span></div>
+        </div>
+      </div>
+
+      <div class="deck-bottom">
+        <div class="keys">
+          <button class="key key-rec" data-key="rec"><span class="glyph">●</span>REC</button>
+          <button class="key" data-key="stop" title="Stop the recording in progress"><span class="glyph">■</span>STOP</button>
+          <button class="key" data-key="prog" title="Program a timer by channel and time">PROG</button>
+          <button class="key" data-key="name" title="Find a programme by its guide name">NAME</button>
+          <button class="key" data-key="timers" title="Timers set">TIMER</button>
+          <button class="key" data-key="tapes" title="Recordings in the media library">TAPES</button>
+        </div>
+        <div class="leds" aria-hidden="true">
+          <span><span class="led green" data-part="led-power"></span>POWER</span>
+          <span><span class="led amber" data-part="led-timer"></span>TIMER</span>
+          <span><span class="led red" data-part="led-rec"></span>REC</span>
+          <span title="On the TV"><span class="led yellow" data-part="led-tv"></span>TV</span>
+        </div>
+      </div>
+    </section>
+  </template>
+
+  <!-- ...or, for a set-top source like the Roku, a cable DVR box. -->
+  <template id="unit-settop">
+    <section class="unit settop">
+      <div class="settop-brand">
+        <span class="settop-name" data-part="name"></span>
+        <span class="settop-model">DIGITAL CABLE · DVR</span>
+      </div>
+      <div class="settop-window" role="status" aria-live="polite" aria-label="Recorder display">
+        <div class="lamps" aria-hidden="true">
+          <span class="lamp" data-part="i-rec">REC</span>
+          <span class="lamp amber" data-part="i-timer">TIMER</span>
+          <span class="lamp amber" data-part="i-held">IN USE</span>
+          <span class="lamp" data-part="i-tv">TV</span>
+        </div>
+        <svg class="seg settop-clock" data-part="seg-clock" aria-hidden="true"></svg>
+        <div class="settop-text" data-part="text"><span data-part="text-inner">— —</span></div>
+      </div>
+      <div class="settop-keys">
+        <button class="nub nub-rec" data-key="rec"><span class="glyph">●</span>REC</button>
+        <button class="nub" data-key="stop" title="Stop the recording in progress"><span class="glyph">■</span>STOP</button>
+        <button class="nub" data-key="prog" title="Program a timer by channel and time">PROG</button>
+        <button class="nub" data-key="tapes" title="Recordings in the media library">LIST</button>
+      </div>
+      <span class="settop-power" aria-hidden="true"><span class="led green" data-part="led-power"></span></span>
+    </section>
+  </template>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -777,9 +939,9 @@ function drawSegments(svg, text) {
   svg.setAttribute("viewBox", `-1 0 ${Math.max(x, 1) + 1} 22.4`);
 }
 
-function setMarquee(text) {
-  const box = $("vfd-text");
-  const inner = $("vfd-text-inner");
+function setMarquee(unit, text) {
+  const box = unit.part("text");
+  const inner = unit.part("text-inner");
   if (inner.textContent === text) return;
   inner.textContent = text;
   box.classList.remove("scroll");
@@ -793,71 +955,136 @@ function runningRecordings() {
   return state.active_recordings || (state.active ? [state.active] : []);
 }
 
-// The tape the deck shows and STOP stops: the one on the chosen SOURCE,
-// or else whichever is running.
-function shownRecording() {
-  const running = runningRecordings();
-  return running.find((timer) => timer.lane === currentInput().lane) || running[0] || null;
+// ---------- the shelf: one recorder per input ----------
+//
+// Every input the server lists is a recorder on the shelf, with its own
+// display and its own REC and STOP: a VCR, or for a set-top source like the
+// Roku, a cable box. The TV shows one of them at a time -- the timer menu's
+// SOURCE -- chosen by its PROG key or by clicking it.
+
+// A lane listed here gets that look; any other input is a VCR.
+const LOOKS = { roku: "settop" };
+// The keys an input shows only if it takes that kind of timer.
+const KEY_MODES = { rec: "otr", prog: "manual", name: "guide" };
+let units = [];
+
+const laneOf = (timer) => timer.lane || "digital";
+const unitInput = (unit) => inputs.find((input) => input.lane === unit.lane) || DIGITAL_INPUT;
+
+function buildShelf() {
+  const shelf = $("shelf");
+  const key = inputs.map((input) => `${input.lane} ${input.name}`).join("|");
+  if (shelf.dataset.key === key) return;
+  shelf.dataset.key = key;
+  units = inputs.map((input) => {
+    const look = LOOKS[input.lane] || "vcr";
+    const root = $(`unit-${look}`).content.firstElementChild.cloneNode(true);
+    const unit = { lane: input.lane, look, root,
+                   part: (name) => root.querySelector(`[data-part="${name}"]`) };
+    root.setAttribute("aria-label", `${input.name} recorder`);
+    unit.part("name").textContent = input.name.toUpperCase();
+    for (const button of root.querySelectorAll("[data-key]")) {
+      const mode = KEY_MODES[button.dataset.key];
+      button.hidden = Boolean(mode) && !input.modes.includes(mode);
+      if (button.dataset.key === "rec") {
+        button.title = `One Touch Recording: tape what the ${input.name} shows now`;
+      }
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        pressKey(unit, button.dataset.key);
+      });
+    }
+    root.addEventListener("click", () => selectInput(unit.lane));
+    return unit;
+  });
+  shelf.replaceChildren(...units.map((unit) => unit.root));
+  renderShelf();
 }
 
-function renderDeck() {
+function pressKey(unit, key) {
+  if (key === "rec") oneTouch(unit.lane);
+  else if (key === "stop") stopRecording(unit.lane);
+  else if (key === "prog") { selectInput(unit.lane); showTab("ctime"); $("m-ch").focus(); }
+  else if (key === "name") { showTab("name"); $("q").focus(); }
+  else showTab(key);           // timers, tapes
+}
+
+function renderShelf() {
+  units.forEach(renderUnit);
+}
+
+function renderUnit(unit) {
   const now = serverNow();
-  const running = runningRecordings();
-  const active = shownRecording();
-  const armed = state ? state.timers.filter((t) => t.status === "scheduled") : [];
+  const input = unitInput(unit);
+  const active = runningRecordings().find((timer) => laneOf(timer) === unit.lane) || null;
+  const armed = state ? state.timers.filter((t) => t.status === "scheduled" && laneOf(t) === unit.lane) : [];
+  const shown = unit.lane === currentInput().lane;
+  const light = (name, on) => unit.part(name)?.classList.toggle(name.startsWith("led") ? "on" : "lit", Boolean(on));
 
-  $("i-rec").classList.toggle("lit", Boolean(active));
-  $("i-rec").classList.toggle("blink", Boolean(active));
-  $("led-rec").classList.toggle("on", Boolean(active));
-  $("i-timer").classList.toggle("lit", armed.length > 0);
-  $("led-timer").classList.toggle("on", armed.length > 0);
-  $("i-otr").classList.toggle("lit", Boolean(active && active.kind === "otr"));
-  $("i-prog").classList.toggle("lit", armed.length > 0 && !active);
-  $("i-hifi").classList.toggle("lit", Boolean(active));
-  $("led-power").classList.toggle("on", reachable);
-  $("door").classList.toggle("loaded", Boolean(active));
-  $("k-stop").disabled = !active;
+  light("i-rec", active);
+  unit.part("i-rec").classList.toggle("blink", Boolean(active));
+  light("led-rec", active);
+  light("i-timer", armed.length > 0);
+  light("led-timer", armed.length > 0);
+  light("i-otr", active && active.kind === "otr");
+  light("i-prog", armed.length > 0 && !active);
+  light("i-hifi", active);
+  light("i-play", shown && !$("player").hidden);
+  light("i-tv", shown);
+  light("led-tv", shown);
+  light("i-held", input.held_by);
+  light("led-power", reachable && input.available);
+  unit.part("door")?.classList.toggle("loaded", Boolean(active));
+  unit.root.setAttribute("aria-current", String(shown));
+  unit.root.title = shown ? "" : `Show the ${input.name} on the TV`;
+  unit.root.querySelector('[data-key="stop"]').disabled = !active;
 
-  const clock = $("seg-clock");
+  const clock = unit.part("seg-clock");
+  const channel = unit.part("seg-ch");
+  const label = unit.part("clock-label");
   if (!reachable) {
-    // The one thing everyone remembers about a VCR.
-    drawSegments(clock, "12:00");
+    // The one thing everyone remembers about a VCR; a cable box just goes blank.
+    drawSegments(clock, unit.look === "vcr" ? "12:00" : "--:--");
     clock.classList.add("blink");
-    drawSegments($("seg-ch"), "--");
-    $("clock-label").textContent = "CLOCK";
-    setMarquee("NO SIGNAL FROM SERVER");
+    clock.classList.remove("red");
+    if (channel) drawSegments(channel, "--");
+    if (label) label.textContent = "CLOCK";
+    setMarquee(unit, "NO SIGNAL FROM SERVER");
     return;
   }
   clock.classList.remove("blink");
 
-  if (active) {
+  // A VCR's clock turns into the tape counter; a cable box keeps the time.
+  const counting = Boolean(active) && unit.look === "vcr";
+  clock.classList.toggle("red", counting);
+  if (counting) {
     const elapsed = Math.max(0, Math.floor(now - (active.started_at || now)));
     const h = Math.floor(elapsed / 3600), m = Math.floor(elapsed / 60) % 60, s = elapsed % 60;
     drawSegments(clock, `${h}:${pad(m)}:${pad(s)}`);
-    clock.classList.add("red");
-    $("clock-label").textContent = "COUNTER";
-    drawSegments($("seg-ch"), vfdChannel(active));
+    if (label) label.textContent = "COUNTER";
+  } else {
+    const d = new Date(now * 1000);
+    const hours = d.getHours() % 12 || 12;
+    drawSegments(clock, `${String(hours).padStart(2, " ")}:${pad(d.getMinutes())}`);
+    if (label) label.textContent = d.getHours() < 12 ? "CLOCK  AM" : "CLOCK  PM";
+  }
+
+  const next = armed[0];
+  if (channel) drawSegments(channel, active ? vfdChannel(active) : next ? vfdChannel(next) : "--");
+  if (active) {
     const left = fmtLength(Math.max(0, active.end - now));
     const signal = { lost: " · NO SIGNAL", tuning: " · TUNING" }[active.signal] || "";
-    const others = running.filter((timer) => timer.id !== active.id)
-      .map((timer) => ` · ALSO REC ${inputName(timer.lane)}`).join("");
-    setMarquee(`REC ${active.title || active.channel_name || ""} · ${left} LEFT${signal}${others}`);
-    return;
-  }
-  clock.classList.remove("red");
-
-  const d = new Date(now * 1000);
-  const hours = d.getHours() % 12 || 12;
-  drawSegments(clock, `${String(hours).padStart(2, " ")}:${pad(d.getMinutes())}`);
-  $("clock-label").textContent = d.getHours() < 12 ? "CLOCK  AM" : "CLOCK  PM";
-  const next = armed[0];
-  drawSegments($("seg-ch"), next ? vfdChannel(next) : "--");
-  if (next) {
-    setMarquee(`NEXT ${fmtDay(next.start)} ${fmtClock(next.start)} · ${next.title || next.channel_name || ""}`);
+    setMarquee(unit, `REC ${active.title || active.channel_name || ""} · ${left} LEFT${signal}`);
+  } else if (!input.available) {
+    setMarquee(unit, "OFFLINE");
+  } else if (next) {
+    setMarquee(unit, `NEXT ${fmtDay(next.start)} ${fmtClock(next.start)} · ${next.title || next.channel_name || ""}`);
   } else if (state && !state.storage.ready) {
-    setMarquee("CHECK SETUP · SEE SCREEN");
+    setMarquee(unit, "CHECK SETUP · SEE SCREEN");
+  } else if (input.held_by) {
+    setMarquee(unit, `IN USE · ${input.held_by}`);
   } else {
-    setMarquee("STANDBY · NO TIMERS SET");
+    setMarquee(unit, "STANDBY · NO TIMERS SET");
   }
 }
 
@@ -873,10 +1100,6 @@ function showTab(name) {
   try { localStorage.setItem("vcr-tab", name); } catch (_) { /* private mode */ }
 }
 TABS.forEach((tab) => $(`tab-${tab}`).addEventListener("click", () => showTab(tab)));
-$("k-prog").addEventListener("click", () => { showTab("ctime"); $("m-ch").focus(); });
-$("k-name").addEventListener("click", () => { showTab("name"); $("q").focus(); });
-$("k-timers").addEventListener("click", () => showTab("timers"));
-$("k-tapes").addEventListener("click", () => showTab("tapes"));
 
 document.addEventListener("keydown", (event) => {
   if (event.target.closest("input, select, textarea") || event.metaKey || event.ctrlKey) return;
@@ -906,6 +1129,7 @@ function fillInputs(list) {
     }));
   }
   select.value = currentInput().lane;
+  buildShelf();
   renderInput();
   return currentInput().lane !== before;
 }
@@ -913,9 +1137,7 @@ function fillInputs(list) {
 function renderInput() {
   const input = currentInput();
   const name = input.name;
-  $("door-input").textContent = name.toUpperCase();
-  $("k-rec").title = `One Touch Recording: tape what the ${name} shows now`;
-  $("k-rec").disabled = !input.modes.includes("otr");
+  $("tv-input").textContent = `INPUT · ${name.toUpperCase()}`;
   const notes = [];
   if (!input.available) notes.push(`The ${name} is offline; its timers will fail until it is back.`);
   if (input.held_by) {
@@ -931,13 +1153,17 @@ function renderInput() {
   $("m-note").hidden = !notes.length;
 }
 
-$("m-src").addEventListener("change", () => {
-  inputLane = $("m-src").value;
+// Put one input on the TV: from SOURCE, its PROG key, or a click on it.
+function selectInput(lane) {
+  if (lane === currentInput().lane && lane === inputLane) return;
+  inputLane = lane;
   try { localStorage.setItem("vcr-input", inputLane); } catch (_) { /* private mode */ }
+  $("m-src").value = currentInput().lane;
   renderInput();
-  renderDeck();
+  renderShelf();
   loadChannels();
-});
+}
+$("m-src").addEventListener("change", () => selectInput($("m-src").value));
 
 async function sourceItems(source, day) {
   const key = source.dated ? `${source.id} ${day}` : source.id;
@@ -1357,7 +1583,7 @@ function playTape(name) {
   void caption.offsetWidth;
   caption.style.animation = "";
   $("player").hidden = false;
-  $("i-play").classList.add("lit");
+  renderShelf();
   video.src = tapeUrl(name, false);
   video.play().catch(() => {});
   $("player-stop").focus();
@@ -1371,7 +1597,7 @@ function stopTape() {
   video.removeAttribute("src");
   video.load();
   $("player").hidden = true;
-  $("i-play").classList.remove("lit");
+  renderShelf();
   say("STOP");
 }
 
@@ -1424,25 +1650,25 @@ function renderProblems() {
 
 // ---------- deck keys ----------
 
-$("k-rec").addEventListener("click", async () => {
+async function oneTouch(lane) {
   try {
-    const data = await api(API, { lane: currentInput().lane, mode: "otr" });
+    const data = await api(API, { lane, mode: "otr" });
     const timer = data.timer;
     const where = timer.channel_number ? `CH ${chLabel(timer.channel_number)}` : inputName(timer.lane);
     say(`ONE TOUCH REC · ${where} UNTIL ${fmtClock(timer.end)}`);
     await load();
   } catch (error) { say(error.message, true); }
-});
+}
 
-$("k-stop").addEventListener("click", async () => {
-  const active = shownRecording();
+async function stopRecording(lane) {
+  const active = runningRecordings().find((timer) => laneOf(timer) === lane);
   if (!active) return;
   try {
     await api(`${API}/cancel`, { id: active.id });
     say("STOPPING · FILING TAPE");
     await load();
   } catch (error) { say(error.message, true); }
-});
+}
 
 // ---------- loading ----------
 
@@ -1459,7 +1685,7 @@ async function load() {
   } catch (error) {
     reachable = false;
   }
-  renderDeck();
+  renderShelf();
 }
 
 (async function start() {
@@ -1482,7 +1708,7 @@ async function load() {
     showTab("name");
     search();
   }
-  setInterval(renderDeck, 1000);
+  setInterval(renderShelf, 1000);
   setInterval(load, 4000);
 })();
 </script>
