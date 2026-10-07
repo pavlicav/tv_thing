@@ -535,8 +535,9 @@ curl -sN localhost:8080/api/guide/refresh/stream
 
 `/vcr.html` is a shelf of recorders above a TV with an on-screen programming
 menu. Each input is its own recorder with its own display, REC and STOP: the
-digital tuner is a VCR, the Roku a cable DVR box (a lane with no look of its
-own is another VCR). The TV shows one of them, the SOURCE; a recorder's PROG
+digital tuner is a VCR, the Roku an old Scientific Atlanta Explorer cable box
+whose arrow pad steps the timer menu's channel and day (a lane with no look of
+its own is another VCR). The TV shows one of them, the SOURCE; a recorder's PROG
 key or a click on it switches the TV to it. The menu sets timers three ways:
 
 | Mode | How | Window |

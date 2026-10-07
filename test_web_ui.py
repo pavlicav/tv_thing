@@ -370,6 +370,11 @@ def test_each_recorder_tapes_and_stops_its_own_lane():
     assert 'key === "rec") oneTouch(unit.lane)' in press
     assert 'key === "stop") stopRecording(unit.lane)' in press
     assert "selectInput(unit.lane)" in press                # PROG puts it on the TV
+    assert "if (listed) ARROWS[key]()" in press             # arrows step only its own list
+    start = VCR.index('<template id="unit-settop">')
+    explorer = VCR[start:VCR.index("</template>", start)]
+    for key in ("up", "down", "left", "right"):
+        assert f'data-key="{key}"' in explorer
     rec = section(VCR, "async function oneTouch(lane)", "async function stopRecording(lane)")
     assert '{ lane, mode: "otr" }' in rec
     stop = section(VCR, "async function stopRecording(lane)", "// ---------- loading")

@@ -142,6 +142,11 @@
       font: 800 10px/1 var(--font); letter-spacing: .14em;
     }
     .ico { color: var(--vfd-dim); transition: color .2s, text-shadow .2s; }
+    /* A VCR standing beside a set-top has a narrower display: keep the icons on one line. */
+    .vfd { container-type: inline-size; }
+    @container (max-width: 300px) {
+      .vfd-icons { gap: 6px; font-size: 9px; letter-spacing: .08em; }
+    }
     .ico.lit { color: var(--vfd); text-shadow: 0 0 6px var(--vfd-glow); }
     .ico.rec.lit { color: var(--vfd-red); text-shadow: 0 0 8px rgba(255,77,94,.7); }
     .ico.amber.lit { color: var(--vfd-amber); text-shadow: 0 0 8px rgba(255,197,107,.6); }
@@ -239,71 +244,80 @@
         linear-gradient(180deg, #5a3d27 0%, #3d281a 45%, #24170e 100%);
       box-shadow: inset 0 1px 0 rgba(255,220,180,.18), 0 16px 24px -12px rgba(0,0,0,.9);
     }
-    .shelf .deck { flex: 1 1 860px; max-width: 1040px; }
-    .shelf .settop { flex: 0 1 500px; }
+    .shelf .deck { flex: 1 1 780px; max-width: 1040px; }
+    .shelf .settop { flex: 0 1 600px; }
     .unit { cursor: pointer; }
     .unit button { cursor: pointer; }
     /* The one the TV shows */
     .unit[aria-current="true"] { outline: 2px solid rgba(255, 233, 90, .4); outline-offset: 5px; }
 
-    /* ---------- A set-top box: the cable DVR ---------- */
+    /* ---------- A set-top box: an old Scientific Atlanta Explorer ---------- */
+    /* Low and black, a glossy front that curves away at top and bottom, a red
+       LED clock behind smoked acrylic, and the round arrow pad around SELECT. */
 
     .settop {
       position: relative;
       display: grid;
       grid-template-columns: auto minmax(0, 1fr) auto;
       align-items: center;
-      gap: 14px;
-      padding: 15px 16px 14px;
-      border-radius: 5px 5px 4px 4px;
+      gap: 16px;
+      padding: 12px 18px 12px 20px;
+      border-radius: 10px 10px 8px 8px / 14px 14px 10px 10px;
       background:
-        linear-gradient(180deg, rgba(255,255,255,.06), transparent 24%),
-        repeating-linear-gradient(90deg, rgba(255,255,255,.012) 0 1px, transparent 1px 4px),
-        linear-gradient(180deg, #24252a 0%, #16171a 60%, #0e0f11 100%);
+        linear-gradient(180deg, rgba(255,255,255,.13) 0, rgba(255,255,255,.04) 7%, transparent 22%,
+                        transparent 78%, rgba(0,0,0,.35) 100%),
+        linear-gradient(180deg, #1d1e21 0%, #101113 55%, #08090a 100%);
       border: 1px solid #000;
       box-shadow:
-        inset 0 1px 0 rgba(255,255,255,.14),
-        inset 0 -2px 0 rgba(0,0,0,.55),
+        inset 0 1px 0 rgba(255,255,255,.2),
+        inset 0 -1px 0 rgba(255,255,255,.05),
         0 18px 30px -18px rgba(0,0,0,.9),
         0 2px 0 #050506;
     }
     .settop::after {           /* the feet */
       content: "";
       position: absolute;
-      left: 24px; right: 24px; bottom: -7px; height: 7px;
+      left: 30px; right: 30px; bottom: -7px; height: 7px;
       background:
-        linear-gradient(#050506, #050506) left / 44px 100% no-repeat,
-        linear-gradient(#050506, #050506) right / 44px 100% no-repeat;
-      border-radius: 0 0 3px 3px;
+        linear-gradient(#050506, #050506) left / 40px 100% no-repeat,
+        linear-gradient(#050506, #050506) right / 40px 100% no-repeat;
+      border-radius: 0 0 4px 4px;
     }
-    .settop-brand { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
-    .settop-name {
-      font: 900 17px/1 var(--font); letter-spacing: .16em;
-      color: #d4d7dd; text-shadow: 0 1px 0 #000;
+    .sa-badge { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+    .sa-maker {
+      font: 700 7px/1 var(--font); letter-spacing: .3em; color: #8f949c; white-space: nowrap;
     }
-    .settop-model { font: 700 8px/1.3 var(--font); letter-spacing: .22em; color: #767b84; white-space: nowrap; }
-    .settop-power { position: absolute; top: 7px; right: 8px; line-height: 0; }
+    .sa-explorer {
+      font: italic 800 22px/1 var(--font); letter-spacing: .01em;
+      background: linear-gradient(180deg, #f4f5f7 0%, #b4b9c1 48%, #6d727a 54%, #c9cdd3 100%);
+      -webkit-background-clip: text; background-clip: text;
+      color: transparent;
+      filter: drop-shadow(0 1px 0 #000);
+      padding-right: 3px;      /* room for the italic's overhang */
+    }
+    .sa-model { font: 800 8px/1 var(--font); letter-spacing: .26em; color: #6f747c; white-space: nowrap; }
+    .settop-power { position: absolute; top: 8px; right: 12px; line-height: 0; }
     .settop-power .led { margin: 0; width: 5px; height: 5px; }
 
     .settop-window {
       position: relative; overflow: hidden; min-width: 0;
       display: grid; grid-template-columns: auto 1fr; align-items: center;
-      gap: 5px 12px;
-      padding: 8px 12px 7px;
-      border-radius: 4px;
+      gap: 4px 12px;
+      padding: 7px 12px 6px;
+      border-radius: 6px;
       background:
-        radial-gradient(120% 100% at 50% 0%, rgba(255,60,40,.06), transparent 60%),
-        linear-gradient(180deg, #160707, #060202);
+        radial-gradient(120% 100% at 50% 0%, rgba(255,60,40,.07), transparent 60%),
+        linear-gradient(180deg, #1a0808, #060202);
       border: 1px solid #000;
-      box-shadow: inset 0 0 16px rgba(0,0,0,.95), 0 1px 0 rgba(255,255,255,.07);
+      box-shadow: inset 0 0 18px rgba(0,0,0,.95), inset 0 2px 3px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.08);
     }
     .settop-window::after {    /* the smoked acrylic's sheen */
       content: ""; position: absolute; inset: 0; pointer-events: none;
-      background: linear-gradient(165deg, rgba(255,255,255,.07), transparent 42%);
+      background: linear-gradient(170deg, rgba(255,255,255,.09), transparent 38%);
     }
     .lamps {
       display: grid; gap: 3px;
-      font: 800 7.5px/1 var(--font); letter-spacing: .16em; color: rgba(255,90,60,.24);
+      font: 800 7px/1 var(--font); letter-spacing: .16em; color: rgba(255,90,60,.24);
     }
     .lamp { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
     .lamp::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: rgba(255,70,50,.14); }
@@ -311,27 +325,57 @@
     .lamp.lit::before { background: #ff3b30; box-shadow: 0 0 6px #ff3b30; }
     .lamp.amber.lit { color: var(--vfd-amber); text-shadow: 0 0 5px rgba(255,197,107,.6); }
     .lamp.amber.lit::before { background: #ffb13b; box-shadow: 0 0 6px #ffb13b; }
-    svg.seg.settop-clock { height: 30px; justify-self: end; }
-    svg.seg.settop-clock .on { fill: #ff3b30; filter: drop-shadow(0 0 3px rgba(255,50,40,.8)); }
-    svg.seg.settop-clock .off { fill: rgba(255,50,40,.07); }
+    svg.seg.settop-clock { height: 34px; justify-self: end; }
+    svg.seg.settop-clock .on { fill: #ff3324; filter: drop-shadow(0 0 3px rgba(255,50,30,.85)); }
+    svg.seg.settop-clock .off { fill: rgba(255,50,40,.06); }
     .settop-text {
       grid-column: 1 / -1;
-      font: 700 11px/1.2 var(--mono); letter-spacing: .14em;
+      font: 700 10.5px/1.2 var(--mono); letter-spacing: .14em;
       color: #ff6a4d; text-shadow: 0 0 5px rgba(255,80,50,.6);
       text-transform: uppercase;
-      white-space: nowrap; overflow: hidden; min-height: 14px;
+      white-space: nowrap; overflow: hidden; min-height: 13px;
     }
     .settop-text span { display: inline-block; }
     .settop-text.scroll span { animation: marquee 12s linear infinite; padding-left: 100%; }
 
-    .settop-keys { display: grid; grid-template-columns: auto auto; gap: 7px; }
+    .sa-controls { display: flex; align-items: center; gap: 14px; }
+    /* The arrow pad: four wedges in a recessed disc around a round SELECT */
+    .sa-pad {
+      display: grid;
+      grid-template-columns: 20px 24px 20px;
+      grid-template-rows: 18px 24px 18px;
+      place-items: center;
+      width: 68px; height: 68px; padding: 3px; border-radius: 50%;
+      background: radial-gradient(circle at 50% 40%, #1f2024, #0b0b0d 70%);
+      box-shadow: inset 0 2px 4px rgba(0,0,0,.9), inset 0 -1px 0 rgba(255,255,255,.07), 0 1px 0 rgba(255,255,255,.08);
+    }
+    .sa-pad button {
+      border: 0; padding: 0; background: none;
+      color: #9da2aa; font: 800 8px/1 var(--font);
+      display: grid; place-items: center;
+    }
+    .sa-pad .sa-arrow { width: 100%; height: 100%; }
+    .sa-pad .up { grid-area: 1 / 2; }
+    .sa-pad .left { grid-area: 2 / 1; }
+    .sa-pad .right { grid-area: 2 / 3; }
+    .sa-pad .down { grid-area: 3 / 2; }
+    .sa-pad .sa-select {
+      grid-area: 2 / 2;
+      width: 24px; height: 24px; border-radius: 50%;
+      font-size: 5.5px; letter-spacing: .08em; color: #c3c7ce;
+      background: linear-gradient(180deg, #3d3f45, #222327);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 1px 0 #000, 0 2px 3px rgba(0,0,0,.6);
+    }
+    .sa-pad button:hover:not(:disabled) { color: #fff; }
+    .sa-pad button:active:not(:disabled) { transform: translateY(1px); }
+    .sa-keys { display: grid; grid-template-columns: auto auto; gap: 7px 6px; }
     .nub {
-      font: 800 9px/1 var(--font); letter-spacing: .14em; text-transform: uppercase;
+      font: 800 8.5px/1 var(--font); letter-spacing: .14em; text-transform: uppercase;
       color: #b7bbc3;
-      height: 24px; min-width: 58px; padding: 0 9px;
-      display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-      border-radius: 12px; border: 1px solid #000;
-      background: linear-gradient(180deg, #3b3d43, #24252a);
+      height: 22px; min-width: 52px; padding: 0 8px;
+      display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+      border-radius: 4px; border: 1px solid #000;
+      background: linear-gradient(180deg, #34363b, #1e1f23);
       box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 2px 0 #060607, 0 3px 4px rgba(0,0,0,.5);
       transition: transform .06s, box-shadow .06s;
     }
@@ -341,7 +385,7 @@
       box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 #060607, 0 1px 2px rgba(0,0,0,.5);
     }
     .nub:disabled { opacity: .45; cursor: not-allowed; }
-    .nub .glyph { font-size: 10px; }
+    .nub .glyph { font-size: 9px; }
     .nub-rec .glyph { color: #ff3b4e; text-shadow: 0 0 5px rgba(255,59,78,.6); }
 
     /* ---------- The TV and its on-screen display ---------- */
@@ -544,8 +588,9 @@
       .keys { width: 100%; }
       .chin-brand { display: none; }
       .settop { grid-template-columns: 1fr; padding: 13px 12px 12px; }
-      .settop-keys { grid-template-columns: repeat(4, 1fr); }
-      .nub { min-width: 0; }
+      .sa-controls { justify-content: space-between; }
+      .sa-keys { flex: 1; max-width: 220px; }
+      .nub { min-width: 0; height: 26px; }
       svg.seg { height: 34px; }
       svg.seg.small { height: 24px; }
       .tv { padding: 12px 10px 10px; border-radius: 14px; }
@@ -757,9 +802,10 @@
   <!-- ...or, for a set-top source like the Roku, a cable DVR box. -->
   <template id="unit-settop">
     <section class="unit settop">
-      <div class="settop-brand">
-        <span class="settop-name" data-part="name"></span>
-        <span class="settop-model">DIGITAL CABLE · DVR</span>
+      <div class="sa-badge">
+        <span class="sa-maker">SCIENTIFIC ATLANTA</span>
+        <span class="sa-explorer">Explorer</span>
+        <span class="sa-model" data-part="name"></span>
       </div>
       <div class="settop-window" role="status" aria-live="polite" aria-label="Recorder display">
         <div class="lamps" aria-hidden="true">
@@ -771,11 +817,20 @@
         <svg class="seg settop-clock" data-part="seg-clock" aria-hidden="true"></svg>
         <div class="settop-text" data-part="text"><span data-part="text-inner">— —</span></div>
       </div>
-      <div class="settop-keys">
-        <button class="nub nub-rec" data-key="rec"><span class="glyph">●</span>REC</button>
-        <button class="nub" data-key="stop" title="Stop the recording in progress"><span class="glyph">■</span>STOP</button>
-        <button class="nub" data-key="prog" title="Program a timer by channel and time">PROG</button>
-        <button class="nub" data-key="tapes" title="Recordings in the media library">LIST</button>
+      <div class="sa-controls">
+        <div class="sa-pad" role="group" aria-label="Channel and day">
+          <button class="sa-arrow up" data-key="up" title="Next channel" aria-label="Next channel">▲</button>
+          <button class="sa-arrow left" data-key="left" title="Day before" aria-label="Day before">◀</button>
+          <button class="sa-select" data-key="prog" title="Program a timer on this box">SELECT</button>
+          <button class="sa-arrow right" data-key="right" title="Day after" aria-label="Day after">▶</button>
+          <button class="sa-arrow down" data-key="down" title="Previous channel" aria-label="Previous channel">▼</button>
+        </div>
+        <div class="sa-keys">
+          <button class="nub nub-rec" data-key="rec"><span class="glyph">●</span>REC</button>
+          <button class="nub" data-key="stop" title="Stop the recording in progress"><span class="glyph">■</span>STOP</button>
+          <button class="nub" data-key="prog" title="Program a timer by channel and time">GUIDE</button>
+          <button class="nub" data-key="tapes" title="Recordings in the media library">LIST</button>
+        </div>
       </div>
       <span class="settop-power" aria-hidden="true"><span class="led green" data-part="led-power"></span></span>
     </section>
@@ -965,7 +1020,11 @@ function runningRecordings() {
 // A lane listed here gets that look; any other input is a VCR.
 const LOOKS = { roku: "settop" };
 // The keys an input shows only if it takes that kind of timer.
-const KEY_MODES = { rec: "otr", prog: "manual", name: "guide" };
+const KEY_MODES = { rec: "otr", prog: "manual", name: "guide",
+                    up: "manual", down: "manual", left: "manual", right: "manual" };
+// A set-top's arrow pad steps the timer menu's channel and day.
+const ARROWS = { up: () => stepChannel(1), down: () => stepChannel(-1),
+                 right: () => stepDay(1), left: () => stepDay(-1) };
 let units = [];
 
 const laneOf = (timer) => timer.lane || "digital";
@@ -1005,6 +1064,13 @@ function pressKey(unit, key) {
   if (key === "rec") oneTouch(unit.lane);
   else if (key === "stop") stopRecording(unit.lane);
   else if (key === "prog") { selectInput(unit.lane); showTab("ctime"); $("m-ch").focus(); }
+  else if (key in ARROWS) {
+    // Until the menu lists this unit's channels, an arrow only puts it on the TV.
+    const listed = $("m-ch").dataset.lane === unit.lane;
+    selectInput(unit.lane);
+    showTab("ctime");
+    if (listed) ARROWS[key]();
+  }
   else if (key === "name") { showTab("name"); $("q").focus(); }
   else showTab(key);           // timers, tapes
 }
@@ -1228,6 +1294,7 @@ function fillChannels(input, groups) {
     nodes.push(group);
   }
   select.replaceChildren(...nodes);
+  select.dataset.lane = input.lane;
   if (wanted && choices.has(wanted)) {
     select.value = wanted;
   } else {
