@@ -533,6 +533,9 @@ def build_record_command(input_url, output_path):
         "-max_pixels", BROADCAST_MAX_PIXELS,
         "-thread_queue_size", "4096",
         "-probesize", "2M", "-analyzeduration", "1500000",
+        # The decoder's and the filters' pools default to one thread per
+        # core, 28 here, against the unit's 192-task cap (server.FFMPEG_THREADS).
+        "-threads", RECORD_THREADS, "-filter_threads", RECORD_THREADS,
         "-i", input_url,
         "-map", "0:v:0", "-map", "0:a:0?",
         "-vf", ",".join(filters),

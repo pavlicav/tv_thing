@@ -188,6 +188,14 @@ FFMPEG_PROBE_SIZE = os.environ.get("TV_THING_FFMPEG_PROBE_SIZE", "512k")
 FFMPEG_ANALYZE_DURATION = os.environ.get(
     "TV_THING_FFMPEG_ANALYZE_DURATION", "750000"
 )
+# ffmpeg sizes its decoder, filter and x264 thread pools to the host's 28
+# cores: a digital packager ran 122 threads and the Roku verifier 58. The unit
+# allows 192 tasks and four cores, and on 2026-10-13 the packager, a VCR
+# recording and a Roku navigation together reached the cap: the kernel refused
+# three threads, and each refusal failed a Roku tune ("Error reinitializing
+# filters ... Resource temporarily unavailable"). Four of each keeps a
+# packager near 30 threads and encodes 1080i no slower on four cores.
+FFMPEG_THREADS = os.environ.get("TV_THING_FFMPEG_THREADS", "4")
 TV_MAX_DUPLICATED_FRAMES = int(os.environ.get(
     "TV_THING_MAX_DUPLICATED_FRAMES", "1000"
 ))
@@ -1153,6 +1161,8 @@ def build_tv_packager_command(quality, encoder=None, stream_id="test",
         "-thread_queue_size", "4096",
         "-probesize", FFMPEG_PROBE_SIZE,
         "-analyzeduration", FFMPEG_ANALYZE_DURATION,
+        # Decoder and filter threads; the encoder's follow -c:v.
+        "-threads", FFMPEG_THREADS, "-filter_threads", FFMPEG_THREADS,
         "-i", tv_udp_input(udp_port),
         "-map", "0:v:0", "-map", "0:a:0?",
     ]
@@ -1166,6 +1176,7 @@ def build_tv_packager_command(quality, encoder=None, stream_id="test",
     cmd += ["-vf", ",".join(filters)]
     cmd += [
         "-c:v", encoder["codec"], *encoder.get("encoder_args", []),
+        "-threads", FFMPEG_THREADS,
         "-b:v", f"{vb}k", "-maxrate", f"{round(vb * 1.2)}k",
         "-bufsize", f"{vb * 2}k",
         # bwdif=send_frame keeps the usual 29.97 fps ATSC cadence. Kepler
@@ -1212,6 +1223,8 @@ def build_analog_packager_command(device, quality, encoder=None,
         "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "warning",
         *encoder.get("input_args", []),
         "-fflags", "+discardcorrupt",
+        # Raw V4L2 needs no decoder threads; see FFMPEG_THREADS.
+        "-filter_threads", FFMPEG_THREADS,
         "-thread_queue_size", "1024",
         "-f", "v4l2", "-timestamps", "mono2abs",
         *device.get("input_args", []),
@@ -1245,6 +1258,7 @@ def build_analog_packager_command(device, quality, encoder=None,
     cmd += ["-vf", ",".join(filters)]
     cmd += [
         "-c:v", encoder["codec"], *encoder.get("encoder_args", []),
+        "-threads", FFMPEG_THREADS,
         "-b:v", f"{vb}k", "-maxrate", f"{round(vb * 1.2)}k",
         "-bufsize", f"{vb * 2}k",
         "-g", str(max(1, round(HLS_SEGMENT_TIME * 30))),
@@ -5544,6 +5558,79 @@ def open_listeners(server_factory, addresses, port):
     return servers, bound, failures
 
 
+HOST_WATCH_SECONDS = float(os.environ.get("TV_THING_HOST_WATCH_SECONDS", "30"))
+
+
+def listen_on_new_addresses(server_factory, bound, candidates, port):
+    """Bind the candidates not bound yet: (servers, addresses, failures).
+
+    Never the wildcard: with loopback already bound it could only collide,
+    with the specific listeners and with tailscale0's own :8080.
+    """
+    fresh = [address for address in candidates
+             if address != "0.0.0.0" and address not in bound]
+    if not fresh:
+        return [], [], []
+    return open_listeners(server_factory, fresh, port)
+
+
+def cgroup_task_limit_hits(proc_cgroup="/proc/self/cgroup",
+                           cgroup_root="/sys/fs/cgroup"):
+    """How often the unit's TasksMax refused a process or thread, or None."""
+    try:
+        cgroup = Path(proc_cgroup).read_text().strip().split("::", 1)[1]
+        events = Path(cgroup_root) / cgroup.lstrip("/") / "pids.events"
+        for line in events.read_text().splitlines():
+            key, value = line.split()
+            if key == "max":
+                return int(value)
+    except (OSError, IndexError, ValueError):
+        return None
+    return None
+
+
+def watch_host(server_factory, servers, bound, preferred, include_loopback,
+               port, stopping, reported=()):
+    """Pick up LAN addresses as they appear, and report the task cap.
+
+    A boot can start the server before the network has its addresses. It
+    then listened on 127.0.0.1 alone until the next restart (2026-10-06 and
+    2026-10-13): Apache's /tv/ proxy worked, but the Roku app and anything
+    else on the LAN found nothing on :8080.
+
+    When TasksMax refuses a thread, ffmpeg reports only "Resource
+    temporarily unavailable" and the failure looks like a bad capture or a
+    dead tuner, so say so in the journal.
+    """
+    reported = set(reported)   # startup already printed these
+    task_limit_hits = cgroup_task_limit_hits() or 0
+    while not stopping.wait(HOST_WATCH_SECONDS):
+        try:
+            added, addresses, failures = listen_on_new_addresses(
+                server_factory, bound,
+                bind_candidates(preferred, include_loopback), port,
+            )
+            for server, address in zip(added, addresses):
+                servers.append(server)
+                bound.append(address)
+                threading.Thread(target=server.serve_forever,
+                                 daemon=True).start()
+                print(f"Now also listening on http://{address}:{port}")
+            for failure in failures:
+                # An address another service holds fails on every pass.
+                if failure not in reported:
+                    reported.add(failure)
+                    print(f"Skipped {failure}", file=sys.stderr)
+            hits = cgroup_task_limit_hits()
+            if hits is not None and hits > task_limit_hits:
+                print(f"Task limit reached: TasksMax refused "
+                      f"{hits - task_limit_hits} new thread(s) or process(es) "
+                      f"({hits} since the service started)")
+                task_limit_hits = hits
+        except Exception as failure:   # noqa: BLE001 - the watch must not die
+            print(f"Host watch error: {failure!r}")
+
+
 def start_roku_lane():
     """Build the Roku lane from roku.json and keep its capture running."""
     global roku
@@ -5590,10 +5677,12 @@ def main():
     preferred = os.environ.get("TV_THING_BIND", "")
     include_loopback = os.environ.get("TV_THING_BIND_LOOPBACK", "1") != "0"
     port = int(os.environ.get("PORT", 8080))
+
+    def server_factory(address):
+        return ThreadedHTTPServer(address, TVHandler)
+
     servers, bound, failures = open_listeners(
-        lambda address: ThreadedHTTPServer(address, TVHandler),
-        bind_candidates(preferred, include_loopback),
-        port,
+        server_factory, bind_candidates(preferred, include_loopback), port,
     )
     if not servers:
         for failure in failures:
@@ -5626,18 +5715,26 @@ def main():
     # main thread so signals still interrupt serve_forever().
     for extra in servers[1:]:
         threading.Thread(target=extra.serve_forever, daemon=True).start()
+    host_watch_stopping = threading.Event()
+    threading.Thread(
+        target=watch_host,
+        args=(server_factory, servers, bound, preferred, include_loopback,
+              port, host_watch_stopping, failures),
+        daemon=True,
+    ).start()
 
     try:
         servers[0].serve_forever()
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:
+        host_watch_stopping.set()
         roku_shutting_down.set()
         shutdown_recording()
         stop_all()
         if roku is not None:
             roku.feedback.close()
-        for server in servers:
+        for server in list(servers):
             server.shutdown() if server is not servers[0] else None
             server.server_close()
     return 1 if shutdown_signal is not None else 0

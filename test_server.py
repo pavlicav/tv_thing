@@ -287,6 +287,96 @@ def test_wildcard_is_skipped_once_a_specific_address_bound(monkeypatch):
     assert len(servers) == 1
 
 
+def test_addresses_that_appear_later_get_their_own_listeners():
+    bound = ["127.0.0.1"]
+    servers, addresses, failures = server.listen_on_new_addresses(
+        lambda address: f"server@{address[0]}", bound,
+        ["127.0.0.1", "10.0.0.98", "192.168.1.98", "0.0.0.0"], 8080,
+    )
+    assert addresses == ["10.0.0.98", "192.168.1.98"]
+    assert servers == ["server@10.0.0.98", "server@192.168.1.98"]
+    assert failures == []
+
+    def refuse(_address):
+        raise AssertionError("nothing new to bind")
+
+    bound += addresses
+    assert server.listen_on_new_addresses(
+        refuse, bound, ["127.0.0.1", "10.0.0.98", "0.0.0.0"], 8080
+    ) == ([], [], [])
+
+
+def one_watch_pass():
+    from unittest.mock import Mock
+    stopping = Mock()
+    stopping.wait.side_effect = [False, True]
+    return stopping
+
+
+def test_host_watch_listens_on_an_address_that_appeared_after_boot(
+        monkeypatch, capsys):
+    """2026-10-13: a boot started the server before the network was up, and
+    it kept to 127.0.0.1; the LAN found nothing on :8080 until a restart."""
+    import threading
+    from unittest.mock import Mock
+    monkeypatch.setattr(server, "lan_addresses", lambda: ["10.0.0.98"])
+    monkeypatch.setattr(server, "cgroup_task_limit_hits", lambda: None)
+    serving = threading.Event()
+    lan = Mock()
+    lan.serve_forever.side_effect = serving.set
+    servers, bound = ["loopback"], ["127.0.0.1"]
+
+    server.watch_host(lambda _address: lan, servers, bound, "", True, 8080,
+                      one_watch_pass())
+
+    assert bound == ["127.0.0.1", "10.0.0.98"]
+    assert servers == ["loopback", lan]
+    assert serving.wait(2)
+    assert "Now also listening on http://10.0.0.98:8080" in \
+        capsys.readouterr().out
+
+
+def test_host_watch_reports_task_limit_refusals(monkeypatch, capsys):
+    from unittest.mock import Mock
+    hits = iter([1, 3])
+    monkeypatch.setattr(server, "cgroup_task_limit_hits", lambda: next(hits))
+    monkeypatch.setattr(server, "lan_addresses", lambda: [])
+
+    server.watch_host(Mock(), [], ["127.0.0.1"], "", True, 8080,
+                      one_watch_pass())
+
+    assert "TasksMax refused 2 new thread(s) or process(es) " \
+        "(3 since the service started)" in capsys.readouterr().out
+
+
+def test_task_limit_hits_are_read_from_the_units_cgroup(tmp_path):
+    proc = tmp_path / "cgroup"
+    proc.write_text("0::/system.slice/tv-thing.service\n")
+    events = tmp_path / "fs/system.slice/tv-thing.service/pids.events"
+    events.parent.mkdir(parents=True)
+    events.write_text("max 3\n")
+    assert server.cgroup_task_limit_hits(proc, tmp_path / "fs") == 3
+    assert server.cgroup_task_limit_hits(tmp_path / "none", tmp_path) is None
+
+
+def test_ffmpeg_thread_pools_are_capped_not_sized_to_the_host(monkeypatch):
+    """28 cores made one packager 122 threads against TasksMax=192."""
+    monkeypatch.setattr(server, "FFMPEG_THREADS", "4")
+    encoder = {"codec": "libx264", "hardware": False,
+               "encoder_args": ["-preset", "veryfast"]}
+    digital = server.build_tv_packager_command("medium", encoder)
+    analog = server.build_analog_packager_command(
+        {"device": "/dev/video7", "audio_device": None}, "medium", encoder,
+    )
+    for command in (digital, analog):
+        assert option_value(command, "-filter_threads") == "4"
+        encoder_options = command[command.index("-c:v"):]
+        assert option_value(encoder_options, "-threads") == "4"
+    # The decoder's pool is an input option: it must precede -i.
+    assert digital.index("-threads") < digital.index("-i")
+    assert option_value(digital, "-threads") == "4"
+
+
 def test_scan_results_become_channel_records(monkeypatch):
     """One scan pass carries names, numbers, service IDs, and PIDs."""
     results = [{

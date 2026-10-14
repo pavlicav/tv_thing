@@ -157,6 +157,13 @@ def test_recorder_encodes_efficiently_and_stops_through_stdin():
     assert command[command.index("-fps_mode") + 1] == "passthrough"
     assert "bwdif" in command[command.index("-vf") + 1]
     assert command[-3:] == ["-f", "mpegts", "/x/a.ts.part"]
+    # Decoder, filter and x264 pools: not one thread per core (TasksMax).
+    decoder = command.index("-threads")
+    assert decoder < command.index("-i")
+    assert command[decoder + 1] == recorder.RECORD_THREADS
+    assert command[command.index("-filter_threads") + 1] == recorder.RECORD_THREADS
+    encoder_options = command[command.index("-c:v"):]
+    assert encoder_options[encoder_options.index("-threads") + 1] == recorder.RECORD_THREADS
 
     remux = recorder.build_remux_command("a.ts.part", "a.mp4.part")
     assert remux[remux.index("-c") + 1] == "copy"

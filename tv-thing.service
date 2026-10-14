@@ -1,18 +1,20 @@
 [Unit]
 Description=TV Thing ATSC + analog streaming server
-After=network.target
+# Start once the network has its addresses. Started earlier, the server
+# listened on 127.0.0.1 alone after the 2026-10-06 and 2026-10-13 boots. It now
+# also picks up addresses that appear later, so this only saves the wait.
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
 User=vivian
 WorkingDirectory=/home/vivian/tv_thing
-# Bind by interface, not by a literal address: the previous pinned
-# 192.168.86.230 was the old Wi-Fi address and stopped being assignable when
-# the host moved to Ethernet, so the service could not start. The server
-# resolves this at boot and falls back to any other LAN address before the
-# wildcard (another service already holds :8080 on tailscale0).
-# 127.0.0.1 is always bound as well, which is what Apache proxies /tv/ to.
-Environment=TV_THING_BIND=iface:enx9405bb192913
+# No TV_THING_BIND: the server listens on 127.0.0.1 (what Apache proxies /tv/
+# to) and on every LAN address, including ones that appear while it runs.
+# Pins went stale twice: 192.168.86.230 (the old Wi-Fi address) and then
+# iface:enx9405bb192913, a USB Ethernet adapter no longer in the host. The
+# wildcard is never used: another service holds :8080 on tailscale0.
 # 90 C, under the card's 97 C slowdown; vizelVision's NVENC master alone holds ~86 C.
 Environment=TV_THING_MAX_GPU_TEMP_C=90
 Environment=TV_THING_VIDEO_ENCODER=cpu

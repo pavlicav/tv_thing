@@ -61,14 +61,22 @@ class LaneCaptureFeedback(VisualFeedback):
     # request while converting and piping a quarter of the 60 fps the HD PVR
     # sends (166 MB/s of RGB into Python at the full rate).
     FRAMES_PER_SECOND = 15
+    # A decoder that exits before its first frame is started once more within
+    # the same observation. On 2026-10-13 three tunes in a row failed on the
+    # first frame when the unit briefly had no thread to spare.
+    DECODER_ATTEMPTS = 2
+    DECODER_RETRY_SECONDS = .5
 
     def decoder_command(self, tap_url: str) -> list[str]:
         # The tap is already a clean transport stream from a running reader,
         # so the probe can be far smaller than a cold HD PVR open needs.
         # Two threads and no input buffering: a decoder that keeps up adds no
         # frames of delay, and one that cannot is not left seconds behind.
+        # Two filter threads too: the default is one per core, and that made
+        # this decoder 58 threads against the unit's 192-task cap.
         return [self.config.ffmpeg_path, "-nostdin", "-hide_banner", "-loglevel", "error",
-                "-threads", "2", "-fflags", "nobuffer", "-flags", "low_delay",
+                "-threads", "2", "-filter_threads", "2",
+                "-fflags", "nobuffer", "-flags", "low_delay",
                 "-probesize", "1000000", "-analyzeduration", "1500000",
                 "-f", "mpegts", "-i", tap_url, "-an",
                 "-vf", f"bwdif=mode=send_frame:parity=auto:deint=interlaced,fps={self.FRAMES_PER_SECOND}",
@@ -118,29 +126,38 @@ class LaneCaptureFeedback(VisualFeedback):
             if time.monotonic() >= deadline:
                 raise NavigationError("The Roku capture is busy with another observation")
         try:
-            source = self.capture_source()
-            capture_id = source.get("stream_id")
-            if not source.get("running") or not capture_id:
-                self._close_stream()
-                raise NavigationError("The Roku capture is not running",
-                                      details={"capture": source.get("error")})
-            if self._stream is not None and (self._stream_capture_id != capture_id
-                                             or self._stream.process.poll() is not None):
-                self._close_stream()
-            if self._stream is None:
-                self._stream = self.stream_factory(self.decoder_command(source["tap_url"]))
-                self._stream_capture_id = capture_id
-                self._ensure_reaper()
-            self._last_used = time.monotonic()
-            barrier = datetime.now(timezone.utc).isoformat()
-            try:
-                frame = self._stream.next_frame(self.config.capture_timeout_seconds, self.wait)
-            except NavigationError as exc:
-                self.last_stream_failure = {"at": datetime.now(timezone.utc).isoformat(),
-                                            "stream_id": capture_id, "error": str(exc),
-                                            "capture": self._stream.status()}
-                self._close_stream()
-                raise
+            for attempt in range(1, self.DECODER_ATTEMPTS + 1):
+                source = self.capture_source()
+                capture_id = source.get("stream_id")
+                if not source.get("running") or not capture_id:
+                    self._close_stream()
+                    raise NavigationError("The Roku capture is not running",
+                                          details={"capture": source.get("error")})
+                if self._stream is not None and (self._stream_capture_id != capture_id
+                                                 or self._stream.process.poll() is not None):
+                    self._close_stream()
+                if self._stream is None:
+                    self._stream = self.stream_factory(self.decoder_command(source["tap_url"]))
+                    self._stream_capture_id = capture_id
+                    self._ensure_reaper()
+                self._last_used = time.monotonic()
+                barrier = datetime.now(timezone.utc).isoformat()
+                stream = self._stream
+                try:
+                    frame = stream.next_frame(self.config.capture_timeout_seconds, self.wait)
+                    break
+                except NavigationError as exc:
+                    # A decoder that timed out was running with nothing to
+                    # show; another would wait the same. One that exited may
+                    # have failed for a passing reason.
+                    exited = bool(stream.error) or stream.process.poll() is not None
+                    self.last_stream_failure = {"at": datetime.now(timezone.utc).isoformat(),
+                                                "stream_id": capture_id, "error": str(exc),
+                                                "attempt": attempt, "capture": stream.status()}
+                    self._close_stream()
+                    if not exited or attempt == self.DECODER_ATTEMPTS:
+                        raise
+                self.wait(self.DECODER_RETRY_SECONDS)
             if self.capture_source().get("stream_id") != capture_id:
                 # The lane restarted its reader while this frame was decoded.
                 self._close_stream()
@@ -301,5 +318,6 @@ class LaneCaptureFeedback(VisualFeedback):
             payload = f"P6\n{frame.width} {frame.height}\n255\n".encode() + frame.rgb
             yield self._run([self.config.ffmpeg_path, "-hide_banner", "-loglevel", "error",
                              "-f", "image2pipe", "-vcodec", "ppm", "-i", "pipe:0",
-                             "-frames:v", "1", "-q:v", "5", "-f", "mjpeg", "pipe:1"], input_data=payload)
+                             "-frames:v", "1", "-q:v", "5", "-threads", "1",
+                             "-f", "mjpeg", "pipe:1"], input_data=payload)
             time.sleep(.5)

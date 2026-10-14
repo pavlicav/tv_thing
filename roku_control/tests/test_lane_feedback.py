@@ -19,6 +19,7 @@ class LaneFeedbackTests(unittest.TestCase):
     def stream(self, *frames):
         stream = Mock()
         stream.process.poll.return_value = None
+        stream.error = None
         stream.next_frame.side_effect = list(frames) if len(frames) > 1 else None
         if len(frames) == 1:
             stream.next_frame.return_value = frames[0]
@@ -43,6 +44,8 @@ class LaneFeedbackTests(unittest.TestCase):
         self.assertNotIn('/dev/video1', command)
         self.assertEqual(command[command.index('-f') + 1], 'mpegts')
         self.assertEqual(command[-1], 'pipe:1')
+        # One filter thread per core made this decoder 58 threads (TasksMax).
+        self.assertEqual(command[command.index('-filter_threads') + 1], '2')
 
     def test_evidence_is_fresh_and_tied_to_the_lane_capture_generation(self):
         feedback, factory = self.feedback(self.stream(PpmFrame(1, 1, b'abc')))
@@ -99,6 +102,55 @@ class LaneFeedbackTests(unittest.TestCase):
         first.close.assert_called_once()
         self.assertEqual(feedback.last_stream_failure['error'], 'stopped')
         self.assertEqual(feedback.capture().rgb, b'def')
+
+    def failing_stream(self, message, *, error=None, returncode=None):
+        stream = self.stream()
+        stream.next_frame.side_effect = NavigationError(message)
+        stream.error = error
+        stream.process.poll.return_value = returncode
+        return stream
+
+    def test_decoder_that_exits_before_a_frame_is_started_once_more(self):
+        # 2026-10-13: the unit's task cap refused one of ffmpeg's threads and
+        # the decoder exited; three Roku tunes failed on their first frame.
+        ended = 'Capture stream ended or returned an invalid image'
+        first = self.failing_stream(ended, error=ended)
+        second = self.stream(PpmFrame(1, 1, b'def'))
+        feedback, factory = self.feedback(first, second)
+        feedback.DECODER_RETRY_SECONDS = 0
+        self.assertEqual(feedback.capture().rgb, b'def')
+        first.close.assert_called_once()
+        self.assertEqual(factory.call_count, 2)
+        self.assertEqual(feedback.last_stream_failure['attempt'], 1)
+        self.assertEqual(feedback.last_capture['stream_id'], 'capture-1')
+
+    def test_decoder_that_exits_twice_fails_the_observation(self):
+        first = self.failing_stream('Capture stream stopped', returncode=1)
+        second = self.failing_stream('Capture stream stopped', returncode=1)
+        feedback, factory = self.feedback(first, second)
+        feedback.DECODER_RETRY_SECONDS = 0
+        with self.assertRaisesRegex(NavigationError, 'stopped'):
+            feedback.capture()
+        self.assertEqual(factory.call_count, 2)
+        self.assertEqual(feedback.last_stream_failure['attempt'], 2)
+        self.assertIsNone(feedback.last_capture)
+
+    def test_decoder_that_timed_out_is_not_restarted_within_the_observation(self):
+        stream = self.failing_stream('timed out waiting for a fresh frame')
+        feedback, factory = self.feedback(stream)
+        with self.assertRaisesRegex(NavigationError, 'timed out'):
+            feedback.capture()
+        factory.assert_called_once()
+        stream.close.assert_called_once()
+
+    def test_stopped_lane_during_the_retry_is_not_retried(self):
+        ended = 'Capture stream ended or returned an invalid image'
+        stream = self.failing_stream(ended, error=ended)
+        feedback, factory = self.feedback(stream)
+        feedback.wait = lambda _seconds: self.source.update(running=False, stream_id=None)
+        with self.assertRaisesRegex(NavigationError, 'not running'):
+            feedback.capture()
+        factory.assert_called_once()
 
     def test_cancelled_observation_keeps_the_decoder(self):
         stream = self.stream(PpmFrame(1, 1, b'abc'))
