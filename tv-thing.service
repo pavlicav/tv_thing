@@ -37,7 +37,13 @@ TimeoutStopSec=5
 # memory and task ceilings for it, and an OOM kill of one child (the 0.4 GB
 # MPEG-2 frames of 2026-09) must no longer take the whole unit down: each
 # child has its own supervisor that restarts it.
-CPUQuota=400%
+#
+# 800% since 2026-10-17. The host went from 4 cores at 3.4 GHz to 14 cores
+# (28 threads) at 2.6 GHz, so 400% -- the whole old machine -- became 4 of 28
+# threads, each slower than an old core, and the unit hit it in 6.9% of its
+# 100 ms periods, stalling every lane at once. The gate's per-encoder CPU
+# limits are unchanged.
+CPUQuota=800%
 MemoryMax=1800M
 TasksMax=192
 OOMPolicy=continue

@@ -310,7 +310,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now tv-thing
 ```
 
-The unit applies independent containment (`CPUQuota=400%`, `MemoryMax=1200M`,
+The unit applies independent containment (`CPUQuota=800%`, `MemoryMax=1200M`,
 `LimitFSIZE=16M`) and sets the `viviserv` NVIDIA ceiling to 80 C. Application
 watchdogs are still required; the systemd limits are a final safety net. The
 service pins `libx264` on `viviserv`: its legacy K4200 reached the 80 C safety
@@ -723,7 +723,7 @@ python3 stream_sanity_check.py \
 multi-threaded x264 reads around 300% for a fraction of a second without
 being sustained load. Measured here: 153% steady state, 110% peak across a
 single tune, and 200-300% only in the instant of a retune, against the unit's
-own `CPUQuota=400%`. A real runaway still trips the check.
+own `CPUQuota=800%`. A real runaway still trips the check.
 
 The gate fails on slow channel changes, malformed or oversized segments,
 implausible encoded/write rates, CPU/RSS/GPU overuse, excess temperature,

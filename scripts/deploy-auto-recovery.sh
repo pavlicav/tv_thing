@@ -187,7 +187,7 @@ as_vivian rsync -a --exclude .git --exclude streams --exclude __pycache__ "$TV_W
 as_vivian rsync -a "$TV/roku_state/" "$STAGE/roku_state/"
 systemctl reset-failed 'tv-thing-candidate*' 2>/dev/null
 systemd-run --unit="$CANDIDATE" --collect --uid=vivian --gid=vivian \
-    -p WorkingDirectory="$STAGE" -p MemoryMax=1800M -p CPUQuota=400% -p TasksMax=192 \
+    -p WorkingDirectory="$STAGE" -p MemoryMax=1800M -p CPUQuota=800% -p TasksMax=192 \
     -p LimitFSIZE=16M:16G -p OOMPolicy=continue -p RuntimeMaxSec=3600 \
     --setenv=PORT=8098 --setenv=TV_THING_BIND=127.0.0.1 --setenv=TV_THING_BIND_LOOPBACK=1 \
     --setenv=TV_THING_STREAMS_DIR="$STAGE/streams" --setenv=TV_THING_RECORDINGS_DIR="$STAGE/recordings" \

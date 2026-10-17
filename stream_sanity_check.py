@@ -492,7 +492,7 @@ def main(argv=None):
     # first ~0.3s of life reads ~300%, reproducibly, without being sustained
     # load. Measured on viviserv: 153% steady state, 110% peak for a single
     # tune, 200-300% only across a retune. 350 clears that transient while
-    # staying under the unit's own CPUQuota=400%, so a genuine runaway still
+    # staying under the unit's own CPUQuota=800%, so a genuine runaway still
     # trips this.
     parser.add_argument("--max-cpu-peak", type=float, default=350)
     parser.add_argument("--max-rss-mib", type=float, default=512)
