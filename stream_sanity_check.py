@@ -9,6 +9,7 @@ large media, stalls, or reports an internal safety trip.
 
 import argparse
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -126,9 +127,58 @@ def transport_stream_errors(data):
     return errors
 
 
+# Process CPU is the CPU time the server's tree used between two samples, not
+# ps %CPU. That is cputime divided by age, and CPU time is counted in 10 ms
+# ticks: on 2026-10-17 a one-thread ffmpeg 0.08 s old read 116% and the new
+# dvb_source 67% while the unit used 51%, and the gate, sampling just after a
+# tune, failed two deploys on peaks of 404% and 504% that the unit's cgroup
+# never came near (242% at most in any 0.25 s). A lifetime average also barely
+# moves when a long-running process runs away, so a delta catches that too.
+CLOCK_TICKS = os.sysconf("SC_CLK_TCK")
+# Shorter intervals are mostly tick rounding; a sample that comes sooner
+# reports no CPU and the next one measures from the same baseline.
+MIN_CPU_INTERVAL = 0.5
+_cpu_baselines = {}  # root pid -> (listed_at, read_at, {pid: (start, ticks)})
+
+
+def system_uptime():
+    with open("/proc/uptime") as uptime:
+        return float(uptime.read().split()[0])
+
+
+def process_cpu_ticks(pid):
+    """(start, ticks): CPU time of a process and of the children it has reaped."""
+    with open(f"/proc/{pid}/stat") as stat:
+        # Fields after "(comm)" start at field 3: utime..cstime are 14-17,
+        # starttime is 22.
+        fields = stat.read().rsplit(")", 1)[1].split()
+    return int(fields[19]), sum(int(value) for value in fields[11:15])
+
+
+def cpu_ticks_used(before, after, listed_before):
+    """CPU ticks a process tree used between two {pid: (start, ticks)} reads.
+
+    Ticks include reaped children, so when the server reaps a killed encoder
+    its whole lifetime moves into the server's count. The encoder's last
+    count is subtracted for that, or each retune would count it twice.
+    """
+    used = 0
+    for pid, (start, ticks) in after.items():
+        if pid in before and before[pid][0] == start:
+            used += ticks - before[pid][1]
+        elif start + 1 >= listed_before * CLOCK_TICKS:
+            used += ticks  # started since the last sample (start is in ticks)
+        # Otherwise it joined the tree from outside; counted from next time.
+    for pid, (start, ticks) in before.items():
+        if pid not in after or after[pid][0] != start:
+            used -= ticks
+    return max(used, 0)
+
+
 def process_group_sample(root_pid):
+    listed_at = system_uptime()
     result = subprocess.run(
-        ["ps", "-eo", "pid=,ppid=,pcpu=,rss=,args="],
+        ["ps", "-eo", "pid=,ppid=,rss=,args="],
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         text=True,
@@ -137,31 +187,47 @@ def process_group_sample(root_pid):
     )
     processes = {}
     for line in result.stdout.splitlines():
-        fields = line.strip().split(None, 4)
-        if len(fields) != 5:
+        fields = line.strip().split(None, 3)
+        if len(fields) != 4:
             continue
         try:
-            pid, ppid = int(fields[0]), int(fields[1])
-            cpu, rss_kib = float(fields[2]), int(fields[3])
+            pid, ppid, rss_kib = int(fields[0]), int(fields[1]), int(fields[2])
         except ValueError:
             continue
-        processes[pid] = {
-            "ppid": ppid, "cpu": cpu, "rss_kib": rss_kib,
-            "args": fields[4],
-        }
+        processes[pid] = {"ppid": ppid, "rss_kib": rss_kib, "args": fields[3]}
 
     descendants = {root_pid}
+    order = [root_pid]  # parents before their children
     changed = True
     while changed:
         changed = False
         for pid, process in processes.items():
             if pid not in descendants and process["ppid"] in descendants:
                 descendants.add(pid)
+                order.append(pid)
                 changed = True
 
     selected = [processes[pid] for pid in descendants if pid in processes]
+    # Read parents first: a child reaped in between is then gone from the
+    # read or still a zombie, never in both its own and its parent's count.
+    ticks = {}
+    for pid in order:
+        if pid in processes:
+            try:
+                ticks[pid] = process_cpu_ticks(pid)
+            except (OSError, ValueError, IndexError):
+                pass  # exited since ps listed it
+    read_at = system_uptime()
+    cpu_percent = None
+    baseline = _cpu_baselines.get(root_pid)
+    if baseline is None:
+        _cpu_baselines[root_pid] = (listed_at, read_at, ticks)
+    elif read_at - baseline[1] >= MIN_CPU_INTERVAL:
+        used = cpu_ticks_used(baseline[2], ticks, baseline[0])
+        cpu_percent = 100 * used / CLOCK_TICKS / (read_at - baseline[1])
+        _cpu_baselines[root_pid] = (listed_at, read_at, ticks)
     return {
-        "cpu_percent": sum(item["cpu"] for item in selected),
+        "cpu_percent": cpu_percent,
         "rss_mib": sum(item["rss_kib"] for item in selected) / 1024,
         "ffmpeg_count": sum("ffmpeg" in item["args"] for item in selected),
         "source_count": sum("dvb_source.py" in item["args"] for item in selected),
@@ -487,13 +553,12 @@ def main(argv=None):
     parser.add_argument("--max-media-mbps", type=float, default=4)
     parser.add_argument("--max-wall-mbps", type=float, default=4)
     parser.add_argument("--max-cpu-average", type=float, default=200)
-    # Peak is measured with ps %CPU, which is cputime/elapsed -- so a
-    # multi-threaded x264 init that burns ~1s of CPU across cores in its
-    # first ~0.3s of life reads ~300%, reproducibly, without being sustained
-    # load. Measured on viviserv: 153% steady state, 110% peak for a single
-    # tune, 200-300% only across a retune. 350 clears that transient while
-    # staying under the unit's own CPUQuota=800%, so a genuine runaway still
-    # trips this.
+    # Set at 350 when the peak was ps %CPU (cputime/elapsed), to clear the
+    # ~300% a fresh multi-threaded x264 read in its first ~0.3 s. Since
+    # 2026-10-17 both CPU checks use the CPU time used between samples (see
+    # process_group_sample), and the limits are unchanged. Across that day's
+    # three-retune gate on the 2.6 GHz Xeon, the candidate's cgroup used 92%
+    # on average and at most 159% in any one second.
     parser.add_argument("--max-cpu-peak", type=float, default=350)
     parser.add_argument("--max-rss-mib", type=float, default=512)
     parser.add_argument("--max-gpu-average", type=float, default=85)
@@ -657,7 +722,9 @@ def main(argv=None):
     media_mbps = (total_bytes * 8 / total_duration / 1_000_000
                   if total_duration else float("inf"))
     wall_mbps = total_bytes * 8 / elapsed / 1_000_000
-    cpu_values = [item["cpu_percent"] for item in samples["process"]]
+    # The first sample is only a baseline (see process_group_sample).
+    cpu_values = [item["cpu_percent"] for item in samples["process"]
+                  if item["cpu_percent"] is not None]
     rss_values = [item["rss_mib"] for item in samples["process"]]
     gpu_values = [item["util_percent"] for item in samples["gpu"]]
     temp_values = [item["temp_c"] for item in samples["gpu"]]

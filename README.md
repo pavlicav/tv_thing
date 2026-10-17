@@ -718,12 +718,19 @@ python3 stream_sanity_check.py \
   --max-gpu-temp 80
 ```
 
-**On the CPU peak limit.** It is 350%, not 300%. Peak is sampled with `ps`
-`%CPU`, which is cputime divided by elapsed time, so a freshly spawned
-multi-threaded x264 reads around 300% for a fraction of a second without
-being sustained load. Measured here: 153% steady state, 110% peak across a
-single tune, and 200-300% only in the instant of a retune, against the unit's
-own `CPUQuota=800%`. A real runaway still trips the check.
+**On the CPU limits.** Both CPU checks charge the server's process tree the
+CPU time it used between samples, about a second apart, read from
+`/proc/<pid>/stat`. A process's count includes the children it has reaped, and
+a reaped encoder's last count is subtracted so that it is not charged twice.
+Until 2026-10-17 the gate used `ps` `%CPU`, which is CPU time divided by age.
+For a process only milliseconds old that is mostly rounding: just after a
+retune, a one-thread ffmpeg 0.08 s old read 116% while the whole unit used
+51%. Two deploys failed on "peaks" of 404% and 504% that the unit's cgroup
+never came near. The limits did not change: 200% average and 350% peak. On
+the 2.6 GHz Xeon the candidate's cgroup averaged 92% across three retunes and
+used at most 159% in any one second. The unit's own quota is `CPUQuota=800%`.
+A real runaway still trips the check. Unlike a lifetime average, it also does
+so when a process that has run for hours suddenly spins.
 
 The gate fails on slow channel changes, malformed or oversized segments,
 implausible encoded/write rates, CPU/RSS/GPU overuse, excess temperature,
