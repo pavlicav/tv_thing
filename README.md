@@ -760,3 +760,33 @@ on. The i2c bus backs it up: `2-0043` and `2-0061` are two separate tuner
 chips, alongside the S5H1409 demodulator.
 
 **Closing the radio node drops FM mode.** Opening `/dev/radio0` is what switches the CX23418 A/V core into FM demodulation; the driver reverts to TV mode as soon as that descriptor closes. Setting a frequency with `v4l2-ctl` therefore accomplishes nothing — the tool exits, the node closes, and the card leaves FM mode before any audio is captured. `fm_tuner.py` holds the descriptor open for the life of the stream.
+
+
+### Unified tunable channels (Watch)
+
+Watch opens with **All channels**: one searchable alphabetical lineup containing
+ATSC antenna channels, the Roku’s YouTube TV channels and dated game feeds, and
+**VizelVision**, pinned first. Each row names its source; matching station names
+on ATSC and Roku remain separate choices. Search accepts channel numbers,
+station names, Roku aliases, and source names. Cable and Roku filters remain
+available, including the Roku game date, locks and Manual Roku remote.
+
+Selecting VizelVision watches its existing station output in the same player.
+It does not tune the Roku or ATSC receiver, take a source lock, change master
+control, or launch an encoder. The quality selector is hidden for both Roku and
+VizelVision. If the station is unavailable, select its channel again to retry.
+
+TV Thing relays station HLS through `stream/vizelvision/index.m3u8` so playback
+works on the direct TV Thing port and under `/tv/`. The upstream defaults to
+`http://127.0.0.1:6970/v1/master/media/`; override
+`TV_THING_VIZELVISION_MEDIA_URL` with an HLS directory URL if needed. The station
+must supply relative, flat playlist/media references (as VizelVision does).
+Playlist query strings, initialization segments and byte ranges are preserved.
+Only GETs for HLS assets are relayed, with a 5-second upstream timeout and a
+16 MiB response limit.
+
+Additional fast checks: `node --test test_tunable_channels.cjs test_live_player.cjs`
+and `node test_tunable_browser.cjs /path/to/playwright`. The browser check mocks
+source APIs and covers both URL layouts, combined search, source routing,
+station playback, declined locks, delayed retunes, keyboard focus and mobile
+layout. Live deployment still requires the resource gate in `AGENTS.md`.

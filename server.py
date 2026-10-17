@@ -23,6 +23,8 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
 import analog_tuner
 import atsc_scan
@@ -62,6 +64,10 @@ QUALITY_PRESETS = {
 
 API_VERSION = "v1"
 SOURCE_POLL_INTERVAL_MS = 3000
+VIZELVISION_MEDIA_URL = os.environ.get(
+    "TV_THING_VIZELVISION_MEDIA_URL", "http://127.0.0.1:6970/v1/master/media/"
+).rstrip("/") + "/"
+VIZELVISION_MAX_MEDIA_BYTES = 16 * 1024 * 1024
 
 # ---------------------------------------------------------------------------
 # Guide
@@ -4695,6 +4701,10 @@ class TVHandler(SimpleHTTPRequestHandler):
             self.send_json(status_payload())
             return
 
+        if path.startswith("/stream/vizelvision/"):
+            self.send_vizelvision_media(parsed)
+            return
+
         if path.startswith("/stream/"):
             filename = path[len("/stream/"):]
             # /stream/live.m3u8 is an alias kept for clients that predate
@@ -5269,6 +5279,50 @@ class TVHandler(SimpleHTTPRequestHandler):
                     remaining -= len(chunk)
             except (BrokenPipeError, ConnectionResetError):
                 pass
+
+    def send_vizelvision_media(self, parsed):
+        """Relay the existing station HLS, without taking any tuner or encoder.
+
+        Relative playlist references stay in this same-origin namespace, both
+        directly on :8080 and under /tv/. Only flat HLS assets are accepted.
+        """
+        filename = parsed.path.removeprefix("/stream/vizelvision/")
+        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:m3u8|mp4|m4s|ts)", filename):
+            self.send_json({"error": "Invalid station media path"}, status=400)
+            return
+        url = VIZELVISION_MEDIA_URL + filename
+        if parsed.query:
+            url += "?" + parsed.query
+        headers = {"Accept-Encoding": "identity"}
+        if self.headers.get("Range"):
+            headers["Range"] = self.headers["Range"]
+        try:
+            with urlopen(Request(url, headers=headers), timeout=5) as response:
+                content = response.read(VIZELVISION_MAX_MEDIA_BYTES + 1)
+                if len(content) > VIZELVISION_MAX_MEDIA_BYTES:
+                    self.send_json({"error": "Station media too large"}, status=502)
+                    return
+                status = response.status
+                forwarded = {name: response.headers[name] for name in (
+                    "Content-Type", "Content-Range", "Accept-Ranges"
+                ) if response.headers.get(name)}
+        except HTTPError as error:
+            self.send_json({"error": "VizelVision stream unavailable"}, status=error.code)
+            return
+        except (URLError, OSError, TimeoutError):
+            self.send_json({"error": "VizelVision stream unavailable"}, status=502)
+            return
+        self.send_response(status)
+        for name, value in forwarded.items():
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(content)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        try:
+            self.wfile.write(content)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def send_roku_preview(self):
         """What the Roku verifier sees, as an MJPEG stream (engineering)."""

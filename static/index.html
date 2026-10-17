@@ -492,7 +492,7 @@
       </nav>
       <div class="topbar-tools">
         <div class="segmented source-tabs" id="source-tabs" role="tablist" aria-label="Source">
-          <button role="tab" id="tab-tv" aria-selected="true">Digital</button>
+          <button role="tab" id="tab-tv" aria-selected="true">All channels</button>
           <button role="tab" id="tab-cable" aria-selected="false">Cable</button>
           <button role="tab" id="tab-roku" aria-selected="false">Roku</button>
           <button role="tab" id="tab-radio" aria-selected="false" hidden>FM Radio</button>
@@ -646,6 +646,7 @@
 
   <script src="hls.min.js"></script>
   <script src="live-player.js"></script>
+  <script src="tunable-channels.js"></script>
   <script>
   (() => {
     "use strict";
@@ -683,8 +684,8 @@
 
     const state = {
       lock: null,        // live tuner lock, or null
-      mode: "tv",        // which source list the panel shows
-      playing: null,     // stage source: "tv", "cable", "fm" or null
+      mode: "tv",        // all channels, or a source filter
+      playing: null,     // stage source: tv, cable, roku, vizelvision, fm or null
       channels: [],
       cableChannels: [],
       cableAvailable: false,
@@ -834,6 +835,11 @@
         }
         const html = `<div class="bn-split"><div class="bn-now">${nowHtml}</div>${later}</div>`;
         body.innerHTML = html;
+      } else if (state.playing === "vizelvision") {
+        num.textContent = "VV";
+        body.innerHTML = '<div class="bn-row"><span class="bn-k">NOW</span>' +
+          '<span class="bn-title">VizelVision</span></div>' +
+          '<div class="bn-desc">The station’s live broadcast</div>';
       } else if (state.playing === "cable") {
         num.textContent = state.currentCableChannel != null ? String(state.currentCableChannel) : "– –";
         body.innerHTML = '<div class="bn-none">Analog cable carries no guide</div>';
@@ -1169,6 +1175,8 @@
       if (sourcePollTimer) clearInterval(sourcePollTimer);
       sourcePollTimer = setInterval(async () => {
         await Promise.all([loadSources(false), loadCableChannels(false)]);
+        if (["tv", "roku"].includes(state.mode)) await loadRokuItems(false);
+        syncRokuPolling();
         render();
       }, sourcePollMs);
     }
@@ -1200,14 +1208,16 @@
       els.tabRoku.setAttribute("aria-selected", String(rokuTab));
       els.tabRoku.hidden = !state.roku.available;
       // The Roku sends its own picture: there is no quality to choose.
-      els.qualityGroup.classList.toggle("hidden", radio || state.playing === "roku");
-      els.panelLabel.textContent = tv ? "Digital Channels"
+      els.qualityGroup.classList.toggle("hidden", radio || ["roku", "vizelvision"].includes(state.playing));
+      els.panelLabel.textContent = tv ? "Tunable channels"
         : (cable ? "Analog Channels" : (rokuTab ? "Roku Feeds" : "Stations"));
-      els.filter.placeholder = tv ? "Filter digital channels…"
+      els.filter.placeholder = tv ? "Filter all channels…"
         : (cable ? "Filter analog channels…"
           : (rokuTab ? "Filter Roku feeds…" : "Filter stations…"));
-      els.rokuTools.hidden = !rokuTab;
+      els.rokuTools.hidden = !(state.roku.available && (tv || rokuTab));
       renderRokuTools();
+      const manual = state.roku.lane && state.roku.lane.roku && state.roku.lane.roku.selection;
+      els.rokuRemote.hidden = !(state.playing === "roku" && manual && manual.manual);
 
       const onRadio = state.playing === "fm";
       els.video.classList.toggle("hidden", onRadio);
@@ -1237,8 +1247,17 @@
 
     function renderList() {
       const scrollTop = els.list.scrollTop;
+      const focusedKey = els.list.contains(document.activeElement)
+        ? document.activeElement.dataset.channelKey : null;
       els.list.innerHTML = "";
-      requestAnimationFrame(() => { els.list.scrollTop = scrollTop; });
+      requestAnimationFrame(() => {
+        if (focusedKey && (document.activeElement === document.body || els.list.contains(document.activeElement))) {
+          const focused = [...els.list.querySelectorAll("[data-channel-key]")]
+            .find(button => button.dataset.channelKey === focusedKey);
+          if (focused) focused.focus({ preventScroll: true });
+        }
+        els.list.scrollTop = scrollTop;
+      });
 
       if (state.mode === "radio" && !state.radioAvailable) {
         const wrap = document.createElement("div");
@@ -1253,18 +1272,21 @@
         return;
       }
 
+      if (state.mode === "tv") {
+        renderTunableList();
+        return;
+      }
+
       if (state.mode === "roku") {
         renderRokuList();
         return;
       }
 
-      const items = state.mode === "tv"
-        ? state.channels.filter(c => matches(`${c.number} ${c.name}`))
-        : (state.mode === "cable"
-          ? state.cableChannels.filter(channel =>
-              matches(`rf ${channel.number} ${channel.frequency_mhz} mhz`))
-          : state.stations.filter(s =>
-              matches(`${s.frequency} ${s.name} ${s.format || ""}`)));
+      const items = state.mode === "cable"
+        ? state.cableChannels.filter(channel =>
+            matches(`rf ${channel.number} ${channel.frequency_mhz} mhz`))
+        : state.stations.filter(s =>
+            matches(`${s.frequency} ${s.name} ${s.format || ""}`));
 
       els.panelCount.textContent = String(items.length);
 
@@ -1273,9 +1295,8 @@
         empty.className = "empty";
         empty.textContent = state.filter
           ? "Nothing matches that filter."
-          : (state.mode === "tv" ? "No channels yet — run a scan."
-            : (state.mode === "cable" ? "Analog channel plan unavailable."
-              : "No stations yet — run a scan."));
+          : (state.mode === "cable" ? "Analog channel plan unavailable."
+            : "No stations yet — run a scan.");
         els.list.appendChild(empty);
         return;
       }
@@ -1284,19 +1305,7 @@
         const btn = document.createElement("button");
         btn.className = "list-item";
 
-        if (state.mode === "tv") {
-          btn.setAttribute("aria-current", String(item.id === state.currentChannelId));
-          const on = listingFor(item.number, Date.now() / 1000).now;
-          const sub = on
-            ? `<span class="item-sub">${escapeHtml(on.title || "No title")}</span>` +
-              `<span class="item-bar"><i style="width:${progressOf(on, Date.now() / 1000).toFixed(0)}%"></i></span>`
-            : "";
-          btn.innerHTML =
-            `<span class="item-key">${escapeHtml(item.number)}</span>` +
-            `<span class="item-body"><span class="item-name">${escapeHtml(item.name)}</span>${sub}</span>` +
-            `<span class="item-tag">RF ${item.rf_channel}</span>`;
-          btn.addEventListener("click", () => tuneTv(item.id));
-        } else if (state.mode === "cable") {
+        if (state.mode === "cable") {
           btn.setAttribute("aria-current",
                            String(item.number === state.currentCableChannel));
           btn.disabled = !state.cableAvailable;
@@ -1323,6 +1332,92 @@
       }
     }
 
+    function tunableChannels() {
+      return TunableChannels.catalog(state.channels, state.roku.sources,
+                                     state.roku.items, state.roku.date);
+    }
+
+    function renderTunableList() {
+      const items = tunableChannels().filter(item => matches(item.search));
+      els.panelCount.textContent = String(items.length);
+      const roku = (state.roku.lane && state.roku.lane.roku) || {};
+      const selection = roku.selection || {};
+      const operation = roku.operation || {};
+      rokuListKey = [state.playing, selection.source_id, selection.channel_id, selection.date,
+                    operation.active && operation.target && operation.target.channel_id].join("|");
+      for (const entry of items) {
+        const button = document.createElement("button");
+        button.className = "list-item";
+        button.dataset.channelKey = entry.id;
+        let key = entry.key, sub = "", tag = entry.tag, current = false, progress = "";
+        if (entry.kind === "digital") {
+          current = state.playing === "tv" && state.currentChannelId === entry.channel.id;
+          const on = listingFor(entry.channel.number, Date.now() / 1000).now;
+          sub = on ? on.title || "No title" : `Antenna · RF ${entry.channel.rf_channel}`;
+          if (on) progress = `<span class="item-bar"><i style="width:${progressOf(on, Date.now() / 1000).toFixed(0)}%"></i></span>`;
+          button.addEventListener("click", () => tuneTv(entry.channel.id));
+        } else if (entry.kind === "roku") {
+          const { source, item } = entry;
+          current = state.playing === "roku" && selection.source_id === source.id
+            && selection.channel_id === item.id && (!source.dated || selection.date === state.roku.date);
+          key = source.dated ? gameClock(item) || rokuShortName(source.id) : rokuShortName(source.id);
+          sub = [source.name, source.dated ? item.status : item.note].filter(Boolean).join(" · ");
+          if (operation.active && operation.target && operation.target.source_id === source.id
+              && operation.target.channel_id === item.id) tag = "MOVING";
+          button.disabled = source.available === false || item.playable === false;
+          button.addEventListener("click", () => tuneRoku(source, item));
+        } else {
+          current = state.playing === "vizelvision";
+          sub = "The station’s live broadcast";
+          button.addEventListener("click", tuneVizelVision);
+        }
+        button.setAttribute("aria-current", String(current));
+        button.innerHTML = `<span class="item-key">${escapeHtml(key)}</span>` +
+          `<span class="item-body"><span class="item-name">${escapeHtml(entry.name)}</span>` +
+          `<span class="item-sub">${escapeHtml(sub)}</span>${progress}</span>` +
+          `<span class="item-tag">${escapeHtml(tag)}</span>`;
+        els.list.appendChild(button);
+      }
+      if (!items.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "Nothing matches that filter.";
+        els.list.appendChild(empty);
+      }
+    }
+
+    function tuneVizelVision() {
+      const serial = ++state.tuneSerial;
+      state.tuning = false;
+      state.needsReconnect = false;
+      state.currentChannelId = null;
+      state.currentCableChannel = null;
+      state.currentFreq = null;
+      state.streamId = null;
+      stopSignalPolling();
+      els.radioAudio.pause();
+      els.radioAudio.removeAttribute("src");
+      destroyHls();
+      els.video.pause();
+      els.video.removeAttribute("src");
+      els.video.load();
+      state.playing = "vizelvision";
+      render();
+      syncRokuPolling();
+      showLock(null);
+      setStatus("VizelVision", "busy");
+      setNowPlaying("VizelVision", "Connecting to the live broadcast…");
+      attachStream("stream/vizelvision/index.m3u8", els.video, () => {
+        if (serial !== state.tuneSerial) return;
+        setStatus("VizelVision unavailable", "error");
+        setNowPlaying("VizelVision", "Stream unavailable · choose the channel to retry");
+      }, () => {
+        if (serial !== state.tuneSerial) return;
+        setStatus("VizelVision", "live");
+        setNowPlaying("VizelVision", "Live broadcast");
+      });
+    }
+
     function renderFoot() {
       if (state.mode === "roku") {
         const lane = state.roku.lane;
@@ -1332,8 +1427,8 @@
         return;
       }
       if (state.mode === "tv") {
-        els.footLeft.textContent = `${state.channels.length} channels`;
-        els.footRight.textContent = "ATSC · 8VSB";
+        els.footLeft.textContent = `${tunableChannels().length} channels`;
+        els.footRight.textContent = "ATSC · Roku · VizelVision";
       } else if (state.mode === "cable") {
         els.footLeft.textContent = `${state.cableChannels.length} channels`;
         els.footRight.textContent = state.cableAvailable
@@ -1447,7 +1542,7 @@
         if (state.roku.lock && (!locks.roku || locks.roku.owner !== ROKU_OWNER)) {
           forgetRokuLock();  // Expired, released elsewhere, or overridden.
         }
-        showLock(state.mode === "roku" || state.playing === "roku"
+        showLock(state.playing === "vizelvision" ? null : state.mode === "roku" || state.playing === "roku"
           ? locks.roku || null : locks.digital || locks.analog || null);
         renderRokuTools();
       } catch (error) {
@@ -1689,7 +1784,7 @@
     function startTvPlayback(streamId, attempt, onReady) {
       attempt = attempt || 0;
       streamId = streamId || state.streamId || String(Date.now());
-      if (state.streamId && streamId !== state.streamId) return;
+      if (streamId !== state.streamId || !["tv", "cable", "roku"].includes(state.playing)) return;
       state.needsReconnect = false;
       const playlist = state.playing === "cable" ? "analog"
         : (state.playing === "roku" ? "roku" : "digital");
@@ -1904,7 +1999,7 @@
     function renderRokuState() {
       const roku = (state.roku.lane && state.roku.lane.roku) || {};
       const manual = !!(roku.selection && roku.selection.manual);
-      els.rokuRemote.hidden = !(state.mode === "roku" && manual);
+      els.rokuRemote.hidden = !(state.playing === "roku" && manual);
       if (manual && !rokuAppsLoaded) loadRokuApps();
       renderRokuTools();
       if (state.mode === "roku") renderFoot();
@@ -1913,16 +2008,16 @@
       // never steals keyboard focus or scrolls it.
       const selection = roku.selection || {};
       const operation = roku.operation || {};
-      const key = [selection.source_id, selection.channel_id, selection.date,
+      const key = [state.playing, selection.source_id, selection.channel_id, selection.date,
                    operation.active && operation.target && operation.target.channel_id].join("|");
-      if (state.mode === "roku" && key !== rokuListKey) renderList();
+      if (["tv", "roku"].includes(state.mode) && key !== rokuListKey) renderList();
     }
 
     function renderRokuList() {
       const roku = (state.roku.lane && state.roku.lane.roku) || {};
       const selection = roku.selection;
       const operation = roku.operation;
-      rokuListKey = [selection && selection.source_id, selection && selection.channel_id,
+      rokuListKey = [state.playing, selection && selection.source_id, selection && selection.channel_id,
                      selection && selection.date,
                      operation && operation.active && operation.target && operation.target.channel_id].join("|");
       let total = 0;
@@ -1945,7 +2040,7 @@
           total += 1;
           const btn = document.createElement("button");
           btn.className = "list-item";
-          const current = !!(selection && selection.source_id === source.id
+          const current = !!(state.playing === "roku" && selection && selection.source_id === source.id
             && selection.channel_id === item.id
             && (!source.dated || selection.date === state.roku.date));
           const moving = !!(operation && operation.active && operation.target
@@ -1994,7 +2089,7 @@
           // Keep what was listed; a schedule outage is not worth an alarm.
         }
       }));
-      if (state.mode === "roku") renderList();
+      if (["tv", "roku"].includes(state.mode)) { renderList(); renderFoot(); }
     }
 
     async function loadRokuApps() {
@@ -2056,7 +2151,7 @@
     }
 
     function syncRokuPolling() {
-      const wanted = state.mode === "roku" || state.playing === "roku";
+      const wanted = state.roku.available && (["tv", "roku"].includes(state.mode) || state.playing === "roku");
       if (wanted && !rokuPollTimer) {
         pollRoku();
         rokuPollTimer = setInterval(pollRoku, 1500);
@@ -2067,6 +2162,7 @@
     }
 
     async function watchRoku(streamId, tuneSerial) {
+      if (tuneSerial !== state.tuneSerial) return;
       // The Roku's capture runs continuously; attach once per generation.
       if (state.playing === "roku" && state.streamId === streamId && hls) return;
       state.playing = "roku";
@@ -2197,7 +2293,7 @@
       state.mode = mode;
       state.filter = "";
       els.filter.value = "";
-      if (mode === "roku") loadRokuItems(false);
+      if (["tv", "roku"].includes(mode)) loadRokuItems(false);
       syncRokuPolling();
       render();
       renderRokuState();
@@ -2254,6 +2350,7 @@
           "api/v1/status", "api/status", { cache: "no-store" }
         );
         const data = normalizeStatus(await res.json());
+        if (state.tuneSerial) return;
         const sourceKind = data.source && data.source.kind;
         const stream = data.stream || {};
         const selection = data.selection;
@@ -2284,7 +2381,6 @@
             String(b.dataset.quality === state.quality)));
 
         if ((sourceKind === "cable" || sourceKind === "analog") && stream.active && selection) {
-          state.mode = "cable";
           state.playing = "cable";
           state.currentCableChannel = selection.channel;
           state.currentChannelId = null;
@@ -2332,7 +2428,7 @@
           return;
         }
 
-        setStatus(`${state.channels.length} channels ready`);
+        setStatus(`${tunableChannels().length} channels ready`);
         setNowPlaying("Nothing playing", "Idle");
       } catch (e) {
         setStatus("Server unreachable", "error");
@@ -2343,6 +2439,8 @@
       ? [loadChannels(), loadCableChannels(false), loadSources(false), loadStations()]
       : [loadChannels(), loadCableChannels(false), loadSources(false)];
     Promise.all(loaders).then(() => {
+      loadRokuItems(true);
+      syncRokuPolling();
       render();
       loadGuideNow();
       resume();

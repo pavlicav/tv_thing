@@ -254,3 +254,15 @@ by side.
 
 `api/v1/status` carries `recording`: the active timer (digital first), or
 null.
+
+
+### VizelVision station playback
+
+`GET /stream/vizelvision/index.m3u8` relays the existing VizelVision master HLS.
+Its relative child playlists and media resolve under `/stream/vizelvision/`.
+This is a watch-only station feed, independent of the hardware lane selection;
+it does not use `/api/v1/tune` and never acquires or overrides a tuner lock.
+Upstream errors propagate as HTTP errors (unreachable: 502). The optional
+`TV_THING_VIZELVISION_MEDIA_URL` sets the upstream HLS directory; by default it
+is `http://127.0.0.1:6970/v1/master/media/`. Only flat HLS asset filenames are
+accepted; query strings and Range headers are forwarded.

@@ -20,7 +20,7 @@ def test_cable_is_a_primary_source_tab():
     source_tabs = section(INDEX, 'id="source-tabs"', 'id="status-dot"')
 
     assert source_tabs.index('id="tab-tv"') < source_tabs.index('id="tab-cable"')
-    assert ">Digital<" in source_tabs
+    assert ">All channels<" in source_tabs
     assert "window.location.href" not in source_tabs
     # Capture cards were removed; only the card's own tuners remain.
     assert 'id="tab-capture"' not in source_tabs
