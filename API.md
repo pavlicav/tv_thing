@@ -126,6 +126,10 @@ refreshed in the background), `generation` and `reuse_max_age_seconds`.
   `state` is `succeeded`, `failed` or `cancelled`. Options: `force: true`
   always navigates; `navigate: false` never does, answering **409**
   `not_prepared` instead; `resume: false` skips the still-playing check.
+  A Sunday Ticket game that showed YouTube TV's blackout card ("airing on
+  your local station") fails its operation with `sunday_ticket_blackout`;
+  for the next 4 hours a tune of it answers **409** `sunday_ticket_blackout`
+  at once, naming the local channel, unless `force: true`.
 * **Generation**: `stream.generation` is `<capture id>.<serial>`. It changes
   when a navigation starts, when the remote moves the Roku, and when the
   capture restarts. A holder of the roku lane must fail closed when it

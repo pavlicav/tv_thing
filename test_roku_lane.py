@@ -9,7 +9,7 @@ import pytest
 import roku_lane
 from roku_control.config import ChannelConfig
 from roku_control.errors import (ChannelNotFoundError, ConfigError, ControlBusyError,
-                                 CueCancelledError, EcpError)
+                                 CueCancelledError, EcpError, SundayTicketBlackoutError)
 from roku_control.feedback import PpmFrame
 
 YOUTUBE_TV = SimpleNamespace(id="195316", name="YouTube TV")
@@ -185,6 +185,27 @@ def test_capture_restart_resumes_after_the_still_playing_check(lane):
     assert status == 200 and result == {"reused": True, "resumed": True, "selection": result["selection"]}
     assert result["selection"]["capture_id"] == "cap-2"
     assert lane.controller.plays == ["ESPN"]
+
+
+def test_a_blacked_out_game_is_refused_without_navigating_again(lane):
+    def blacked_out(game):
+        lane.controller.plays.append(game["title"])
+        raise SundayTicketBlackoutError(f"{game['title']} is blacked out on Sunday Ticket: it is airing on FOX")
+    lane.controller.play_sunday_ticket = blacked_out
+    body = {"source_id": "sunday-ticket", "channel_id": "401872964", "date": "2026-10-18"}
+    assert lane.tune(dict(body))[0] == 202
+    operation = settle(lane)
+    assert operation["state"] == "failed" and operation["error"]["code"] == "sunday_ticket_blackout"
+    status, refused = lane.tune(dict(body))  # vizelVision's retry: no second trip through the guide.
+    assert status == 409 and refused["code"] == "sunday_ticket_blackout" and "airing on FOX" in refused["error"]
+    assert lane.controller.plays == ["Steelers at Browns"]
+    assert lane.tune({**body, "date": "2026-10-25"})[0] == 202  # Another week's game is its own target.
+    settle(lane)
+    assert lane.tune({**body, "force": True})[0] == 202
+    settle(lane)
+    assert len(lane.controller.plays) == 3
+    lane._wall = lambda: time.time() + roku_lane.BLACKOUT_SECONDS + 1
+    assert lane.tune(dict(body))[0] == 202
 
 
 def test_a_failed_check_navigates(lane):

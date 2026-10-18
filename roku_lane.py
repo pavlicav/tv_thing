@@ -27,7 +27,7 @@ from contextlib import contextmanager
 from datetime import date
 
 from roku_control.errors import (ConfigError, ControlBusyError, CueCancelledError, EcpError,
-                                 NavigationError, RokuStreamError)
+                                 NavigationError, RokuStreamError, SundayTicketBlackoutError)
 from roku_control.sports import TYPICAL
 
 LANE = "roku"
@@ -52,6 +52,10 @@ GAME_LEAGUES = {MLB: "mlb", THURSDAY_NIGHT_FOOTBALL: "nfl", SUNDAY_TICKET: "nfl"
 # How long the Roku can take to reach a target and verify it: YouTube TV
 # took 39-124 s and Sunday Ticket 93-205 s when measured on 2026-10-06.
 NAVIGATION_SECONDS = 210
+# A game Sunday Ticket blacked out stays blacked out for its broadcast: its
+# local station carries it. A repeat is refused at once (force navigates);
+# vizelVision retries a Sunday Ticket game 10 times, ~2 min of Roku each.
+BLACKOUT_SECONDS = 4 * 3600
 
 # What the on-screen remote may send. Power and volume are left out: the
 # source Roku's HDMI goes to the capture card, not a television.
@@ -117,6 +121,7 @@ class RokuLane:
         self.serial = 0
         self.operation = None
         self._thread = None
+        self._blackouts = {}  # target key -> (wall time, message)
         self._player = {"at": None, "data": None, "error": None}
         self._player_refreshing = False
         self._apps = {"at": None, "data": None}
@@ -192,6 +197,16 @@ class RokuLane:
     def _running(self):
         return bool(self.operation and self.operation["state"] == "running")
 
+    @staticmethod
+    def _key(target):
+        return target["source_id"], target["channel_id"], target.get("date")
+
+    def _blackout(self, target):
+        """The message of a recent blackout of target, or None."""
+        with self._lock:
+            at, message = self._blackouts.get(self._key(target), (None, None))
+        return message if at is not None and self._wall() - at < BLACKOUT_SECONDS else None
+
     def _set_manual(self, message):
         with self._lock:
             if not (self.selection and self.selection.get("manual")):
@@ -215,6 +230,9 @@ class RokuLane:
                 self._stop_operation()
                 self._set_manual("Selected by a remote")
                 return 200, {"reused": False, "selection": self.selection_view()}
+            blackout = None if force else self._blackout(target)
+            if blackout is not None:
+                return 409, {"error": blackout, "code": SundayTicketBlackoutError.code}
             with self._lock:
                 if not force and self._fresh(target):
                     return 200, {"reused": True, "selection": self.selection_view()}
@@ -263,6 +281,9 @@ class RokuLane:
         except CueCancelledError as exc:
             self._finish(operation, "cancelled", str(exc))
         except Exception as exc:  # The operation records it; the lane stays usable.
+            if isinstance(exc, SundayTicketBlackoutError):
+                with self._lock:
+                    self._blackouts[self._key(target)] = (self._wall(), str(exc))
             self._finish(operation, "failed", str(exc), code=getattr(exc, "code", "navigation_failed"))
         else:
             with self._lock:
