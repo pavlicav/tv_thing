@@ -11,7 +11,8 @@ from typing import Callable
 from .baseball import team_ocr_names
 from .config import AppConfig, ChannelConfig, normalize_channel_name
 from .ecp import EcpClient, RokuApp, discover_roku
-from .errors import ControlBusyError, CueCancelledError, EcpError, NavigationError, RokuNotReadyError
+from .errors import (ControlBusyError, CueCancelledError, EcpError, NavigationError, RokuNotReadyError,
+                     SundayTicketBlackoutError)
 from .feedback import PpmFrame, VisualFeedback
 from .states import AppState
 from .operations import EventLog, OperationStore
@@ -216,6 +217,7 @@ class RokuStreamController:
             AppState.YOUTUBE_TV_LOCATION_VERIFICATION: "YouTube TV location verification detected",
             AppState.LIVE_GUIDE: "Live guide detected",
             AppState.FULL_PROGRAM: "Fullscreen program detected; returning to the guide",
+            AppState.SUNDAY_TICKET_BLACKOUT: "Sunday Ticket blackout card detected; returning to the guide",
             AppState.CHANNEL_DESCRIPTION: "Channel description detected; returning to the guide",
             AppState.JOIN_LIVE_OR_START_FROM_BEGINNING: "Join live chooser detected",
             AppState.MLB_HOME: "MLB Home detected",
@@ -583,7 +585,7 @@ class RokuStreamController:
                 unknown_attempts = 0
                 continue
 
-            if state in (AppState.FULL_PROGRAM, AppState.CHANNEL_DESCRIPTION):
+            if state in (AppState.FULL_PROGRAM, AppState.SUNDAY_TICKET_BLACKOUT, AppState.CHANNEL_DESCRIPTION):
                 if (
                     state == AppState.CHANNEL_DESCRIPTION
                     and repeated_state < 2
@@ -659,14 +661,19 @@ class RokuStreamController:
         )
 
     def _wait_for_playback(
-        self, app_id: str, events: list[dict[str, object]]
+        self, app_id: str, events: list[dict[str, object]], *, confirmations: int = 1
     ) -> dict[str, object]:
-        """Wait for playback, accepting a verified Join live prompt if shown."""
+        """Wait for playback, accepting a verified Join live prompt if shown.
+
+        `confirmations` consecutive playing frames are required, so a blackout
+        card that replaces the picture a moment after Select is still seen.
+        """
         roku = self.config.roku
         deadline = time.monotonic() + roku.playback_timeout_seconds
         last_player: dict[str, object] = {}
         last_observation: dict[str, object] | None = None
         location_confirmations = 0
+        playing = 0
 
         while time.monotonic() < deadline:
             active = self.ecp.active_app()
@@ -698,6 +705,18 @@ class RokuStreamController:
                         "observation": last_observation,
                     }
                 )
+                if state == AppState.SUNDAY_TICKET_BLACKOUT:
+                    # The Roku player still reports play behind this card.
+                    raise SundayTicketBlackoutError(
+                        "YouTube TV shows its blackout card: this game is airing on your local station",
+                        details={"observation": last_observation},
+                    )
+                playing_now = (
+                    state == AppState.FULL_PROGRAM
+                    and last_player.get("state") == "play"
+                    and plugin_id == app_id
+                )
+                playing = playing + 1 if playing_now else 0
                 if state == AppState.JOIN_LIVE_OR_START_FROM_BEGINNING:
                     self.ecp.keypress("Select")
                     self._publish_operation(
@@ -748,11 +767,7 @@ class RokuStreamController:
                         deadline = time.monotonic() + roku.playback_timeout_seconds
                     self._sleep(self.config.navigation.launch_settle_seconds)
                     continue
-                if (
-                    state == AppState.FULL_PROGRAM
-                    and last_player.get("state") == "play"
-                    and plugin_id == app_id
-                ):
+                if playing_now and playing >= confirmations:
                     self._publish_operation(
                         phase="playback_confirmed",
                         app_state=AppState.FULL_PROGRAM,
@@ -1647,7 +1662,15 @@ class RokuStreamController:
                     {"event": "keypress", "key": "Select", "action": "play"}
                 )
                 self._sleep(self.config.navigation.play_settle_seconds)
-                player = self._wait_for_playback(app_id, events)
+                try:
+                    player = self._wait_for_playback(app_id, events, confirmations=2 if sunday_ticket else 1)
+                except SundayTicketBlackoutError as exc:
+                    local = verification.get("local_channel") if sunday_ticket else None
+                    raise SundayTicketBlackoutError(
+                        f"{label} is blacked out on Sunday Ticket: it is airing on "
+                        + (f"{local}. Choose {local} under YouTube TV instead" if local else "your local station"),
+                        details={**exc.details, "local_channel": local},
+                    ) from exc
                 completed = datetime.now(timezone.utc)
                 result = {
                     "ok": True,
@@ -2464,13 +2487,15 @@ class RokuStreamController:
         guide_observation: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """Verify the top guide row, then read each row below it until the game's
-        Sunday Ticket row is found in two fresh observations."""
+        Sunday Ticket row is found in two fresh observations. A calibrated row
+        naming both teams is the local station Sunday Ticket blacks out for."""
         if self.feedback is None or getattr(self.feedback, "ocr", None) is None:
             raise NavigationError("Sunday Ticket selection needs the direct capture and local OCR")
         anchor_verification = self._open_channel_row(anchor, events, guide_observation=guide_observation)
         nav = self.config.navigation
         title = str(game.get("title"))
         seen_ticket = False
+        local_channel = None
         limit = len(self.config.channels) + 40  # Every configured row plus a full Sunday slate.
         for step in range(1, limit + 1):
             self._publish_operation(phase="finding_sunday_ticket", app_state=AppState.LIVE_GUIDE,
@@ -2482,6 +2507,8 @@ class RokuStreamController:
             events.append({"event": "sunday_ticket_row", "step": step,
                            **{k: v for k, v in observation.items() if k != "row" or v}})
             seen_ticket = seen_ticket or observation["strong_sunday_ticket"]
+            if local_channel is None and observation["calibrated_channel"] and all(observation["teams"].values()):
+                local_channel = observation["calibrated_channel"]
             if seen_ticket and observation["calibrated_channel"]:
                 break  # Past the block of temporary Sunday Ticket rows.
             if not observation["matched"]:
@@ -2497,7 +2524,8 @@ class RokuStreamController:
                     f"{title} is listed on Sunday Ticket but has not started; it can be selected once it is live",
                     details={"sunday_ticket_row": confirmation, "row_offset": step})
             return {"matched": True, "surface": "sunday_ticket_guide_row", "anchor": anchor_verification,
-                    "row_offset": step, "observations": [observation, confirmation]}
+                    "row_offset": step, "observations": [observation, confirmation],
+                    "local_channel": local_channel}
         raise NavigationError(
             f"{title} was not found among YouTube TV's Sunday Ticket guide rows",
             details={"rows_read": step, "sunday_ticket_rows_seen": seen_ticket})

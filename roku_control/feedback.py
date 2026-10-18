@@ -776,6 +776,27 @@ class VisualFeedback:
         return {"matched": difference <= self.config.template_difference_threshold,
                 "difference": round(difference, 3)}
 
+    def sunday_ticket_blackout(self, frame: PpmFrame) -> dict[str, object] | None:
+        """Read YouTube TV's blackout card, or None when `frame` is not one.
+
+        Sunday Ticket blacks out a game that airs on a local station: both team
+        logos and "This game is airing on your local station." stand in for the
+        picture while the Roku's media player still reports play (2026-10-18).
+        A whole-frame OCR pass reads only "This game", so the line is cropped.
+        """
+        if self.ocr is None:
+            return None
+        crop = (int(frame.width * 0.2), int(frame.height * 0.45),
+                int(frame.width * 0.8), int(frame.height * 0.72))
+        try:
+            text = self.ocr.read(frame, crop=crop, psm=6).text
+        except NavigationError:
+            return None
+        compact = normalize_channel_name(text)
+        if "localstation" in compact and ("airing" in compact or "thisgame" in compact):
+            return {"text": text}
+        return None
+
     @staticmethod
     def match_nfl_game(texts: list[str], game: dict[str, object]) -> dict[str, object]:
         """Both teams of `game` must appear in the OCR text, by full name or nickname."""
@@ -1611,6 +1632,16 @@ class VisualFeedback:
 
         player_state = str(media_player.get("state", "")).casefold()
         if player_state not in ("", "none", "close", "stop", "stopped"):
+            # The player keeps playing behind a blackout card, so only the
+            # card itself shows that no game is on screen.
+            blackout = self.sunday_ticket_blackout(frame)
+            if blackout is not None:
+                return {
+                    "state": AppState.SUNDAY_TICKET_BLACKOUT,
+                    "evidence": "ocr_local_station_blackout",
+                    "player_state": player_state,
+                    "ocr": blackout,
+                }
             return {
                 "state": AppState.FULL_PROGRAM,
                 "evidence": "roku_media_player",

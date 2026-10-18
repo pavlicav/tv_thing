@@ -1,10 +1,13 @@
+from dataclasses import replace
+import gzip
 from pathlib import Path
 import tempfile
 import unittest
 
 from roku_control.controller import RokuStreamController
-from roku_control.errors import NavigationError
-from roku_control.feedback import VisualFeedback
+from roku_control.errors import NavigationError, SundayTicketBlackoutError
+from roku_control.feedback import PpmFrame, VisualFeedback
+from roku_control.states import AppState
 
 from roku_control.tests import test_controller
 from roku_control.tests.test_controller import FakeEcp
@@ -108,6 +111,99 @@ class SundayTicketScanTests(unittest.TestCase):
         result = self.scan([row('NBC', channel='NBC'), row('Los Angeles Chargers at Buffalo Bills')],
                            logo_template=False)
         self.assertEqual(result['row_offset'], 1)
+
+
+BEARS = {'game_id': 401872999, 'title': 'Chicago Bears at Atlanta Falcons',
+         'away': {'name': 'Chicago Bears', 'nickname': 'Bears'},
+         'home': {'name': 'Atlanta Falcons', 'nickname': 'Falcons'}}
+
+
+def fixture(name):
+    return PpmFrame.parse(gzip.decompress((Path(__file__).parent / 'fixtures' / f'{name}.ppm.gz').read_bytes()))
+
+
+class BlackoutCardTests(unittest.TestCase):
+    """The 720p card captured on October 18, read by the local OCR."""
+
+    def detect(self, frame):
+        with tempfile.TemporaryDirectory() as directory:
+            config = test_controller.ControllerTests().config(Path(directory))
+            feedback = VisualFeedback(replace(config.feedback, ocr_enabled=True))
+            return feedback.detect_youtube_tv_state(frame, config.channels,
+                                                    {'state': 'play', 'plugin': {'id': '195316'}})
+
+    def test_the_blackout_card_is_not_a_playing_game(self):
+        observation = self.detect(fixture('sunday-ticket-blackout'))
+        self.assertEqual(observation['state'], AppState.SUNDAY_TICKET_BLACKOUT)
+        self.assertIn('airing on your local station', observation['ocr']['text'])
+
+    def test_a_playing_program_is_still_a_full_program(self):
+        self.assertEqual(self.detect(fixture('mlb-playing-video'))['state'], AppState.FULL_PROGRAM)
+
+
+class PlayerFeedback(GuideFeedback):
+    """The guide until Select, then the player screens in `after_select`."""
+
+    def __init__(self, ecp, rows, after_select):
+        super().__init__(ecp, rows)
+        self.after_select = list(after_select)
+
+    def assert_ready(self):
+        return {'ready': True}
+
+    def detect_youtube_tv_state(self, frame, channels, media_player):
+        assert 'Select' in self.ecp.keys
+        state = self.after_select.pop(0) if len(self.after_select) > 1 else self.after_select[0]
+        return {'state': state, 'evidence': 'test'}
+
+
+class BlackoutPlaybackTests(unittest.TestCase):
+    # The guide on October 18: local FOX carried the game Sunday Ticket blacked out.
+    ROWS = [row('NBC', channel='NBC'), row('Chicago Bears at Atlanta Falcons', channel='FOX'),
+            row('Carolina Panthers at Philadelphia Eagles'), row('Chicago Bears at Atlanta Falcons')]
+
+    def play(self, after_select):
+        self.ecp = FakeEcp()
+        with tempfile.TemporaryDirectory() as directory:
+            controller = RokuStreamController(test_controller.ControllerTests.config(None, Path(directory)),
+                                              ecp=self.ecp, feedback=PlayerFeedback(self.ecp, self.ROWS, after_select),
+                                              sleeper=lambda _: None)
+            controller._drive_to_live_guide = lambda app_id, events: {'state': AppState.LIVE_GUIDE}
+            controller._open_channel_row = lambda *args, **kwargs: {'matched': True, 'channel': 'NBC'}
+            try:
+                return controller.play_sunday_ticket(BEARS)
+            finally:
+                self.operation = controller.operation_status()
+
+    def test_a_blackout_card_fails_the_tune_and_names_the_local_channel(self):
+        with self.assertRaisesRegex(SundayTicketBlackoutError, 'blacked out on Sunday Ticket: it is airing on FOX'):
+            self.play([AppState.SUNDAY_TICKET_BLACKOUT])
+        self.assertEqual(self.operation['phase'], 'error')
+        self.assertEqual(self.operation['error']['code'], 'sunday_ticket_blackout')
+        self.assertEqual(self.operation['error']['details']['local_channel'], 'FOX')
+
+    def test_a_card_that_follows_the_first_playing_frame_is_still_caught(self):
+        with self.assertRaises(SundayTicketBlackoutError):
+            self.play([AppState.FULL_PROGRAM, AppState.SUNDAY_TICKET_BLACKOUT])
+
+    def test_a_playing_game_needs_two_frames(self):
+        result = self.play([AppState.FULL_PROGRAM])
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['game'], 'Chicago Bears at Atlanta Falcons')
+        self.assertEqual(self.ecp.keys.count('Select'), 1)
+        detections = [e for e in result['events'] if e['event'] == 'playback_state_detected']
+        self.assertEqual(len(detections), 2)
+
+    def test_a_new_tune_leaves_the_blackout_card_with_back(self):
+        ecp = FakeEcp()
+        feedback = test_controller.FakeFeedback()
+        feedback.states = [AppState.SUNDAY_TICKET_BLACKOUT, AppState.LIVE_GUIDE]
+        with tempfile.TemporaryDirectory() as directory:
+            controller = RokuStreamController(test_controller.ControllerTests.config(None, Path(directory)),
+                                              ecp=ecp, feedback=feedback, sleeper=lambda _: None)
+            observation = controller._drive_to_live_guide('195316', [])
+        self.assertEqual(observation['state'], AppState.LIVE_GUIDE)
+        self.assertEqual(ecp.keys, ['Back'])
 
 
 class HeaderTextTests(unittest.TestCase):

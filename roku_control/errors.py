@@ -28,6 +28,12 @@ class NavigationError(RokuStreamError):
     code = "navigation_failed"
 
 
+class SundayTicketBlackoutError(NavigationError):
+    """YouTube TV blacked the game out: it airs on a local station instead."""
+
+    code = "sunday_ticket_blackout"
+
+
 class ControlBusyError(RokuStreamError):
     code = "control_busy"
 

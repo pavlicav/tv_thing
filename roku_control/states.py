@@ -12,6 +12,7 @@ class AppState(StrEnum):
     YOUTUBE_TV_LOCATION_VERIFICATION = "youtube_tv_location_verification"
     LIVE_GUIDE = "live_guide"
     FULL_PROGRAM = "full_program"
+    SUNDAY_TICKET_BLACKOUT = "sunday_ticket_blackout"
     CHANNEL_DESCRIPTION = "channel_description"
     JOIN_LIVE_OR_START_FROM_BEGINNING = "join_live_or_start_from_beginning"
     MLB_HOME = "mlb_home"
