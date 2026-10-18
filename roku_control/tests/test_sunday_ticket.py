@@ -58,11 +58,15 @@ class GuideFeedback:
     match_nfl_game = staticmethod(VisualFeedback.match_nfl_game)
 
 
+# The local stations and their guide order on viviserv.
+CHANNELS = [{'name': 'NBC', 'guide_index': 0}, {'name': 'FOX', 'guide_index': 1}, {'name': 'CBS', 'guide_index': 3}]
+
+
 class SundayTicketScanTests(unittest.TestCase):
-    def scan(self, rows, game=BILLS, **options):
+    def scan(self, rows, game=BILLS, channels=None, **options):
         self.ecp = FakeEcp()
         with tempfile.TemporaryDirectory() as directory:
-            controller = RokuStreamController(test_controller.ControllerTests.config(None, Path(directory)),
+            controller = RokuStreamController(test_controller.ControllerTests.config(None, Path(directory), channels),
                                               ecp=self.ecp, feedback=GuideFeedback(self.ecp, rows, **options),
                                               sleeper=lambda _: None)
             controller._open_channel_row = lambda *args, **kwargs: {'matched': True, 'channel': 'NBC'}
@@ -89,10 +93,24 @@ class SundayTicketScanTests(unittest.TestCase):
         with self.assertRaisesRegex(NavigationError, 'has not started'):
             self.scan([row('NBC', channel='NBC'), frame])
 
-    def test_a_calibrated_channel_with_the_same_matchup_is_not_sunday_ticket(self):
+    def test_a_local_station_showing_the_game_is_where_it_plays(self):
+        # Sunday Ticket blacks out a game a local station carries: take the local row.
+        result = self.scan([row('NBC', channel='NBC'), row('Los Angeles Chargers at Buffalo Bills', channel='FOX'),
+                            row('Carolina Panthers at Cleveland Browns'), row('Los Angeles Chargers at Buffalo Bills')])
+        self.assertEqual((result['surface'], result['local_station'], result['row_offset']),
+                         ('local_station_guide_row', 'FOX', 1))
+        self.assertEqual(self.ecp.keys, ['Down'])
+
+    def test_only_the_games_own_network_counts_as_its_local_station(self):
+        game = {**BILLS, 'broadcasts': [{'name': 'CBS', 'market': 'national'}]}
+        result = self.scan([row('NBC', channel='NBC'), row('Los Angeles Chargers at Buffalo Bills', channel='FOX'),
+                            row('Los Angeles Chargers at Buffalo Bills')], game=game, channels=CHANNELS)
+        self.assertEqual((result['surface'], result['row_offset']), ('sunday_ticket_guide_row', 2))
+
+    def test_a_calibrated_row_after_the_sunday_ticket_block_is_not_taken(self):
         with self.assertRaisesRegex(NavigationError, 'not found'):
-            self.scan([row('NBC', channel='NBC'), row('Los Angeles Chargers at Buffalo Bills', channel='FOX'),
-                       row('Carolina Panthers at Cleveland Browns'), row('ESPN', channel='ESPN')])
+            self.scan([row('NBC', channel='NBC'), row('Carolina Panthers at Cleveland Browns'),
+                       row('Los Angeles Chargers at Buffalo Bills', channel='FOX'), row('ESPN', channel='ESPN')])
 
     def test_scan_stops_after_the_sunday_ticket_block(self):
         rows = [row('NBC', channel='NBC'), row('Carolina Panthers at Cleveland Browns'),
@@ -115,7 +133,8 @@ class SundayTicketScanTests(unittest.TestCase):
 
 BEARS = {'game_id': 401872999, 'title': 'Chicago Bears at Atlanta Falcons',
          'away': {'name': 'Chicago Bears', 'nickname': 'Bears'},
-         'home': {'name': 'Atlanta Falcons', 'nickname': 'Falcons'}}
+         'home': {'name': 'Atlanta Falcons', 'nickname': 'Falcons'},
+         'broadcasts': [{'name': 'Fox', 'market': 'national'}]}  # ESPN's spelling on October 18.
 
 
 def fixture(name):
@@ -142,11 +161,16 @@ class BlackoutCardTests(unittest.TestCase):
 
 
 class PlayerFeedback(GuideFeedback):
-    """The guide until Select, then the player screens in `after_select`."""
+    """The guide until Select, then the player screens in `after_select`.
+    `station` is the row shown once the controller opens a channel's row."""
 
     def __init__(self, ecp, rows, after_select):
         super().__init__(ecp, rows)
         self.after_select = list(after_select)
+        self.station = None
+
+    def capture(self):
+        return self.station or super().capture()
 
     def assert_ready(self):
         return {'ready': True}
@@ -158,41 +182,65 @@ class PlayerFeedback(GuideFeedback):
 
 
 class BlackoutPlaybackTests(unittest.TestCase):
-    # The guide on October 18: local FOX carried the game Sunday Ticket blacked out.
-    ROWS = [row('NBC', channel='NBC'), row('Chicago Bears at Atlanta Falcons', channel='FOX'),
+    # The guide on October 18, with OCR missing "Falcons" on local FOX's row, so
+    # the scan reaches the Sunday Ticket row that YouTube TV blacked out.
+    ROWS = [row('NBC', channel='NBC'), row('Chicago Bears at Atlanta', channel='FOX'),
             row('Carolina Panthers at Philadelphia Eagles'), row('Chicago Bears at Atlanta Falcons')]
+    LOCAL_FOX = row('Chicago Bears at Atlanta Falcons', channel='FOX')
 
-    def play(self, after_select):
+    def play(self, after_select, *, rows=ROWS, fox=LOCAL_FOX):
         self.ecp = FakeEcp()
+        feedback = PlayerFeedback(self.ecp, rows, after_select)
+
+        def open_row(channel, events, **kwargs):
+            if channel.name == 'FOX':
+                feedback.station = fox
+            return {'matched': True, 'channel': channel.name}
+
         with tempfile.TemporaryDirectory() as directory:
-            controller = RokuStreamController(test_controller.ControllerTests.config(None, Path(directory)),
-                                              ecp=self.ecp, feedback=PlayerFeedback(self.ecp, self.ROWS, after_select),
-                                              sleeper=lambda _: None)
+            controller = RokuStreamController(test_controller.ControllerTests.config(None, Path(directory), CHANNELS),
+                                              ecp=self.ecp, feedback=feedback, sleeper=lambda _: None)
             controller._drive_to_live_guide = lambda app_id, events: {'state': AppState.LIVE_GUIDE}
-            controller._open_channel_row = lambda *args, **kwargs: {'matched': True, 'channel': 'NBC'}
+            controller._open_channel_row = open_row
             try:
                 return controller.play_sunday_ticket(BEARS)
             finally:
                 self.operation = controller.operation_status()
 
-    def test_a_blackout_card_fails_the_tune_and_names_the_local_channel(self):
-        with self.assertRaisesRegex(SundayTicketBlackoutError, 'blacked out on Sunday Ticket: it is airing on FOX'):
-            self.play([AppState.SUNDAY_TICKET_BLACKOUT])
+    def test_a_blackout_card_plays_the_game_on_the_local_station(self):
+        result = self.play([AppState.SUNDAY_TICKET_BLACKOUT, AppState.FULL_PROGRAM])
+        self.assertTrue(result['ok'])
+        self.assertEqual((result['provider'], result['source'], result['local_station']),
+                         ('youtube_tv', 'FOX (local station)', 'FOX'))
+        self.assertEqual(result['verification']['visible_channel_template']['local_station'], 'FOX')
+        self.assertEqual(self.ecp.keys.count('Select'), 2)
+        self.assertIn('on FOX, the local station', self.operation['message'])
+
+    def test_without_a_station_showing_the_game_the_tune_fails(self):
+        with self.assertRaisesRegex(SundayTicketBlackoutError, 'blacked out on Sunday Ticket, and FOX did not show it'):
+            self.play([AppState.SUNDAY_TICKET_BLACKOUT], fox=row('FOX NFL Kickoff', channel='FOX'))
         self.assertEqual(self.operation['phase'], 'error')
         self.assertEqual(self.operation['error']['code'], 'sunday_ticket_blackout')
-        self.assertEqual(self.operation['error']['details']['local_channel'], 'FOX')
+        self.assertEqual(self.operation['error']['details']['local_stations_tried'], ['FOX'])
+        self.assertEqual(self.ecp.keys.count('Select'), 1)  # Never Select on an unverified row.
 
     def test_a_card_that_follows_the_first_playing_frame_is_still_caught(self):
-        with self.assertRaises(SundayTicketBlackoutError):
-            self.play([AppState.FULL_PROGRAM, AppState.SUNDAY_TICKET_BLACKOUT])
+        result = self.play([AppState.FULL_PROGRAM, AppState.SUNDAY_TICKET_BLACKOUT, AppState.FULL_PROGRAM])
+        self.assertEqual(result['local_station'], 'FOX')
 
     def test_a_playing_game_needs_two_frames(self):
         result = self.play([AppState.FULL_PROGRAM])
-        self.assertTrue(result['ok'])
-        self.assertEqual(result['game'], 'Chicago Bears at Atlanta Falcons')
+        self.assertEqual((result['game'], result['source'], result['local_station']),
+                         ('Chicago Bears at Atlanta Falcons', 'NFL Sunday Ticket', None))
         self.assertEqual(self.ecp.keys.count('Select'), 1)
         detections = [e for e in result['events'] if e['event'] == 'playback_state_detected']
         self.assertEqual(len(detections), 2)
+
+    def test_the_local_row_seen_on_the_way_plays_without_trying_sunday_ticket(self):
+        rows = [row('NBC', channel='NBC'), self.LOCAL_FOX, row('Chicago Bears at Atlanta Falcons')]
+        result = self.play([AppState.FULL_PROGRAM], rows=rows)
+        self.assertEqual(result['local_station'], 'FOX')
+        self.assertEqual(self.ecp.keys, ['Down', 'Select'])
 
     def test_a_new_tune_leaves_the_blackout_card_with_back(self):
         ecp = FakeEcp()
@@ -204,6 +252,19 @@ class BlackoutPlaybackTests(unittest.TestCase):
             observation = controller._drive_to_live_guide('195316', [])
         self.assertEqual(observation['state'], AppState.LIVE_GUIDE)
         self.assertEqual(ecp.keys, ['Back'])
+
+
+class SundayTicketListingTests(unittest.TestCase):
+    def test_a_fox_game_spelled_fox_is_on_sunday_ticket(self):
+        from roku_control.sports import SportsCatalog
+        game = {**BEARS, 'league': 'nfl', 'start_time': '2026-10-18T17:00Z',
+                'away': {**BEARS['away'], 'abbreviation': 'CHI'}, 'home': {**BEARS['home'], 'abbreviation': 'ATL'}}
+        with tempfile.TemporaryDirectory() as directory:
+            catalog = SportsCatalog(test_controller.ControllerTests.config(None, Path(directory), CHANNELS),
+                                    None, scoreboard=object())
+            suggested = catalog._suggest(game)
+        self.assertTrue(suggested['on_sunday_ticket'])
+        self.assertEqual(suggested['channels'], ['FOX'])
 
 
 class HeaderTextTests(unittest.TestCase):

@@ -204,8 +204,14 @@ def test_a_blacked_out_game_is_refused_without_navigating_again(lane):
     assert lane.tune({**body, "force": True})[0] == 202
     settle(lane)
     assert len(lane.controller.plays) == 3
-    lane._wall = lambda: time.time() + roku_lane.BLACKOUT_SECONDS + 1
-    assert lane.tune(dict(body))[0] == 202
+    wall = lane._wall
+    lane._wall = lambda: wall() + roku_lane.BLACKOUT_SECONDS + 1
+    assert lane.tune(dict(body))[0] == 202  # Expired: the market may have moved.
+    settle(lane)
+    lane.controller.play_sunday_ticket = lambda game: lane.controller._play(game["title"], "sunday_ticket")
+    assert lane.tune({**body, "force": True})[0] == 202
+    assert settle(lane)["state"] == "succeeded"
+    assert lane._blackout(lane.normalize(dict(body))[0]) is None  # A success forgets the failure.
 
 
 def test_a_failed_check_navigates(lane):

@@ -52,10 +52,12 @@ GAME_LEAGUES = {MLB: "mlb", THURSDAY_NIGHT_FOOTBALL: "nfl", SUNDAY_TICKET: "nfl"
 # How long the Roku can take to reach a target and verify it: YouTube TV
 # took 39-124 s and Sunday Ticket 93-205 s when measured on 2026-10-06.
 NAVIGATION_SECONDS = 210
-# A game Sunday Ticket blacked out stays blacked out for its broadcast: its
-# local station carries it. A repeat is refused at once (force navigates);
-# vizelVision retries a Sunday Ticket game 10 times, ~2 min of Roku each.
-BLACKOUT_SECONDS = 4 * 3600
+# A Sunday Ticket game normally plays from its local station's row when it is
+# blacked out. Only when no station showing it was found is the failure
+# remembered: a repeat is refused at once (force navigates), since vizelVision
+# retries a Sunday Ticket game 10 times, ~2.5 min of Roku each. Short, because
+# YouTube TV's market (and so the blackout) can change.
+BLACKOUT_SECONDS = 30 * 60
 
 # What the on-screen remote may send. Power and volume are left out: the
 # source Roku's HDMI goes to the capture card, not a television.
@@ -287,6 +289,7 @@ class RokuLane:
             self._finish(operation, "failed", str(exc), code=getattr(exc, "code", "navigation_failed"))
         else:
             with self._lock:
+                self._blackouts.pop(self._key(target), None)
                 if self.operation is operation:
                     self.selection = selection
                     self._changed()

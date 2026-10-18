@@ -126,10 +126,15 @@ refreshed in the background), `generation` and `reuse_max_age_seconds`.
   `state` is `succeeded`, `failed` or `cancelled`. Options: `force: true`
   always navigates; `navigate: false` never does, answering **409**
   `not_prepared` instead; `resume: false` skips the still-playing check.
-  A Sunday Ticket game that showed YouTube TV's blackout card ("airing on
-  your local station") fails its operation with `sunday_ticket_blackout`;
-  for the next 4 hours a tune of it answers **409** `sunday_ticket_blackout`
-  at once, naming the local channel, unless `force: true`.
+  A Sunday Ticket game plays from wherever it is watchable: when a local
+  station's guide row names both teams (Sunday Ticket blacks those games
+  out), or after YouTube TV shows its blackout card ("airing on your local
+  station"), the Roku plays the local station instead. The selection stays
+  the requested game, with `resolved_source` `{"provider": "youtube_tv",
+  "label": "FOX (local station)"}`. Only when no station showing it is found
+  does the operation fail with `sunday_ticket_blackout`; for the next 30
+  minutes a tune of it then answers **409** `sunday_ticket_blackout` at once,
+  unless `force: true`.
 * **Generation**: `stream.generation` is `<capture id>.<serial>`. It changes
   when a navigation starts, when the remote moves the Roku, and when the
   capture restarts. A holder of the roku lane must fail closed when it

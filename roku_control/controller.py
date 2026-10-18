@@ -11,8 +11,8 @@ from typing import Callable
 from .baseball import team_ocr_names
 from .config import AppConfig, ChannelConfig, normalize_channel_name
 from .ecp import EcpClient, RokuApp, discover_roku
-from .errors import (ControlBusyError, CueCancelledError, EcpError, NavigationError, RokuNotReadyError,
-                     SundayTicketBlackoutError)
+from .errors import (ChannelNotFoundError, ControlBusyError, CueCancelledError, EcpError, NavigationError,
+                     RokuNotReadyError, SundayTicketBlackoutError)
 from .feedback import PpmFrame, VisualFeedback
 from .states import AppState
 from .operations import EventLog, OperationStore
@@ -1665,12 +1665,10 @@ class RokuStreamController:
                 try:
                     player = self._wait_for_playback(app_id, events, confirmations=2 if sunday_ticket else 1)
                 except SundayTicketBlackoutError as exc:
-                    local = verification.get("local_channel") if sunday_ticket else None
-                    raise SundayTicketBlackoutError(
-                        f"{label} is blacked out on Sunday Ticket: it is airing on "
-                        + (f"{local}. Choose {local} under YouTube TV instead" if local else "your local station"),
-                        details={**exc.details, "local_channel": local},
-                    ) from exc
+                    if sunday_ticket is None or verification.get("surface") != "sunday_ticket_guide_row":
+                        raise
+                    verification, player = self._play_local_station(app_id, sunday_ticket, verification, events, exc)
+                station = verification.get("local_station") if sunday_ticket else None
                 completed = datetime.now(timezone.utc)
                 result = {
                     "ok": True,
@@ -1691,7 +1689,9 @@ class RokuStreamController:
                 }
                 if sunday_ticket is not None:
                     result.update({"game_id": sunday_ticket.get("game_id"), "game": sunday_ticket.get("title"),
-                                   "provider": "sunday_ticket", "source": "NFL Sunday Ticket"})
+                                   "provider": "youtube_tv" if station else "sunday_ticket",
+                                   "source": f"{station} (local station)" if station else "NFL Sunday Ticket",
+                                   "local_station": station})
                 if baseball_game is not None:
                     result.update(
                         {
@@ -1733,12 +1733,14 @@ class RokuStreamController:
                 active=False,
                 phase="complete",
                 app_state=AppState.FULL_PROGRAM,
-                message=f"{label} was selected; Roku reported playback",
+                message=(f"{label} is playing on {station}, the local station that carries it" if station
+                         else f"{label} was selected; Roku reported playback"),
                 completed_at=completed.isoformat(),
                 result=result,
             )
             if sunday_ticket is not None:
-                self._set_on_air({"type": "sunday_ticket", "channel": label, "provider": "sunday_ticket",
+                self._set_on_air({"type": "sunday_ticket", "channel": label,
+                                  "provider": "youtube_tv" if station else "sunday_ticket", "local_station": station,
                                   "game_id": sunday_ticket.get("game_id"), "title": sunday_ticket.get("title")})
             elif baseball_game is None:
                 self._set_on_air(
@@ -2486,14 +2488,17 @@ class RokuStreamController:
         *,
         guide_observation: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        """Verify the top guide row, then read each row below it until the game's
-        Sunday Ticket row is found in two fresh observations. A calibrated row
-        naming both teams is the local station Sunday Ticket blacks out for."""
+        """Verify the top guide row, then read each row below it until the game
+        is found in two fresh observations: on its Sunday Ticket row, or on a
+        local station's row above them. Sunday Ticket blacks out a game a local
+        station in YouTube TV's market carries, and that market moves between
+        DC and Lansing, so the local row, when it names both teams, wins."""
         if self.feedback is None or getattr(self.feedback, "ocr", None) is None:
             raise NavigationError("Sunday Ticket selection needs the direct capture and local OCR")
         anchor_verification = self._open_channel_row(anchor, events, guide_observation=guide_observation)
         nav = self.config.navigation
         title = str(game.get("title"))
+        networks = self._game_channels(game)
         seen_ticket = False
         local_channel = None
         limit = len(self.config.channels) + 40  # Every configured row plus a full Sunday slate.
@@ -2507,16 +2512,26 @@ class RokuStreamController:
             events.append({"event": "sunday_ticket_row", "step": step,
                            **{k: v for k, v in observation.items() if k != "row" or v}})
             seen_ticket = seen_ticket or observation["strong_sunday_ticket"]
-            if local_channel is None and observation["calibrated_channel"] and all(observation["teams"].values()):
-                local_channel = observation["calibrated_channel"]
-            if seen_ticket and observation["calibrated_channel"]:
+            calibrated = observation["calibrated_channel"]
+            if local_channel is None and calibrated and all(observation["teams"].values()):
+                local_channel = calibrated
+            if seen_ticket and calibrated:
                 break  # Past the block of temporary Sunday Ticket rows.
-            if not observation["matched"]:
+            # Only the game's own network: a talk show naming both teams elsewhere is not it.
+            local = self._shows_game_live(observation, calibrated) and (not networks or calibrated in networks)
+            if not (observation["matched"] or local):
                 continue
             self._sleep(nav.key_delay_seconds)
             confirmation = self._observe_sunday_ticket_row(game)
             events.append({"event": "sunday_ticket_confirm", "step": step,
                            **{k: v for k, v in confirmation.items() if k != "row" or v}})
+            if local:
+                if not self._shows_game_live(confirmation, calibrated):
+                    continue
+                events.append({"event": "sunday_ticket_local_station", "channel": calibrated, "step": step})
+                return {"matched": True, "surface": "local_station_guide_row", "local_station": calibrated,
+                        "anchor": anchor_verification, "row_offset": step,
+                        "observations": [observation, confirmation], "local_channel": calibrated}
             if not confirmation["matched"]:
                 continue
             if observation["upcoming"] or confirmation["upcoming"]:
@@ -2529,6 +2544,72 @@ class RokuStreamController:
         raise NavigationError(
             f"{title} was not found among YouTube TV's Sunday Ticket guide rows",
             details={"rows_read": step, "sunday_ticket_rows_seen": seen_ticket})
+
+    @staticmethod
+    def _shows_game_live(observation: dict[str, object], channel: str | None) -> bool:
+        """Whether a guide observation is `channel`'s row playing the game now."""
+        return (bool(channel) and observation["calibrated_channel"] == channel
+                and all(observation["teams"].values()) and not observation["upcoming"])
+
+    def _game_channels(self, game: dict[str, object]) -> list[str]:
+        """The configured channels a game's broadcasts name (ESPN writes FOX as "Fox")."""
+        channels: list[str] = []
+        for broadcast in game.get("broadcasts") or []:
+            try:
+                name = self.config.resolve_channel(str((broadcast or {}).get("name")))[1].name
+            except ChannelNotFoundError:
+                continue
+            if name not in channels:
+                channels.append(name)
+        return channels
+
+    def _play_local_station(
+        self,
+        app_id: str,
+        game: dict[str, object],
+        ticket_row: dict[str, object],
+        events: list[dict[str, object]],
+        blackout: SundayTicketBlackoutError,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        """Sunday Ticket showed its blackout card: play the game where it is
+        watchable, the local station carrying it. The station the scan saw comes
+        first, then the game's networks; each row must name both teams in two
+        frames before Select."""
+        title = str(game.get("title"))
+        nav = self.config.navigation
+        tried: list[str] = []
+        for name in dict.fromkeys(filter(None, [ticket_row.get("local_channel"), *self._game_channels(game)])):
+            try:
+                _, channel = self.config.resolve_channel(str(name))
+            except ChannelNotFoundError:
+                continue
+            tried.append(channel.name)
+            self._publish_operation(phase="finding_local_station", app_state=None,
+                                    message=f"{title} is blacked out on Sunday Ticket; looking for it on {channel.name}")
+            events.append({"event": "sunday_ticket_blackout_fallback", "channel": channel.name})
+            guide_observation = self._drive_to_live_guide(app_id, events)
+            row = self._open_channel_row(channel, events, guide_observation=guide_observation)
+            observations = []
+            for _ in range(2):
+                self._sleep(nav.key_delay_seconds)
+                observations.append(self._observe_sunday_ticket_row(game))
+            events.append({"event": "local_station_row", "channel": channel.name,
+                           "observations": [{k: v for k, v in o.items() if k != "row" or v} for o in observations]})
+            if not all(self._shows_game_live(o, channel.name) for o in observations):
+                continue
+            self._publish_operation(phase="starting_playback", app_state=AppState.LIVE_GUIDE,
+                                    message=f"Starting {title} on {channel.name}, the local station")
+            self.ecp.keypress("Select")
+            events.append({"event": "keypress", "key": "Select", "action": "play_local_station"})
+            self._sleep(nav.play_settle_seconds)
+            player = self._wait_for_playback(app_id, events, confirmations=2)
+            return {**(row or {}), "matched": True, "surface": "local_station_guide_row",
+                    "local_station": channel.name, "observations": observations,
+                    "sunday_ticket_blackout": blackout.details.get("observation")}, player
+        raise SundayTicketBlackoutError(
+            f"{title} is blacked out on Sunday Ticket, and "
+            + (f"{' and '.join(tried)} did not show it" if tried else "no local station showing it was found"),
+            details={**blackout.details, "local_stations_tried": tried})
 
     def play_baseball_game(
         self,
