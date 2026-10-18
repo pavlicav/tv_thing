@@ -2,10 +2,25 @@
 
 All repository changes must pass the fast local test suite before deployment.
 
-Any change that can affect tuning, FFmpeg, HLS, the browser/Roku player,
-process supervision, hardware access, or the systemd service must also pass the
-real-stream resource gate on `viviserv` before production files or services are
-changed:
+Changes to the core stream stack must also pass the real-stream resource gate
+on `viviserv` before production files or services are changed. The core stream
+stack is:
+
+- FFmpeg: every invocation and its arguments (live packagers, the recorder, the
+  HD PVR capture copy, the Roku verifier's frame decoder), encoder selection,
+  and thread or resource limits;
+- HLS output: playlists, segments, and the streams directory;
+- the digital and analog tuners and capture hardware access (`dvb_source.py`,
+  `tuner.py`, `analog_tuner.py`, the HD PVR device);
+- process supervision (spawning, restarting, reaping, watchdogs) and the
+  systemd unit.
+
+Roku tuning (navigating YouTube TV, Sunday Ticket, MLB, or Prime Video: screen
+recognition, OCR, key sequences, and the lane's selection logic) and UI changes
+(`static/`, `roku_app/`) do not need the gate; the fast suite is enough. A
+change that also touches the core stream stack is gated.
+
+The gate:
 
 1. Keep `tv-thing.service` stopped.
 2. Copy the candidate into a separate staging directory.

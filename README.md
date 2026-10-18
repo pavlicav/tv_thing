@@ -796,4 +796,5 @@ Additional fast checks: `node --test test_tunable_channels.cjs test_live_player.
 and `node test_tunable_browser.cjs /path/to/playwright`. The browser check mocks
 source APIs and covers both URL layouts, combined search, source routing,
 station playback, declined locks, delayed retunes, keyboard focus and mobile
-layout. Live deployment still requires the resource gate in `AGENTS.md`.
+layout. UI-only changes need just these checks and the fast suite; changes to
+the core stream stack still need the resource gate in `AGENTS.md`.
