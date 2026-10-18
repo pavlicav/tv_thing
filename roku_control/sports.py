@@ -284,7 +284,8 @@ class SportsCatalog:
         # Sunday Ticket carries the Sunday-afternoon CBS and FOX games, never a national
         # exclusive (NFL Network, ESPN, NBC at night): on 2026-10-04 Colts at Commanders, on
         # NFL Network, was picked from its listing and looked for there in vain.
-        networks = {NETWORK_ALIASES.get(str(b['name']).upper(), b['name']) for b in game['broadcasts']}
+        # Upper case: ESPN has written FOX as "Fox" (2026-10-18), which hid every FOX game.
+        networks = {NETWORK_ALIASES.get(str(b['name']).upper(), str(b['name'])).upper() for b in game['broadcasts']}
         on_ticket = bool(game['league'] == 'nfl' and start and start.weekday() == 6 and start.hour < 19
                          and (not networks or networks & {'CBS', 'FOX'}))
         ticket = {'source_id': 'sunday-ticket', 'channel_id': str(game['game_id']),
