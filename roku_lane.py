@@ -50,8 +50,9 @@ SOURCES = {
 GAME_SOURCES = (MLB, THURSDAY_NIGHT_FOOTBALL, SUNDAY_TICKET)
 # Games the lineup numbers and the guide lists, though the Roku cannot be sent
 # to them yet, so they are in no source list and refused by tune(): the NHL
-# games ESPN Unlimited streams inside YouTube TV. Finding one on the Roku (the
-# live guide's event rows, or the ESPN page's NHL shelf) is still to be built.
+# games ESPN Unlimited streams inside YouTube TV. Finding one on the Roku is
+# still to be built: on 2026-10-19 they were on the ESPN page (its live-guide
+# logo), under Live, in one On Now row, two ESPN+ cards a game (away, home).
 LISTED_SOURCES = {NHL: ("NHL on ESPN Unlimited", "games")}
 # The league each game source lists, for how long its games usually run.
 GAME_LEAGUES = {MLB: "mlb", THURSDAY_NIGHT_FOOTBALL: "nfl", SUNDAY_TICKET: "nfl", NHL: "nhl"}
