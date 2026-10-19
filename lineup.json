@@ -206,7 +206,7 @@
     {"number": 274, "source": "digital", "channel": "49.2", "note": "HSN2"},
     {"number": 275, "source": "digital", "channel": "31.2", "note": "Shop LC"},
     {"number": 276, "source": "digital", "channel": "49.6", "note": "Shop LC"},
-    {"number": 280, "source": "youtube-tv", "channel": "SOUL"},
+    {"number": 280, "source": "youtube-tv", "channel": "SOUL", "name": "FOX SOUL"},
     {"number": 281, "source": "digital", "channel": "49.4", "note": "NTD TV"},
     {"number": 282, "source": "digital", "channel": "49.5", "note": "SonLife"},
     {"number": 283, "source": "digital", "channel": "48.12", "note": "EMLW"},
