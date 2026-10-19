@@ -890,10 +890,11 @@ and tapes the same channel.
 
 The About page offers the lineup as a printable card,
 `static/lineup-card.pdf`, typeset in LaTeX from
-[`lineup_card.tex`](lineup_card.tex). It is a snapshot, so rebuild it after
+[`lineup_card.tex`](lineup_card.tex), and a print version on white paper,
+`static/lineup-card-print.pdf`. They are snapshots, so rebuild them after
 changing `lineup.json` or when a rescan adds channels:
 `python3 lineup_card.py` reads `/api/v1/lineup` from the running server
-(`--json` takes a saved copy instead) and needs
+(`--json` takes a saved copy instead), writes both, and needs
 [Tectonic](https://tectonic-typesetting.github.io). The day's games are left
 off; each games block carries a note in their place.
 

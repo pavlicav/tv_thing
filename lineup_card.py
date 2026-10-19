@@ -2,15 +2,17 @@
 
 Reads the numbered lineup from a running server (``GET /api/v1/lineup``) or a
 saved copy of that response, typesets it with ``lineup_card.tex`` and writes
-``static/lineup-card.pdf``, which the About page offers for download. The
-day's games are left off -- their numbers change every morning -- and each
-games block prints a note in their place.
+two PDFs the About page offers for download: ``static/lineup-card.pdf`` on
+cream card stock, and ``static/lineup-card-print.pdf`` on white paper, which
+spares a printer the full-page background. The day's games are left off --
+their numbers change every morning -- and each games block prints a note in
+their place.
 
 Needs Tectonic (https://tectonic-typesetting.github.io), a self-contained
 XeTeX that fetches the packages and fonts it needs on first use.
 
     python3 lineup_card.py                          # from http://127.0.0.1:8080
-    python3 lineup_card.py --json lineup.json --out /tmp/card.pdf
+    python3 lineup_card.py --json lineup.json --out-dir /tmp/cards
 """
 from __future__ import annotations
 
@@ -29,7 +31,9 @@ import roku_lane
 
 BASE_DIR = Path(__file__).parent
 TEMPLATE = BASE_DIR / "lineup_card.tex"
-DEFAULT_OUT = BASE_DIR / "static" / "lineup-card.pdf"
+DEFAULT_OUT_DIR = BASE_DIR / "static"
+# The file each version is written to, by whether it is on card stock.
+CARDS = {True: "lineup-card.pdf", False: "lineup-card-print.pdf"}
 DEFAULT_URL = "http://127.0.0.1:8080"
 TECTONIC_TIMEOUT = 600      # the first build downloads TeX Live's pieces
 
@@ -94,9 +98,10 @@ def _games_note(sources, section_name):
     return f"{which}, numbered each morning by start time."
 
 
-def channels_tex(payload, effective):
+def channels_tex(payload, effective, cardstock=True):
     """channels.tex: the effective date and the blocks, for lineup_card.tex."""
     lines = [
+        *([] if cardstock else ["\\cardstockfalse"]),
         f"\\newcommand\\EffectiveDay{{{effective.strftime('%b').upper()} {effective.day}}}",
         f"\\newcommand\\EffectiveYear{{{effective.year}}}",
         "\\newcommand\\Channels{%",
@@ -125,13 +130,13 @@ def find_tectonic():
     return str(local) if local.exists() else None
 
 
-def build(payload, out_path, effective, tectonic):
+def build(payload, out_path, effective, tectonic, cardstock=True):
     """Typeset the card and put the PDF at out_path (replaced atomically)."""
     out_path = Path(out_path)
     with tempfile.TemporaryDirectory(prefix="lineup-card-") as work:
         work = Path(work)
         shutil.copy(TEMPLATE, work / "card.tex")
-        (work / "channels.tex").write_text(channels_tex(payload, effective))
+        (work / "channels.tex").write_text(channels_tex(payload, effective, cardstock))
         result = subprocess.run(
             [tectonic, "--chatter", "minimal", "card.tex"], cwd=work,
             capture_output=True, text=True, timeout=TECTONIC_TIMEOUT)
@@ -149,8 +154,8 @@ def main(argv=None):
     source.add_argument("--url", default=DEFAULT_URL,
                         help="TV Thing server to read /api/v1/lineup from (default %(default)s)")
     source.add_argument("--json", type=Path, help="a saved /api/v1/lineup response instead")
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT,
-                        help="where to write the PDF (default static/lineup-card.pdf)")
+    parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR,
+                        help="where to write both PDFs (default static/)")
     parser.add_argument("--date", type=datetime.date.fromisoformat,
                         help="the effective date printed on the card (default today)")
     args = parser.parse_args(argv)
@@ -165,8 +170,9 @@ def main(argv=None):
     tectonic = find_tectonic()
     if tectonic is None:
         parser.error("tectonic is not installed (https://tectonic-typesetting.github.io)")
-    out = build(payload, args.out, args.date or datetime.date.today(), tectonic)
-    print(out)
+    effective = args.date or datetime.date.today()
+    for cardstock, name in CARDS.items():
+        print(build(payload, args.out_dir / name, effective, tectonic, cardstock))
 
 
 if __name__ == "__main__":

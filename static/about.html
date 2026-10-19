@@ -40,9 +40,8 @@
       display: flex; align-items: center; gap: 16px;
       margin: 28px 0 0; padding: 16px 18px 16px 16px;
       border: 1px solid var(--accent-line); border-radius: 10px;
-      background: var(--accent-soft); color: var(--text); text-decoration: none;
+      background: var(--accent-soft);
     }
-    .lineup-dl:hover { border-color: var(--accent); }
     /* The printed card's rust, orange and mustard stripe, stood on end. */
     .lineup-dl-stripe {
       flex-shrink: 0; align-self: stretch; width: 12px; border-radius: 2px;
@@ -50,12 +49,18 @@
                   #db7525 35% 65%, transparent 65% 70%, #dca42e 70%);
     }
     .lineup-dl-text { flex: 1; min-width: 0; }
-    .lineup-dl-text strong { display: block; font-size: 14px; }
+    .lineup-dl-text strong { display: block; color: var(--accent); font-size: 14px; }
     .lineup-dl-text span { display: block; margin-top: 4px; color: var(--text-dim); font-size: 12px; line-height: 1.55; }
-    .lineup-dl-action {
-      flex-shrink: 0; padding: 8px 13px; border-radius: var(--r-md);
+    .lineup-dl-actions { display: flex; flex-shrink: 0; gap: 8px; }
+    /* Two classes deep, to outrank app.css's .page a. */
+    .lineup-dl .lineup-dl-action {
+      padding: 8px 13px; border: 1px solid var(--accent); border-radius: var(--r-md);
       background: var(--accent); color: var(--bg); font-size: 12px; font-weight: 700;
+      text-decoration: none; white-space: nowrap;
     }
+    .lineup-dl .lineup-dl-action:hover { filter: brightness(1.1); }
+    .lineup-dl .lineup-dl-action.secondary { background: transparent; color: var(--accent); }
+    .lineup-dl .lineup-dl-action.secondary:hover { background: var(--accent-soft); filter: none; }
     .note { margin-top: 14px; padding: 18px 20px; border-left: 2px solid var(--accent); background: var(--surface); }
     .note strong { display: block; margin-bottom: 5px; font-size: 13px; }
     .note span { color: var(--text-mute); font-size: 12px; line-height: 1.55; }
@@ -63,8 +68,9 @@
       .flow { grid-template-columns: 1fr; }
       .flow-step { min-height: 0; }
       .grid { grid-template-columns: 1fr; }
-      .lineup-dl { flex-wrap: wrap; }
+      .lineup-dl { flex-direction: column; align-items: stretch; gap: 14px; }
       .lineup-dl-stripe { display: none; }
+      .lineup-dl-actions .lineup-dl-action { flex: 1; text-align: center; }
     }
   </style>
 </head>
@@ -95,15 +101,19 @@
       timestamp or encoder failure from running away with the machine.
     </p>
 
-    <a class="lineup-dl" href="lineup-card.pdf" download="TV Thing channel lineup.pdf">
+    <section class="lineup-dl" aria-label="Channel lineup card">
       <span class="lineup-dl-stripe" aria-hidden="true"></span>
       <span class="lineup-dl-text">
         <strong>Channel lineup card</strong>
-        <span>Every TV Thing channel number on one printable page, typeset in
-          LaTeX like a cable company's lineup card from the seventies. US Letter.</span>
+        <span>Every TV Thing channel number on one US Letter page, typeset in
+          LaTeX like a cable company's lineup card from the seventies. The print
+          version leaves off the cream card stock to save ink.</span>
       </span>
-      <span class="lineup-dl-action">Download PDF</span>
-    </a>
+      <span class="lineup-dl-actions">
+        <a class="lineup-dl-action" href="lineup-card.pdf" download="TV Thing channel lineup.pdf">Download PDF</a>
+        <a class="lineup-dl-action secondary" href="lineup-card-print.pdf" download="TV Thing channel lineup (print).pdf">Print version</a>
+      </span>
+    </section>
 
     <section class="flow" aria-label="Broadcast processing path">
       <div class="flow-step"><div class="flow-num">01</div><div class="flow-name">ATSC tuner</div><div class="flow-sub">Linux DVB frontend locks the requested RF channel.</div></div>

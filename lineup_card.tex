@@ -3,7 +3,9 @@
 % stripe, and a second colour a hair out of register.
 %
 % lineup_card.py writes channels.tex (the effective date and every block of
-% channels) next to this file and builds it with Tectonic (XeTeX).
+% channels) next to this file and builds it with Tectonic (XeTeX). For the
+% print version it also sets \cardstockfalse: white paper, ink only where
+% there is type, a stripe or a rule.
 \documentclass[10pt]{article}
 \usepackage[letterpaper, hmargin=0.72in, top=0.56in, bottom=0.52in]{geometry}
 \usepackage{fontspec}
@@ -35,9 +37,12 @@
 
 % -- the card stock -----------------------------------------------------------
 % Darker toward the edges, flecked, and framed by a rounded double rule.
+\newif\ifcardstock
+\cardstocktrue
 \AddToShipoutPictureBG{\AtPageLowerLeft{%
   \begin{tikzpicture}[x=1pt, y=1pt]
     \useasboundingbox (0,0) rectangle (\paperwidth, \paperheight);
+    \ifcardstock
     % Solid fills only: xdvipdfmx loses both the opacity and the shadings
     % that pgf puts in a shipout picture. The darkening is nested ellipses.
     \fill[paperedge] (0, 0) rectangle (\paperwidth, \paperheight);
@@ -51,6 +56,7 @@
       \fill[paperedge!55!ink]
         ({rnd*\paperwidth}, {rnd*\paperheight}) circle ({0.12 + 0.3*rnd});
     }
+    \fi
     \draw[rust, line width=1.6pt, rounded corners=14pt]
       (0.3in, 0.3in) rectangle (\paperwidth - 0.3in, \paperheight - 0.3in);
     \draw[rust, line width=0.5pt, rounded corners=11pt]

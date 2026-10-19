@@ -70,6 +70,7 @@ def test_channels_tex_escapes_names_and_dates_the_card():
     tex = lineup_card.channels_tex(PAYLOAD, datetime.date(2026, 10, 19))
     assert r"\newcommand\EffectiveDay{OCT 19}" in tex
     assert r"\newcommand\EffectiveYear{2026}" in tex
+    assert r"\cardstockfalse" not in tex
     assert r"\block{House channel}{0 · 70}" in tex
     assert r"\block{Football}{60–69 · 71–79}" in tex
     assert r"\block{Shopping \& more}{270–279}" in tex
@@ -81,21 +82,28 @@ def test_channels_tex_escapes_names_and_dates_the_card():
     assert "\\games{The day's games, numbered each morning by start time.}" in tex
 
 
+def test_the_print_version_is_on_white_paper():
+    tex = lineup_card.channels_tex(PAYLOAD, datetime.date(2026, 10, 19), cardstock=False)
+    assert tex.startswith("\\cardstockfalse\n")
+
+
 def test_tex_escape_covers_every_special_character():
     assert lineup_card.tex_escape(r"a\b&c%d$e#f_g{h}i~j^k") == (
         r"a\textbackslash{}b\&c\%d\$e\#f\_g\{h\}i\textasciitilde{}j\textasciicircum{}k")
 
 
-def test_about_page_offers_the_card_it_ships():
+def test_about_page_offers_both_cards_it_ships():
     about = (ROOT / "static" / "about.html").read_text()
-    assert 'href="lineup-card.pdf" download' in about
-    assert (ROOT / "static" / "lineup-card.pdf").read_bytes().startswith(b"%PDF-")
+    for name in lineup_card.CARDS.values():
+        assert f'href="{name}" download' in about
+        assert (ROOT / "static" / name).read_bytes().startswith(b"%PDF-")
 
 
 @pytest.mark.skipif(lineup_card.find_tectonic() is None or shutil.which("pdfinfo") is None,
                     reason="needs tectonic and pdfinfo")
-def test_the_card_typesets_onto_one_page(tmp_path):
+@pytest.mark.parametrize("cardstock", [True, False])
+def test_the_card_typesets_onto_one_page(tmp_path, cardstock):
     out = lineup_card.build(PAYLOAD, tmp_path / "card.pdf", datetime.date(2026, 10, 19),
-                            lineup_card.find_tectonic())
+                            lineup_card.find_tectonic(), cardstock)
     info = subprocess.run(["pdfinfo", str(out)], capture_output=True, text=True, check=True).stdout
     assert "Pages:           1" in info
