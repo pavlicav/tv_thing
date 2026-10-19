@@ -1,0 +1,191 @@
+% TV Thing's channel lineup, printed like a cable company's lineup card from
+% the late seventies: cream card stock, brown ink, an orange-and-mustard
+% stripe, and a second colour a hair out of register.
+%
+% lineup_card.py writes channels.tex (the effective date and every block of
+% channels) next to this file and builds it with Tectonic (XeTeX).
+\documentclass[10pt]{article}
+\usepackage[letterpaper, hmargin=0.72in, top=0.56in, bottom=0.52in]{geometry}
+\usepackage{fontspec}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{eso-pic}
+\usepackage{multicol}
+
+% Bookman for the listings, Avant Garde for the display type, and a
+% typewriter for the fine print: TeX Gyre's versions of the three.
+\setmainfont{texgyrebonum}[Extension=.otf, UprightFont=*-regular,
+  BoldFont=*-bold, ItalicFont=*-italic, BoldItalicFont=*-bolditalic]
+\newfontfamily\gothic{texgyreadventor}[Extension=.otf, UprightFont=*-regular,
+  BoldFont=*-bold, ItalicFont=*-italic, BoldItalicFont=*-bolditalic]
+\newfontfamily\typewriter{texgyrecursor}[Extension=.otf, UprightFont=*-regular,
+  BoldFont=*-bold]
+
+\definecolor{paper}{HTML}{F1E4C6}
+\definecolor{paperedge}{HTML}{DCC69A}
+\definecolor{ink}{HTML}{3B2417}
+\definecolor{rust}{HTML}{B5441C}
+\definecolor{orange}{HTML}{DB7525}
+\definecolor{mustard}{HTML}{DCA42E}
+
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+\color{ink}
+
+% -- the card stock -----------------------------------------------------------
+% Darker toward the edges, flecked, and framed by a rounded double rule.
+\AddToShipoutPictureBG{\AtPageLowerLeft{%
+  \begin{tikzpicture}[x=1pt, y=1pt]
+    \useasboundingbox (0,0) rectangle (\paperwidth, \paperheight);
+    % Solid fills only: xdvipdfmx loses both the opacity and the shadings
+    % that pgf puts in a shipout picture. The darkening is nested ellipses.
+    \fill[paperedge] (0, 0) rectangle (\paperwidth, \paperheight);
+    \foreach \i in {0,...,40} {
+      \pgfmathtruncatemacro\edge{100 - 2.5*\i}
+      \fill[paperedge!\edge!paper] (0.5\paperwidth, 0.5\paperheight)
+        ellipse ({(0.78 - 0.011*\i)*\paperwidth} and {(0.72 - 0.0105*\i)*\paperheight});
+    }
+    \pgfmathsetseed{1977}
+    \foreach \i in {1,...,1400} {
+      \fill[paperedge!55!ink]
+        ({rnd*\paperwidth}, {rnd*\paperheight}) circle ({0.12 + 0.3*rnd});
+    }
+    \draw[rust, line width=1.6pt, rounded corners=14pt]
+      (0.3in, 0.3in) rectangle (\paperwidth - 0.3in, \paperheight - 0.3in);
+    \draw[rust, line width=0.5pt, rounded corners=11pt]
+      (0.36in, 0.36in) rectangle (\paperwidth - 0.36in, \paperheight - 0.36in);
+  \end{tikzpicture}}}
+
+% -- pieces -------------------------------------------------------------------
+\newcommand\stripes[1][\linewidth]{%
+  \begin{tikzpicture}[x=1pt, y=1pt]
+    \fill[rust]    (0, 9) rectangle (#1, 13);
+    \fill[orange]  (0, 4.5) rectangle (#1, 8.5);
+    \fill[mustard] (0, 0) rectangle (#1, 4);
+  \end{tikzpicture}}
+
+% Two colour passes, the second slightly off register.
+\newcommand\misprint[3]{%
+  \tikz[baseline=(t.base)]{%
+    \node[inner sep=0, text=#2] at (0.9pt, -0.7pt) {#1};
+    \node[inner sep=0, text=#3] (t) at (0, 0) {#1};}}
+
+\newcommand\televisionset{%
+  \begin{tikzpicture}[x=0.84pt, y=0.84pt, line width=1.2pt, draw=ink, line join=round]
+    \draw (40, 62) -- (16, 96);  \fill[ink] (16, 96) circle (2.3);
+    \draw (46, 62) -- (78, 92);  \fill[ink] (78, 92) circle (2.3);
+    \filldraw[fill=ink] (43, 64) ellipse (9 and 4);
+    \draw (12, 0) -- (7, -11);  \draw (78, 0) -- (83, -11);
+    \filldraw[fill=rust, rounded corners=6pt] (0, 0) rectangle (90, 62);
+    \filldraw[fill=mustard!35!paper, rounded corners=9pt] (7, 7) rectangle (64, 55);
+    \draw[paper, line width=1.6pt, line cap=round] (14, 38) arc (180:115:14);
+    \foreach \y in {14, 21, 28} \draw[line width=0.7pt] (70, \y) -- (84, \y);
+    \filldraw[fill=mustard] (77, 46) circle (5);
+    \draw[line width=0.8pt] (77, 46) -- ++(60:4.2);
+    \filldraw[fill=mustard] (77, 35) circle (3);
+    \node[text=rust] at (35.5, 31) {\gothic\bfseries\fontsize{18}{18}\selectfont TV};
+  \end{tikzpicture}}
+
+\newcommand\effectivebadge{%
+  \begin{tikzpicture}[x=0.86pt, y=0.86pt, rotate=-9]
+    \foreach \a in {0, 15, ..., 345}
+      \fill[mustard] (\a:39) -- (\a + 7.5:47) -- (\a + 15:39) -- cycle;
+    \fill[mustard] (0, 0) circle (39.5);
+    \fill[rust] (0, 0) circle (36);
+    \draw[paper, line width=0.6pt] (0, 0) circle (32.5);
+    \node[text=paper, align=center, rotate=-9, font=\gothic\bfseries] {%
+      {\fontsize{6.2}{7}\selectfont EFFECTIVE}\\[1pt]
+      {\fontsize{12}{12.5}\selectfont\EffectiveDay}\\[1pt]
+      {\fontsize{8}{9}\selectfont\EffectiveYear}};
+  \end{tikzpicture}}
+
+% -- the listings ---------------------------------------------------------------
+\newcommand\listingsize{\fontsize{8.1}{8.85}\selectfont}
+
+% \block{name}{numbers}: a reversed-out heading bar over its channels. A
+% long name wraps beside its numbers.
+\newcommand\block[2]{%
+  \par\addvspace{5pt}%
+  \colorbox{ink}{\parbox{\dimexpr\linewidth-2\fboxsep\relax}{%
+    \gothic\bfseries\fontsize{7.2}{8.6}\selectfont\color{paper}%
+    \sbox0{#2}%
+    \parbox[b]{\dimexpr\linewidth-\wd0-0.5em\relax}{\raggedright
+      \addfontfeatures{LetterSpace=5}\strut\MakeUppercase{#1}\strut}%
+    \hfill\usebox0}}\par\nobreak\vskip 2pt\nobreak}
+
+% \chan{number}{name}{note}{antenna}: the note sits beside the name, the
+% station's own over-the-air channel out at the right margin.
+\newcommand\chan[4]{%
+  \hangindent=2.25em
+  \makebox[1.75em][r]{\gothic\bfseries\color{rust}#1}\hspace{0.5em}#2%
+  \if\relax\detokenize{#3}\relax\else\ {\fontsize{6.4}{8}\selectfont\gothic\bfseries #3}\fi
+  \if\relax\detokenize{#4}\relax\else
+    \leaders\hbox to 0.42em{\hss.\hss}\hskip 0.6em plus 1filll
+    \hbox{\typewriter\bfseries\fontsize{7.4}{8}\selectfont #4}\fi
+  \par}
+
+% \games{text}: what a games block holds instead of channels.
+\newcommand\games[1]{%
+  {\itshape\fontsize{8}{9.4}\selectfont\leftskip=0.4em #1\par}}
+
+\input{channels}
+
+\begin{document}
+
+% -- masthead -------------------------------------------------------------------
+\begin{minipage}[b]{1.08in}\televisionset\end{minipage}%
+\hspace{0.08in}%
+\begin{minipage}[b]{4.35in}
+  {\gothic\bfseries\fontsize{12.5}{12.5}\selectfont\addfontfeatures{LetterSpace=22}%
+   \color{rust}YOUR\par}
+  \vspace{2pt}
+  {\gothic\bfseries\fontsize{42}{38}\selectfont
+   \misprint{TV THING}{mustard}{ink}\par}
+  \vspace{4pt}
+  {\gothic\bfseries\fontsize{15}{15}\selectfont\addfontfeatures{LetterSpace=16}%
+   CHANNEL LINEUP\par}
+\end{minipage}%
+\hfill
+\begin{minipage}[b]{1.16in}\raggedleft\effectivebadge\end{minipage}
+
+\vspace{8pt}
+\stripes
+\vspace{3pt}
+
+{\itshape\fontsize{9}{11}\selectfont
+ Antenna, cable and the game of the day, all on one dial.
+ \hfill{\upshape\typewriter\fontsize{8}{11}\selectfont VIVISERV \textbullet{} HAUPPAUGE HVR-1600 \textbullet{} ROKU}\par}
+
+\vspace{3pt}
+
+% -- channels -------------------------------------------------------------------
+\setlength{\columnsep}{14pt}
+\setlength{\columnseprule}{0.5pt}
+\renewcommand\columnseprulecolor{\color{rust}}
+\raggedcolumns
+\begin{multicols}{4}
+\listingsize
+\raggedright
+\Channels
+\end{multicols}
+
+% -- fine print -------------------------------------------------------------------
+\vfill
+\stripes
+\vspace{4pt}
+
+{\fontsize{7.1}{8.6}\selectfont
+ \begin{minipage}[t]{0.74\linewidth}
+   Figures at the right of a listing are the station's own over-the-air
+   channel; the rest come in through the Roku. Football and baseball numbers
+   are given out each morning in order of start time, and a channel added
+   later takes the next free number in its group.
+ \end{minipage}\hfill
+ \begin{minipage}[t]{0.22\linewidth}\raggedleft
+   {\gothic\bfseries\fontsize{8.5}{10}\selectfont KEEP THIS CARD\\NEAR YOUR SET\par}
+   \vspace{2pt}
+   {\typewriter\fontsize{6.5}{8}\selectfont Channels subject to change.\par}
+ \end{minipage}\par}
+
+\end{document}

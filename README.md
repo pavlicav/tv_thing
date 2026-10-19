@@ -888,6 +888,15 @@ per browser) lists the antenna's own numbers in antenna order instead. Tuning
 and recording always use the antenna channel itself, so either view tunes
 and tapes the same channel.
 
+The About page offers the lineup as a printable card,
+`static/lineup-card.pdf`, typeset in LaTeX from
+[`lineup_card.tex`](lineup_card.tex). It is a snapshot, so rebuild it after
+changing `lineup.json` or when a rescan adds channels:
+`python3 lineup_card.py` reads `/api/v1/lineup` from the running server
+(`--json` takes a saved copy instead) and needs
+[Tectonic](https://tectonic-typesetting.github.io). The day's games are left
+off; each games block carries a note in their place.
+
 ### YouTube TV channels on the Roku
 
 `roku.json` lists the YouTube TV Live-guide rows TV Thing can tune, by name

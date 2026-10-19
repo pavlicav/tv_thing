@@ -5118,6 +5118,7 @@ class TVHandler(SimpleHTTPRequestHandler):
                 ".js": "application/javascript",
                 ".css": "text/css",
                 ".svg": "image/svg+xml",
+                ".pdf": "application/pdf",
             }.get(filepath.suffix, "application/octet-stream")
             self.send_header("Content-Type", ct)
             self.end_headers()

@@ -36,6 +36,26 @@
       color: var(--text-mute); font: 600 10px/1.4 var(--mono);
     }
     code { color: var(--text); font-family: var(--mono); font-size: .92em; }
+    .lineup-dl {
+      display: flex; align-items: center; gap: 16px;
+      margin: 28px 0 0; padding: 16px 18px 16px 16px;
+      border: 1px solid var(--accent-line); border-radius: 10px;
+      background: var(--accent-soft); color: var(--text); text-decoration: none;
+    }
+    .lineup-dl:hover { border-color: var(--accent); }
+    /* The printed card's rust, orange and mustard stripe, stood on end. */
+    .lineup-dl-stripe {
+      flex-shrink: 0; align-self: stretch; width: 12px; border-radius: 2px;
+      background: linear-gradient(90deg, #b5441c 0 30%, transparent 30% 35%,
+                  #db7525 35% 65%, transparent 65% 70%, #dca42e 70%);
+    }
+    .lineup-dl-text { flex: 1; min-width: 0; }
+    .lineup-dl-text strong { display: block; font-size: 14px; }
+    .lineup-dl-text span { display: block; margin-top: 4px; color: var(--text-dim); font-size: 12px; line-height: 1.55; }
+    .lineup-dl-action {
+      flex-shrink: 0; padding: 8px 13px; border-radius: var(--r-md);
+      background: var(--accent); color: var(--bg); font-size: 12px; font-weight: 700;
+    }
     .note { margin-top: 14px; padding: 18px 20px; border-left: 2px solid var(--accent); background: var(--surface); }
     .note strong { display: block; margin-bottom: 5px; font-size: 13px; }
     .note span { color: var(--text-mute); font-size: 12px; line-height: 1.55; }
@@ -43,6 +63,8 @@
       .flow { grid-template-columns: 1fr; }
       .flow-step { min-height: 0; }
       .grid { grid-template-columns: 1fr; }
+      .lineup-dl { flex-wrap: wrap; }
+      .lineup-dl-stripe { display: none; }
     }
   </style>
 </head>
@@ -72,6 +94,16 @@
       hardware, with fast source changes and hard limits that keep a bad
       timestamp or encoder failure from running away with the machine.
     </p>
+
+    <a class="lineup-dl" href="lineup-card.pdf" download="TV Thing channel lineup.pdf">
+      <span class="lineup-dl-stripe" aria-hidden="true"></span>
+      <span class="lineup-dl-text">
+        <strong>Channel lineup card</strong>
+        <span>Every TV Thing channel number on one printable page, typeset in
+          LaTeX like a cable company's lineup card from the seventies. US Letter.</span>
+      </span>
+      <span class="lineup-dl-action">Download PDF</span>
+    </a>
 
     <section class="flow" aria-label="Broadcast processing path">
       <div class="flow-step"><div class="flow-num">01</div><div class="flow-name">ATSC tuner</div><div class="flow-sub">Linux DVB frontend locks the requested RF channel.</div></div>
