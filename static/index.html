@@ -386,6 +386,9 @@
     .panel .item-sub { font-family: var(--stb-font); font-size: 11.5px; color: var(--text-mute); }
     .panel .list-item { padding: 8px 14px; align-items: center; min-height: 54px; }
     .panel .list-item[aria-current="true"] .item-sub { color: var(--text-dim); }
+    /* Nothing to tune: an unplayable game, or a listed one (ESPN Unlimited's NHL). */
+    .panel .list-item:disabled { opacity: .5; cursor: default; }
+    .panel .list-item:disabled:hover { background: none; color: inherit; }
     .panel .item-tag { font-family: var(--stb-font); font-size: 10px; opacity: .8; }
     .item-bar { display: block; height: 2px; margin-top: 5px; background: var(--border); max-width: 180px; }
     .item-bar i { display: block; height: 100%; background: var(--accent); opacity: .75; }
@@ -1182,7 +1185,9 @@
         const sources = data.sources || [];
         const cable = sources.find(source => source.id === "cable");
         if (cable) state.cableAvailable = cable.available !== false;
-        state.roku.sources = sources.filter(source => source.lane === "roku");
+        // Listed catalogs (ESPN Unlimited's NHL games) show in the list, greyed:
+        // nothing can tune them.
+        state.roku.sources = [...sources, ...(data.listed || [])].filter(source => source.lane === "roku");
         state.roku.available = state.roku.sources.length > 0;
         if (data.lineup) state.lineup = data.lineup;
         sourcePollMs = Math.max(
@@ -1419,6 +1424,7 @@
           if (operation.active && operation.target && operation.target.source_id === source.id
               && operation.target.channel_id === item.id) tag = "MOVING";
           button.disabled = source.available === false || item.playable === false;
+          if (item.playable === false && item.note) button.title = item.note;
           button.addEventListener("click", () => tuneRoku(source, item));
         } else {
           current = state.playing === "vizelvision" && state.houseNumber === entry.number;
@@ -2006,7 +2012,7 @@
     const ROKU_LOCK_KEY = "tvthing.rokuLock";
     const ROKU_SHORT = {
       "youtube-tv": "YTTV", "mlb": "MLB", "thursday-night-football": "TNF",
-      "sunday-ticket": "NFL", "roku-manual": "RK",
+      "sunday-ticket": "NFL", "nhl": "NHL", "roku-manual": "RK",
     };
     let rokuPollTimer = null;
     let rokuListKey = null;
@@ -2152,6 +2158,7 @@
             const route = item.route && item.route.label;
             sub = [item.status, route].filter(Boolean).join(" · ");
             btn.disabled = item.playable === false;
+            if (item.playable === false && item.note) btn.title = item.note;
           } else if (source.id === "youtube-tv") {
             sub = (item.aliases || []).join(" · ");
           } else {
@@ -2551,7 +2558,7 @@
       try { value = decodeURIComponent(match[1]); } catch (_) { return null; }
       const slash = value.indexOf("/");
       if (slash <= 0) return null;
-      const source = state.roku.sources.find(s => s.id === value.slice(0, slash)
+      const source = state.roku.sources.find(s => s.id === value.slice(0, slash) && s.tunable !== false
         && (!s.dated || state.roku.date === localDate()));
       const item = source && (state.roku.items[source.id] || [])
         .find(i => String(i.id) === value.slice(slash + 1));

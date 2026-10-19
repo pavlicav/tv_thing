@@ -54,6 +54,7 @@ GAME_SOURCES = (MLB, THURSDAY_NIGHT_FOOTBALL, SUNDAY_TICKET)
 # still to be built: on 2026-10-19 they were on the ESPN page (its live-guide
 # logo), under Live, in one On Now row, two ESPN+ cards a game (away, home).
 LISTED_SOURCES = {NHL: ("NHL on ESPN Unlimited", "games")}
+NHL_NOTE = "On YouTube TV's ESPN page, under Live. TV Thing cannot send the Roku there yet."
 # The league each game source lists, for how long its games usually run.
 GAME_LEAGUES = {MLB: "mlb", THURSDAY_NIGHT_FOOTBALL: "nfl", SUNDAY_TICKET: "nfl", NHL: "nhl"}
 # How long the Roku can take to reach a target and verify it: YouTube TV
@@ -520,6 +521,14 @@ class RokuLane:
                  "items_path": f"/api/v1/sources/{source_id}"}
                 for source_id, (name, kind) in SOURCES.items()]
 
+    def listed_source_list(self, available):
+        """LISTED_SOURCES in source_list's shape, with ``tunable: false``."""
+        return [{"id": source_id, "kind": source_id, "lane": LANE, "name": name, "items": kind,
+                 "available": available, "tunable": False, "selector": None, "dated": True,
+                 "typical_seconds": int(TYPICAL[GAME_LEAGUES[source_id]].total_seconds()),
+                 "items_path": f"/api/v1/sources/{source_id}"}
+                for source_id, (name, kind) in LISTED_SOURCES.items()]
+
     def catalog(self, source_id, requested_date=None):
         if source_id == MANUAL:
             return {"items": [{"id": "manual", "name": "Manual Roku",
@@ -548,7 +557,7 @@ class RokuLane:
                 items.append({"id": str(game["game_id"]), "name": game["title"],
                               "start_time": game.get("start_time"), "state": state,
                               "status": game.get("status"), "playable": False,
-                              "espn_unlimited": stream, "game": game})
+                              "note": NHL_NOTE, "espn_unlimited": stream, "game": game})
             return {"date": catalog["date"], "items": items}
         catalog = self.sports.games("nfl", day)
         items = []

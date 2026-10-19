@@ -138,6 +138,14 @@ refreshed in the background), `generation` and `reuse_max_age_seconds`.
   (Sunday-afternoon CBS/FOX games), and `roku-manual`. Every item has an
   `id` (the `channel_id` to tune) and a `name`; games carry `game`,
   `state`, `start_time` and `playable`.
+  `GET api/v1/sources` also has `listed`: catalogs in the same shape, with
+  `tunable: false`, that nothing can tune yet. Today that is `nhl`, the NHL
+  games ESPN Unlimited streams in YouTube TV (`GET api/v1/sources/nhl?date=`,
+  every item `playable: false` with a `note` on where to find it). They are
+  not under `sources`, so a client that tunes what it lists never offers
+  them; a tune of one is **400**. A day's games are numbered across the whole
+  games block, `nhl` included, so a game's `tv_number` is the same in every
+  catalog, the lineup and the guide.
 * **Tune**: POST `api/v1/tune` `{"source": "youtube-tv", "channel_id": "ESPN",
   "token": …}` (games add `"date"`). **200** with `reused: true` when the Roku
   already shows that verified selection, recently and on the current capture,

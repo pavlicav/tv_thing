@@ -2064,15 +2064,20 @@ def api_v1_roku_source(source_id, requested_date=None):
     def catalog():
         listing = roku.catalog(source_id, requested_date)
         listings = {source_id: listing}
+        # A day's games are numbered across the whole block, listed sources (NHL) too,
+        # so a game has the same number here as in the guide.
         for partner in channel_lineup.game_partners(source_id):
-            if partner != source_id and partner in roku_lane.SOURCES:
+            if partner != source_id and (partner in roku_lane.SOURCES
+                                         or partner in roku_lane.LISTED_SOURCES):
                 try:
                     listings[partner] = roku.catalog(partner, listing.get("date") or requested_date)
                 except Exception:   # noqa: BLE001 - numbering never fails the catalog asked for
                     pass    # Numbered without it; its own request will say why.
         numbered_roku_listings(listings)
-        source = next(item for item in roku.source_list(
-            roku_sources_available()) if item["id"] == source_id)
+        available = roku_sources_available()
+        source = next(item for item in (*roku.source_list(available),
+                                        *roku.listed_source_list(available))
+                      if item["id"] == source_id)
         return {
             "api_version": API_VERSION,
             "source": dict(source, count=len(listing["items"]),
@@ -4381,6 +4386,9 @@ def api_v1_source_catalog():
             dict(cable, items_path="/api/v1/sources/cable"),
             *roku_sources,
         ],
+        # Catalogs the Watch page lists but nothing can tune (ESPN Unlimited's
+        # NHL games). Apart from "sources", so vizelVision and the VCR never offer them.
+        "listed": roku.listed_source_list(roku_sources_available()) if roku is not None else [],
         # The lineup card's sections and the station's own numbers. Every
         # catalog item carries its tv_number; the cable tab is the analog
         # tuner's RF plan and is not part of the lineup.
@@ -5076,7 +5084,8 @@ class TVHandler(SimpleHTTPRequestHandler):
             return
 
         if (path.startswith("/api/v1/sources/")
-                and path[len("/api/v1/sources/"):] in roku_lane.SOURCES):
+                and (path[len("/api/v1/sources/"):] in roku_lane.SOURCES
+                     or path[len("/api/v1/sources/"):] in roku_lane.LISTED_SOURCES)):
             payload, status = api_v1_roku_source(
                 path[len("/api/v1/sources/"):],
                 parse_qs(parsed.query).get("date", [None])[0],

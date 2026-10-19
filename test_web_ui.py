@@ -472,14 +472,23 @@ def test_guide_lists_youtube_tv_and_sends_its_rows_to_the_watch_page():
     assert "guide.youtube_tv" in GUIDE
 
 
+def test_watch_page_lists_hockey_greyed_with_where_to_find_it():
+    # ESPN Unlimited's NHL games: listed, never tunable, the note on hover.
+    assert "[...sources, ...(data.listed || [])]" in INDEX
+    assert "if (item.playable === false && item.note) button.title = item.note;" in INDEX
+    assert "if (item.playable === false && item.note) btn.title = item.note;" in INDEX
+    assert '"nhl": "NHL"' in INDEX
+
+
 def test_watch_page_tunes_the_roku_channel_the_guide_links_to():
     linked = section(INDEX, "function linkedRokuTarget()", "startSourcePolling();")
     assert "#watch=" in linked
     # Used once: a reload must not send the Roku off again.
     assert "history.replaceState(" in linked
     assert "tuneRoku(linked.source, linked.item)" in linked
-    # A game is one of today's, as the Watch page lists them.
+    # A game is one of today's, as the Watch page lists them, and one the Roku can reach.
     assert "(!s.dated || state.roku.date === localDate())" in linked
+    assert "s.tunable !== false" in linked
     assert "else resume();" in linked
 
 
