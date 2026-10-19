@@ -494,7 +494,7 @@ function fmtAge(seconds) {
 // YouTube TV's by source and name (youtube-tv/NBC), as the lineup keys them.
 const keyOf = (channel) => channel.key || channel.number;
 const isRoku = (channel) => channel.kind === 'roku';
-// The lineup's name for it (NBC Lansing), as the Watch page lists it.
+// The lineup's name for it (WILX for YouTube TV's NBC), as the Watch page lists it.
 const nameOf = (channel) => channel.tv_name || channel.name || '';
 
 async function load() {

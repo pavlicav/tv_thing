@@ -44,6 +44,8 @@ test('the lineup is in TV Thing number order, with the station on both of its nu
   // Typing a channel number finds it; the antenna's own number still does.
   assert.ok(list[5].search.startsWith('201 ch 201 '));
   assert.ok(/\b9\.5\b/.test(list[5].search));
+  // So does the lineup's name for it, and the source's own name.
+  assert.ok(/\bNBC Lansing\b/.test(list[2].search) && /\bNBC\b/.test(list[2].search));
 });
 
 test('without a lineup the old alphabetical list comes back, station first', () => {

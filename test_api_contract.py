@@ -197,7 +197,7 @@ def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypat
     assert [(i["number"], i["tv_number"]) for i in digital["items"]] == [("4.1", 4), ("7.5", 300)]
     code, feeds = request("/api/v1/sources/youtube-tv")
     assert [(i["id"], i["tv_number"], i["tv_name"]) for i in feeds["items"]] == [
-        ("NBC", 16, "NBC Lansing"), ("ESPN", 33, "ESPN")]
+        ("NBC", 16, "WILX"), ("ESPN", 33, "ESPN")]
     code, tnf = request("/api/v1/sources/thursday-night-football?date=2026-10-01")
     assert [(i["id"], i["tv_number"], i["tv_section"]) for i in tnf["items"]] == [
         ("401872964", 60, "Football")]
