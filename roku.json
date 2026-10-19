@@ -1,5 +1,5 @@
 {
-  "_comment": "The source Roku and its HD PVR capture (TV Thing Roku lane). Moved from vizelVision config.master.json on 2026-10-06. Channels are the YouTube TV Live-guide rows in order; their logo templates live in roku_state/ (not in git).",
+  "_comment": "The source Roku and its HD PVR capture (TV Thing Roku lane). Moved from vizelVision config.master.json on 2026-10-06. Channels are the YouTube TV Live-guide rows in order; their logo templates live in roku_state/ (not in git). guide_index past the locals assumes 15 temporary NFL Sunday Ticket rows after The CW (read from the guide 2026-10-18 with 10, plus 5): with fewer the row comes sooner, and the walk down verifies every row it passes. Rows the antenna already carries (QVC, HSN, Charge!, Roar, The Nest, ION, Bounce, Start TV, Comet, Cozi, GREAT, FOX Weather, Oxygen True Crime, True CRMZ, Telemundo, Dabl) are left out.",
   "roku": {
     "url": "http://10.0.0.240:8060",
     "app_name": "YouTube TV",
@@ -35,7 +35,13 @@
       "Select",
       "Down",
       "Down"
-    ]
+    ],
+    "fast_seek_rows": 5,
+    "fast_seek_min_rows": 6,
+    "fast_seek_margin_rows": 4,
+    "fast_seek_key_delay_seconds": 0.35,
+    "game_rows_after_index": 5,
+    "game_rows_max": 15
   },
   "feedback": {
     "backend": "lane",
@@ -132,7 +138,7 @@
         "DCW50",
         "CW 50"
       ],
-      "guide_index": 7
+      "guide_index": 5
     },
     {
       "name": "ESPN",
@@ -198,12 +204,68 @@
       "guide_index": 29
     },
     {
+      "name": "The Weather Channel",
+      "aliases": [
+        "Weather Channel",
+        "TWC"
+      ],
+      "guide_index": 30
+    },
+    {
+      "name": "CNN",
+      "aliases": [],
+      "guide_index": 31
+    },
+    {
+      "name": "BBC News",
+      "aliases": [
+        "BBC World News"
+      ],
+      "guide_index": 32
+    },
+    {
+      "name": "NBC News NOW",
+      "aliases": [],
+      "guide_index": 33
+    },
+    {
+      "name": "ABC News Live",
+      "aliases": [],
+      "guide_index": 34
+    },
+    {
+      "name": "Discovery Channel",
+      "aliases": [
+        "Discovery"
+      ],
+      "guide_index": 35
+    },
+    {
+      "name": "Smithsonian Channel",
+      "aliases": [
+        "Smithsonian"
+      ],
+      "guide_index": 36
+    },
+    {
+      "name": "Animal Planet",
+      "aliases": [],
+      "guide_index": 37
+    },
+    {
+      "name": "Nat Geo",
+      "aliases": [
+        "National Geographic"
+      ],
+      "guide_index": 38
+    },
+    {
       "name": "SEC Network",
       "aliases": [
         "SECN",
         "SEC"
       ],
-      "guide_index": 44,
+      "guide_index": 42,
       "network_page": "ESPN"
     },
     {
@@ -212,7 +274,7 @@
         "ACCN",
         "ACC"
       ],
-      "guide_index": 45,
+      "guide_index": 43,
       "network_page": "ESPN"
     },
     {
@@ -220,7 +282,7 @@
       "aliases": [
         "ESPN U"
       ],
-      "guide_index": 46,
+      "guide_index": 44,
       "network_page": "ESPN"
     },
     {
@@ -228,7 +290,7 @@
       "aliases": [
         "ESPN News"
       ],
-      "guide_index": 47,
+      "guide_index": 45,
       "network_page": "ESPN"
     },
     {
@@ -236,7 +298,7 @@
       "aliases": [
         "NBATV"
       ],
-      "guide_index": 48
+      "guide_index": 46
     },
     {
       "name": "CBS Sports Network",
@@ -244,7 +306,7 @@
         "CBS Sports",
         "CBSSN"
       ],
-      "guide_index": 50
+      "guide_index": 47
     },
     {
       "name": "T2",
@@ -252,14 +314,14 @@
         "Tennis Channel 2",
         "Tennis 2"
       ],
-      "guide_index": 51
+      "guide_index": 48
     },
     {
       "name": "Golf Channel",
       "aliases": [
         "Golf"
       ],
-      "guide_index": 54
+      "guide_index": 51
     },
     {
       "name": "Pickleball TV",
@@ -267,7 +329,409 @@
         "PickleballTV",
         "PBTV"
       ],
+      "guide_index": 52
+    },
+    {
+      "name": "Disney XD",
+      "aliases": [],
+      "guide_index": 54
+    },
+    {
+      "name": "Disney Channel",
+      "aliases": [],
       "guide_index": 55
+    },
+    {
+      "name": "Disney Junior",
+      "aliases": [],
+      "guide_index": 56
+    },
+    {
+      "name": "Cartoon Network",
+      "aliases": [],
+      "guide_index": 58
+    },
+    {
+      "name": "Nickelodeon",
+      "aliases": [
+        "Nick"
+      ],
+      "guide_index": 59
+    },
+    {
+      "name": "Nick Jr.",
+      "aliases": [],
+      "guide_index": 60
+    },
+    {
+      "name": "Nicktoons",
+      "aliases": [],
+      "guide_index": 61
+    },
+    {
+      "name": "TeenNick",
+      "aliases": [],
+      "guide_index": 62
+    },
+    {
+      "name": "AMC",
+      "aliases": [],
+      "guide_index": 63
+    },
+    {
+      "name": "Stories by AMC",
+      "aliases": [],
+      "guide_index": 64
+    },
+    {
+      "name": "AMC Thrillers",
+      "aliases": [],
+      "guide_index": 65
+    },
+    {
+      "name": "Portlandia",
+      "aliases": [],
+      "guide_index": 66
+    },
+    {
+      "name": "BBC America",
+      "aliases": [],
+      "guide_index": 67
+    },
+    {
+      "name": "BET",
+      "aliases": [],
+      "guide_index": 68
+    },
+    {
+      "name": "BET Her",
+      "aliases": [],
+      "guide_index": 69
+    },
+    {
+      "name": "CMT",
+      "aliases": [],
+      "guide_index": 70
+    },
+    {
+      "name": "Comedy Central",
+      "aliases": [],
+      "guide_index": 71
+    },
+    {
+      "name": "Comedy.TV",
+      "aliases": [],
+      "guide_index": 72
+    },
+    {
+      "name": "Freeform",
+      "aliases": [],
+      "guide_index": 73
+    },
+    {
+      "name": "SOUL",
+      "aliases": [
+        "Soul of the South"
+      ],
+      "guide_index": 74
+    },
+    {
+      "name": "FXX",
+      "aliases": [],
+      "guide_index": 75
+    },
+    {
+      "name": "FX",
+      "aliases": [],
+      "guide_index": 76
+    },
+    {
+      "name": "FXM",
+      "aliases": [],
+      "guide_index": 77
+    },
+    {
+      "name": "Hallmark Channel",
+      "aliases": [
+        "Hallmark"
+      ],
+      "guide_index": 78
+    },
+    {
+      "name": "Hallmark Family",
+      "aliases": [],
+      "guide_index": 79
+    },
+    {
+      "name": "Hallmark Mystery",
+      "aliases": [],
+      "guide_index": 80
+    },
+    {
+      "name": "IFC",
+      "aliases": [],
+      "guide_index": 81
+    },
+    {
+      "name": "MTV",
+      "aliases": [],
+      "guide_index": 82
+    },
+    {
+      "name": "MTV2",
+      "aliases": [],
+      "guide_index": 83
+    },
+    {
+      "name": "MTV Classic",
+      "aliases": [],
+      "guide_index": 84
+    },
+    {
+      "name": "VH1",
+      "aliases": [],
+      "guide_index": 85
+    },
+    {
+      "name": "Paramount Network",
+      "aliases": [
+        "Paramount"
+      ],
+      "guide_index": 86
+    },
+    {
+      "name": "Pop",
+      "aliases": [
+        "Pop TV"
+      ],
+      "guide_index": 87
+    },
+    {
+      "name": "Turner Classic Movies",
+      "aliases": [
+        "TCM"
+      ],
+      "guide_index": 88
+    },
+    {
+      "name": "truTV",
+      "aliases": [],
+      "guide_index": 89
+    },
+    {
+      "name": "USA",
+      "aliases": [
+        "USA Network"
+      ],
+      "guide_index": 90
+    },
+    {
+      "name": "NewsNation",
+      "aliases": [],
+      "guide_index": 91
+    },
+    {
+      "name": "Nat Geo Wild",
+      "aliases": [
+        "National Geographic Wild"
+      ],
+      "guide_index": 92
+    },
+    {
+      "name": "SYFY",
+      "aliases": [
+        "Syfy",
+        "Sci Fi"
+      ],
+      "guide_index": 93
+    },
+    {
+      "name": "Travel Channel",
+      "aliases": [],
+      "guide_index": 94
+    },
+    {
+      "name": "TV Land",
+      "aliases": [],
+      "guide_index": 95
+    },
+    {
+      "name": "Bravo",
+      "aliases": [],
+      "guide_index": 96
+    },
+    {
+      "name": "E!",
+      "aliases": [
+        "E! Entertainment"
+      ],
+      "guide_index": 98
+    },
+    {
+      "name": "Food Network",
+      "aliases": [],
+      "guide_index": 99
+    },
+    {
+      "name": "Magnolia Network",
+      "aliases": [
+        "Magnolia"
+      ],
+      "guide_index": 100
+    },
+    {
+      "name": "HGTV",
+      "aliases": [],
+      "guide_index": 101
+    },
+    {
+      "name": "JusticeCentral TV",
+      "aliases": [
+        "Justice Central"
+      ],
+      "guide_index": 102
+    },
+    {
+      "name": "ID",
+      "aliases": [
+        "Investigation Discovery"
+      ],
+      "guide_index": 103
+    },
+    {
+      "name": "Discovery Turbo",
+      "aliases": [],
+      "guide_index": 104
+    },
+    {
+      "name": "OWN",
+      "aliases": [],
+      "guide_index": 105
+    },
+    {
+      "name": "Recipe.TV",
+      "aliases": [],
+      "guide_index": 108
+    },
+    {
+      "name": "TLC",
+      "aliases": [],
+      "guide_index": 109
+    },
+    {
+      "name": "Game Show Network",
+      "aliases": [
+        "GSN"
+      ],
+      "guide_index": 110
+    },
+    {
+      "name": "WE tv",
+      "aliases": [
+        "WEtv"
+      ],
+      "guide_index": 111
+    },
+    {
+      "name": "All Reality We TV",
+      "aliases": [
+        "All Reality"
+      ],
+      "guide_index": 112
+    },
+    {
+      "name": "Cheddar",
+      "aliases": [
+        "Cheddar News"
+      ],
+      "guide_index": 113
+    },
+    {
+      "name": "CNBC",
+      "aliases": [],
+      "guide_index": 114
+    },
+    {
+      "name": "Bloomberg TV+",
+      "aliases": [
+        "Bloomberg TV",
+        "Bloomberg Television"
+      ],
+      "guide_index": 115
+    },
+    {
+      "name": "Bloomberg Originals",
+      "aliases": [],
+      "guide_index": 116
+    },
+    {
+      "name": "FOX Business",
+      "aliases": [
+        "Fox Business Network",
+        "FBN"
+      ],
+      "guide_index": 117
+    },
+    {
+      "name": "FOX News",
+      "aliases": [
+        "Fox News Channel",
+        "FNC"
+      ],
+      "guide_index": 118
+    },
+    {
+      "name": "HLN",
+      "aliases": [],
+      "guide_index": 120
+    },
+    {
+      "name": "LiveNOW from FOX",
+      "aliases": [
+        "LiveNOW"
+      ],
+      "guide_index": 121
+    },
+    {
+      "name": "Local Now",
+      "aliases": [],
+      "guide_index": 122
+    },
+    {
+      "name": "MS NOW",
+      "aliases": [
+        "MSNBC"
+      ],
+      "guide_index": 123
+    },
+    {
+      "name": "AWE",
+      "aliases": [],
+      "guide_index": 124
+    },
+    {
+      "name": "GFAM",
+      "aliases": [
+        "Great American Family"
+      ],
+      "guide_index": 125
+    },
+    {
+      "name": "GLIV",
+      "aliases": [
+        "Great American Living"
+      ],
+      "guide_index": 126
+    },
+    {
+      "name": "Scripps News",
+      "aliases": [],
+      "guide_index": 129
+    },
+    {
+      "name": "World at War",
+      "aliases": [],
+      "guide_index": 130
     }
   ],
   "state_file": "roku_state/state.json"

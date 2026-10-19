@@ -166,6 +166,23 @@ def test_game_overflow_steps_around_given_out_numbers(make):
     assert sorted(view["tv_number"] for view in views.values()) == [50, 51, 52, 301]
 
 
+def test_a_block_split_around_a_pinned_channel_fills_in_order(make):
+    sections = [s for s in SECTIONS if s["name"] != "Football"] + [
+        {"first": 60, "last": 61, "name": "Football", "games": ["sunday-ticket"]},
+        {"first": 63, "last": 64, "name": "Football", "games": ["sunday-ticket"]}]
+    numbering = make(plan_document([{"number": 62, "source": "vizelvision"}], sections=sections))
+    views = numbering.number_games({"sunday-ticket": [game(str(n), "") for n in range(1, 6)]})
+    assert [views[("sunday-ticket", str(n))]["tv_number"] for n in range(1, 6)] == [60, 61, 63, 64, 300]
+    assert [view["tv_number"] for view in numbering.house()] == [0, 62, 70]
+
+
+def test_a_split_block_lists_the_same_sources():
+    document = plan_document()
+    document["sections"].append({"first": 53, "last": 55, "name": "More football", "games": ["sunday-ticket"]})
+    with pytest.raises(lineup.LineupError, match="share some game"):
+        lineup.parse_plan(document)
+
+
 def test_game_partners_name_the_shared_block(make):
     numbering = make()
     assert numbering.game_partners("sunday-ticket") == ("sunday-ticket", "thursday-night-football")
@@ -193,20 +210,28 @@ def test_the_card_reads_like_a_cable_lineup():
     plan = real_plan()
     by_number = {number: key for key, (number, _) in plan.fixed.items()}
     assert [number for number, _ in plan.house] == [0, 70]
-    # Twenty locals, NHK among them, and the Lansing stations from the Roku.
-    locals_ = [by_number[n] for n in range(1, 21)]
-    assert "digital/22.4" in locals_
-    assert {key for key in locals_ if key.startswith("youtube-tv/")} == {
+    # Locals through 29, NHK and Baltimore's CW among them, the Roku's Lansing
+    # stations together, and 22-29 held for a Lansing / Flint receiver.
+    assert plan.section_of(29).name == "Local stations" and plan.section_of(30).name == "Cable"
+    locals_ = [by_number[n] for n in range(1, 30) if n in by_number]
+    assert "digital/22.4" in locals_ and "digital/54.1" in locals_
+    assert [by_number[n] for n in range(16, 22)] == [
         "youtube-tv/NBC", "youtube-tv/FOX", "youtube-tv/ABC", "youtube-tv/CBS",
-        "youtube-tv/PBS", "youtube-tv/The CW"}
+        "youtube-tv/PBS", "youtube-tv/The CW"]
+    assert not any(n in by_number for n in range(22, 30))
     # DC's network stations keep their own dial positions.
     assert [by_number[n] for n in (4, 5, 7, 9)] == [
         "digital/4.1", "digital/5.1", "digital/7.1", "digital/9.1"]
-    # Cable networks in 21-49, Sunday Ticket from 50, subchannels in the hundreds.
-    assert all(key.startswith("youtube-tv/") for number, key in by_number.items() if 21 <= number <= 49)
-    assert plan.games_section("sunday-ticket").first == 50
-    assert plan.new_section("digital").first >= 100
-    assert all(number >= 100 for number, key in by_number.items()
+    # Cable 30-59, every one from YouTube TV, the classics among them.
+    assert all(key.startswith("youtube-tv/") for number, key in by_number.items() if 30 <= number <= 59)
+    assert {"youtube-tv/CNN", "youtube-tv/MS NOW", "youtube-tv/Discovery Channel",
+            "youtube-tv/HGTV"} <= {by_number[n] for n in range(30, 60)}
+    # Football from 60 around VizelVision on 70, baseball from 80.
+    assert [(s.first, s.last) for s in plan.games_sections("sunday-ticket")] == [(60, 69), (71, 79)]
+    assert plan.games_sections("mlb")[0].first == 80
+    assert by_number[109] == "roku-manual/manual"
+    assert plan.new_section("digital").first >= 300 and plan.new_section("youtube-tv").first >= 300
+    assert all(number >= 110 for number, key in by_number.items()
                if key.startswith("digital/") and key not in locals_)
 
 

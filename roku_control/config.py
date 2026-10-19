@@ -75,6 +75,19 @@ class NavigationConfig:
     play_settle_seconds: float = 1.5
     guide_scan_lookbehind: int = 2
     guide_scan_max_rows: int = 14
+    # Fast seek: a target at least fast_seek_min_rows away is approached in
+    # bursts of fast_seek_rows quick keys, each followed by one look at which
+    # row the guide landed on. 0 turns it off (one verified row per key).
+    # A burst never ends where the target could already be: within
+    # fast_seek_margin_rows of its position, or, when YouTube TV's temporary
+    # game rows (up to game_rows_max of them, inserted after the row at
+    # game_rows_after_index) lie in between, that many more.
+    fast_seek_rows: int = 5
+    fast_seek_min_rows: int = 6
+    fast_seek_margin_rows: int = 4
+    fast_seek_key_delay_seconds: float = 0.35
+    game_rows_after_index: int = 5
+    game_rows_max: int = 15
     # A clean YouTube TV launch focuses Home on the supported UI. Right selects
     # Live; Select opens it; two Downs move through ON NOW to the first guide row.
     open_live_guide_keys: tuple[str, ...] = ("Right", "Select", "Down", "Down")
@@ -273,7 +286,17 @@ def load_config(path: str | Path) -> AppConfig:
         or not 1 <= guide_scan_max_rows <= 100
     ):
         raise ConfigError("navigation.guide_scan_max_rows must be from 1 through 100")
+    fast_seek = {}
+    for key, default, low, high in (("fast_seek_rows", 5, 0, 15), ("fast_seek_min_rows", 6, 2, 50),
+                                    ("fast_seek_margin_rows", 4, 0, 30), ("game_rows_after_index", 5, 0, 200),
+                                    ("game_rows_max", 15, 0, 50)):
+        value = nav_raw.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+            raise ConfigError(f"navigation.{key} must be from {low} through {high}")
+        fast_seek[key] = value
     navigation = NavigationConfig(
+        **fast_seek,
+        fast_seek_key_delay_seconds=_number(nav_raw, "fast_seek_key_delay_seconds", 0.35),
         reset_back_presses=reset_back_presses,
         reset_key_delay_seconds=_number(nav_raw, "reset_key_delay_seconds", 1.0),
         post_exit_settle_seconds=_number(nav_raw, "post_exit_settle_seconds", 4.0),

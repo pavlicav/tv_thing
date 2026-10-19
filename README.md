@@ -339,7 +339,7 @@ Two things make that materially faster than the previous `w_scan` pipeline:
   a locked frequency from roughly 12 s to under 4 s.
 
 A rescan replaces `channels.json`. A channel it finds that the lineup does
-not list is numbered automatically in 250–299 ("New on the antenna"); see
+not list is numbered automatically in 300–349 ("New on the antenna"); see
 [TV Thing channel numbers](#tv-thing-channel-numbers).
 
 Scan the whole band from the Scan page, or drive it directly:
@@ -806,21 +806,21 @@ Every channel has a TV Thing number, laid out like an old cable lineup card in
 | Numbers | Section |
 |---|---|
 | 0, 70 | VizelVision (the house channel) |
-| 1–20 | Local stations: DC's network stations on their own dial positions (4, 5, 7, 9), NHK World on 1, the other DC stations, and the Roku's Lansing locals (YouTube TV) on 15–20 |
-| 21–49 | Cable networks from YouTube TV; 39 up is free |
-| 50–69 | Football: the day's NFL Sunday Ticket and Thursday Night Football games, by kickoff |
-| 71–89 | Baseball: the day's MLB games, by first pitch |
-| 90–99 | Roku (Manual Roku on 99) |
-| 100–179 | The antenna's diginets and public-television subchannels, by genre |
-| 200–229 | Shopping, faith, and repeaters of other channels |
-| 250–299 | New on the antenna |
-| 300 up | Overflow |
+| 1–29 | Local stations: DC's network stations on their own dial positions (4, 5, 7, 9), NHK World on 1, the other DC and Baltimore stations, the Roku's Lansing locals (YouTube TV) on 16–21; 22–29 are held for a Lansing / Flint antenna receiver |
+| 30–59 | Cable from YouTube TV: the Weather Channel, TBS, TNT, the sports networks, then CNN, MS NOW, FOX News, CNBC, Discovery, HGTV, Food, TLC, USA, FX, Comedy Central |
+| 60–69, 71–79 | Football: the day's NFL Sunday Ticket and Thursday Night Football games, by kickoff (one block, split around VizelVision) |
+| 80–99 | Baseball: the day's MLB games, by first pitch |
+| 100–109 | Roku (Manual Roku on 109) |
+| 110–299 | The digital tier, by genre, YouTube TV's other channels and the antenna's subchannels together: news and business, learning and lifestyle, kids, entertainment, music, classic TV, movies and westerns, crime and reality, game shows, Spanish, shopping, faith, repeaters |
+| 300–349 | New on the antenna |
+| 350–369 | New on YouTube TV |
+| 400 up | Overflow |
 
 Games are numbered afresh each day from the start of their section, so a
 day's slate keeps its numbers all day. Anything `lineup.json` does not list
 is numbered automatically: a channel a rescan turns up takes the first free
-number in 250–299, a YouTube TV row added to `roku.json` the first free one in
-the cable section. That number is kept in `lineup_state.json` (not in git) so
+number in 300–349, a YouTube TV row added to `roku.json` the first free one in
+350–369. That number is kept in `lineup_state.json` (not in git) so
 it never moves. To move a channel, list it in `lineup.json`; that takes
 precedence, and a UI reload shows it. An unusable `lineup.json` leaves
 channels unnumbered (the Watch list falls back to alphabetical) rather than
@@ -830,6 +830,25 @@ The Guide shows TV Thing numbers too; its **Antenna numbers** option (kept
 per browser) lists the antenna's own numbers in antenna order instead. Tuning
 and recording always use the antenna channel itself, so either view tunes
 and tapes the same channel.
+
+### YouTube TV channels on the Roku
+
+`roku.json` lists the YouTube TV Live-guide rows TV Thing can tune, by name
+and approximate `guide_index`, in guide order. Rows past the locals assume 15
+of YouTube TV's temporary NFL Sunday Ticket rows after The CW; with fewer, a
+row comes sooner. Each needs a guide-logo template in `roku_state/templates-720p/`
+(not in git): select its row on the Roku, then POST `api/v1/roku/calibrate`
+with `{"kind": "guide", "channel": NAME}` and the Roku lock's token. Rows the
+antenna already carries (QVC, HSN, Charge!, Roar, ION and the like) are left out.
+
+Tuning walks the guide verifying each row it lands on. A target six or more
+rows away is reached by **fast seek** first: bursts of five quick keys, each
+followed by one look that checks the landing row for the target and otherwise
+identifies it (correcting for dropped keys or an overshoot). A burst never ends
+within four rows of where the target could be (nineteen while the Sunday
+Ticket rows lie in between), so a channel that has moved up the guide is still
+walked onto. `navigation.fast_seek_*` in `roku.json` tunes it; `fast_seek_rows: 0`
+turns it off.
 
 Additional fast checks: `node --test test_tunable_channels.cjs test_live_player.cjs`
 and `node test_tunable_browser.cjs /path/to/playwright`. The browser check mocks

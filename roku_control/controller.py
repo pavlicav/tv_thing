@@ -1300,6 +1300,14 @@ class RokuStreamController:
             initial_moves = abs(delta)
             positioning = "relative_to_identified_row"
 
+        if (nav.fast_seek_rows and initial_moves >= nav.fast_seek_min_rows
+                and isinstance(self.feedback, VisualFeedback) and self.config.feedback.fresh_frames):
+            current_index = self._fast_seek(channel, current_index, events)
+            delta = channel.guide_index - current_index
+            scan_key = "Down" if delta >= 0 else "Up"
+            initial_moves = abs(delta)
+            positioning = "after_fast_seek"
+
         # Guide positions are estimates: lineup changes can move the target
         # closer as well as farther away. Observe each move so an old offset
         # cannot scroll past the requested channel before verification starts.
@@ -1532,6 +1540,79 @@ class RokuStreamController:
             f"within {nav.guide_scan_max_rows} guide rows",
             details={"last_error": str(last_error), "last_details": details},
         )
+
+    def _fast_seek(
+        self, channel: ChannelConfig, current_index: int, events: list[dict[str, object]]
+    ) -> int:
+        """Close most of the distance to ``channel`` in bursts of quick keys.
+
+        Each burst is up to fast_seek_rows keys, fast_seek_key_delay apart, then
+        one look at the guide. The landing row is checked as the target itself,
+        then identified: a confidently recognized row gives the true position
+        (dropped keys, fewer Sunday Ticket rows, an overshoot are corrected from
+        it, in either direction); a row nothing recognizes (a game, an unlisted
+        channel) is counted as reached. A burst never ends where the target
+        could already be -- within fast_seek_margin_rows of its position, plus
+        game_rows_max while YouTube TV's temporary game rows lie in between --
+        so a target that has moved up the guide is still walked onto, not
+        skipped. Returns the position, for the verified row-by-row approach to
+        finish.
+        """
+        nav = self.config.navigation
+        position = current_index
+        start = time.monotonic()
+        bursts = 0
+        limit = abs(channel.guide_index - current_index) // max(1, nav.fast_seek_rows) + 8
+
+        def margin(at: int) -> int:
+            low, high = sorted((at, channel.guide_index))
+            return nav.fast_seek_margin_rows + (
+                nav.game_rows_max if low <= nav.game_rows_after_index < high else 0)
+
+        while bursts < limit:
+            remaining = channel.guide_index - position
+            count = min(nav.fast_seek_rows, abs(remaining) - margin(position))
+            if count < 2:
+                break
+            key = "Down" if remaining > 0 else "Up"
+            self._publish_operation(
+                phase="positioning_guide",
+                message=f"Fast seek to {channel.name}: about {abs(remaining)} rows to go",
+            )
+            for _ in range(count):
+                self.ecp.keypress(key)
+                self._sleep(nav.fast_seek_key_delay_seconds)
+            bursts += 1
+            self._sleep(nav.key_delay_seconds)
+            guessed = position + (count if key == "Down" else -count)
+            frame = self.feedback.capture()
+            try:
+                verification = self.feedback.verify_selected(
+                    channel.name, configured_path=channel.template, frame=frame)
+            except NavigationError:
+                pass
+            else:
+                events.append({"event": "guide_target_observed_during_positioning",
+                               "phase": "fast_seek", "result": verification})
+                position = channel.guide_index
+                break
+            try:
+                observed = self.feedback.identify_selected(self.config.channels, frame)
+            except NavigationError as exc:
+                observed, reason = None, str(exc)
+            else:
+                reason = None
+                if not (type(observed.get("guide_index")) is int
+                        and self._reliable_guide_anchor(observed)):
+                    observed, reason = None, "not_a_confident_anchor"
+            position = int(observed["guide_index"]) if observed else guessed
+            events.append({"event": "fast_seek", "key": key, "count": count, "guessed": guessed,
+                           "observed": observed.get("channel") if observed else None,
+                           "position": position, "unrecognized": reason})
+        events.append({"event": "fast_seek_done", "bursts": bursts, "position": position,
+                       "target": channel.guide_index,
+                       "seconds": round(time.monotonic() - start, 1)})
+        return position
 
     def _reliable_guide_anchor(self, observation: dict[str, object]) -> bool:
         channel = next((item for item in self.config.channels if item.name == observation.get("channel")), None)

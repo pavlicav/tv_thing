@@ -8,7 +8,8 @@ are placed by rule:
 
 * **Games** (a section with ``games``) are numbered each day from the
   section's first number up, in kickoff order, so a day's slate keeps its
-  numbers from morning to night.
+  numbers from morning to night. A block can be split around a pinned
+  channel: sections listing the same game sources fill one after another.
 * **Anything new** -- a channel a rescan turns up, a YouTube TV row added to
   roku.json -- takes the first free number in the section whose ``new``
   names its source (``*`` takes any source no section names). The number is
@@ -60,8 +61,9 @@ class Plan:
     def section_of(self, number):
         return next((s for s in self.sections if s.holds(number)), None)
 
-    def games_section(self, source_id):
-        return next((s for s in self.sections if source_id in s.games), None)
+    def games_sections(self, source_id):
+        """The sections a game source fills, in order; () for none."""
+        return tuple(s for s in self.sections if source_id in s.games)
 
     def new_section(self, source_id):
         named = next((s for s in self.sections if source_id in s.new), None)
@@ -101,10 +103,14 @@ def parse_plan(document):
             raise LineupError(f"sections {before.name!r} and {after.name!r} overlap")
     if sum(s.overflow for s in sections) != 1:
         raise LineupError("exactly one section must be the overflow")
-    for kind in ("games", "new"):
-        seen = [source for s in sections for source in getattr(s, kind)]
-        if len(seen) != len(set(seen)):
-            raise LineupError(f"a source is listed under {kind} in more than one section")
+    seen = [source for s in sections for source in s.new]
+    if len(seen) != len(set(seen)):
+        raise LineupError("a source is listed under new in more than one section")
+    for section in sections:
+        for other in sections:
+            if set(section.games) & set(other.games) and set(section.games) != set(other.games):
+                raise LineupError(f"sections {section.name!r} and {other.name!r} share some game "
+                                  "sources but not all; a split block lists the same ones")
 
     plan = Plan(tuple(sections), {}, ())
     fixed, house, numbers = {}, [], set()
@@ -289,17 +295,17 @@ class Lineup:
         with self._lock:
             taken = ({number for number, _ in plan.fixed.values()} | {n for n, _ in plan.house}
                      | {entry["number"] for entry in self._assigned().values()})
-        by_section = {}
+        by_block = {}
         for source_id, items in pools.items():
-            section = plan.games_section(source_id)
+            block = plan.games_sections(source_id)
             for item in items:
-                by_section.setdefault(section, []).append((source_id, item))
+                by_block.setdefault(block, []).append((source_id, item))
         views = {}
-        # Sections first, so a section's own numbers are never taken by overflow.
-        for section in sorted(by_section, key=lambda s: (s is None, s.first if s else 0)):
-            games = sorted(by_section[section], key=lambda pair: _game_order(pair[1]))
+        # Blocks first, so a block's own numbers are never taken by overflow.
+        for block in sorted(by_block, key=lambda b: (not b, b[0].first if b else 0)):
+            games = sorted(by_block[block], key=lambda pair: _game_order(pair[1]))
             for source_id, item in games:
-                number = self._free(section, taken) if section else None
+                number = next((n for n in (self._free(s, taken) for s in block) if n is not None), None)
                 if number is None:
                     number = self._overflow(plan, taken)
                 taken.add(number)
@@ -309,10 +315,10 @@ class Lineup:
     def game_partners(self, source_id):
         """The game sources numbered together with ``source_id``, itself included."""
         try:
-            section = self.plan().games_section(source_id)
+            block = self.plan().games_sections(source_id)
         except LineupError:
-            section = None
-        return section.games if section else (source_id,)
+            block = ()
+        return block[0].games if block else (source_id,)
 
     def house(self):
         """The station's numbers, as views."""

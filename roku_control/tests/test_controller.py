@@ -157,6 +157,78 @@ class ControllerTests(unittest.TestCase):
             self.assertTrue(result["matched"])
             self.assertEqual(ecp.keys[:3], ["Up", "Up", "Down"])
 
+    def _seek_guide(self, directory, rows, drop_every=0):
+        """A Live guide of ``rows`` (None: a row no template knows, such as a
+        Sunday Ticket game) whose cursor the fake remote moves; every
+        ``drop_every``-th key is lost, as on the old Roku."""
+        names = [name for name in rows if name]
+        # Configured positions assume three more game rows than the guide has.
+        channels = [{"name": name, "guide_index": rows.index(name) + (3 if rows.index(name) > 2 else 0)}
+                    for name in names]
+        config = self.config(Path(directory), channels=channels)
+        ecp, feedback = FakeEcp(), FakeFeedback()
+        cursor = {"row": 0, "keys": 0}
+
+        def keypress(key):
+            ecp.keys.append(key)
+            cursor["keys"] += 1
+            if drop_every and cursor["keys"] % drop_every == 0:
+                return
+            step = 1 if key == "Down" else -1
+            cursor["row"] = max(0, min(len(rows) - 1, cursor["row"] + step))
+
+        def identify(channels, frame=None):
+            name = rows[cursor["row"]]
+            if name is None:
+                raise NavigationError("The live guide is visible, but its selected row is not calibrated")
+            return {"channel": name, "guide_index": config.resolve_channel(name)[1].guide_index,
+                    "verification": {"correlation": .99, "correlation_margin": .1}}
+
+        def verify(name, *, configured_path=None, frame=None):
+            if rows[cursor["row"]] != name:
+                raise NavigationError("Wrong guide row", details={"visual_verification": {"matched": False}})
+            return {"matched": True, "correlation": .99, "correlation_margin": .1}
+
+        ecp.keypress = keypress
+        feedback.identify_selected = identify
+        feedback.verify_selected = verify
+        controller = RokuStreamController(config, ecp=ecp, feedback=feedback, sleeper=lambda _: None)
+        return controller, config, ecp, cursor
+
+    def test_fast_seek_closes_the_distance_in_bursts_and_stops_short(self):
+        rows = ["NBC", "FOX", "CW", None, None, *[f"Net{i}" for i in range(60)]]
+        with tempfile.TemporaryDirectory() as directory:
+            controller, config, ecp, cursor = self._seek_guide(directory, rows)
+            target = config.resolve_channel("Net50")[1]
+            events = []
+            position = controller._fast_seek(target, 0, events)
+            # Within reach of the verified row-by-row finish, and on the row it reports.
+            self.assertLess(abs(target.guide_index - position), config.navigation.fast_seek_min_rows)
+            self.assertEqual(position, config.resolve_channel(rows[cursor["row"]])[1].guide_index)
+            self.assertLessEqual(len(ecp.keys), rows.index("Net50"))
+            bursts = [e for e in events if e["event"] == "fast_seek"]
+            self.assertEqual(max(e["count"] for e in bursts), config.navigation.fast_seek_rows)
+            self.assertLessEqual(len(bursts), rows.index("Net50") // 5 + 1)
+
+    def test_fast_seek_corrects_dropped_keys_and_an_overshoot(self):
+        # Fewer game rows than configured: positions are overestimates, and one
+        # key in seven is dropped. The seek must still land near the target.
+        rows = ["NBC", "FOX", "CW", None, *[f"Net{i}" for i in range(80)]]
+        with tempfile.TemporaryDirectory() as directory:
+            controller, config, ecp, cursor = self._seek_guide(directory, rows, drop_every=7)
+            target = config.resolve_channel("Net70")[1]
+            position = controller._fast_seek(target, 0, [])
+            self.assertLess(abs(target.guide_index - position), config.navigation.fast_seek_min_rows)
+            self.assertLess(abs(cursor["row"] - rows.index("Net70")), config.navigation.fast_seek_min_rows)
+        # Starting below the target, it seeks upward.
+        with tempfile.TemporaryDirectory() as directory:
+            controller, config, ecp, cursor = self._seek_guide(directory, rows)
+            cursor["row"] = rows.index("Net75")
+            target = config.resolve_channel("Net20")[1]
+            position = controller._fast_seek(target, config.resolve_channel("Net75")[1].guide_index, [])
+            self.assertEqual(set(ecp.keys), {"Up"})
+            self.assertLess(abs(target.guide_index - position), config.navigation.fast_seek_min_rows)
+
     def test_second_cue_is_rejected_without_sending_keys(self):
         with tempfile.TemporaryDirectory() as directory:
             ecp = FakeEcp()

@@ -167,6 +167,12 @@ class VisualFeedback:
         self.last_capture: dict[str, object] | None = None
         self.on_capture = None
         self.wait = time.sleep
+        # Template files, parsed once until they change, and each template's
+        # scores against the logo last checked: identifying a row compares it
+        # with every template once, not once per channel tried.
+        self._templates: dict[str, dict[str, object]] = {}
+        self._real_paths: dict[str, str] = {}
+        self._score_memo: tuple[object, dict] = (None, {})
         self.ocr = (
             LocalOcr(
                 executable=config.tesseract_path,
@@ -1754,6 +1760,47 @@ class VisualFeedback:
         temporary.replace(path)
         return path
 
+    def _template_file(self, path: Path) -> dict[str, object]:
+        """A template file's JSON, parsed once until the file changes."""
+        stat = path.stat()
+        key = self._real(path)
+        signature = (stat.st_mtime_ns, stat.st_size)
+        entry = self._templates.get(key)
+        if entry is None or entry["signature"] != signature:
+            entry = {"signature": signature, "raw": json.loads(path.read_text(encoding="utf-8"))}
+            self._templates[key] = entry
+        return entry
+
+    def _variants_of(self, entry: dict[str, object]) -> tuple[GrayTemplate, ...]:
+        if "variants" not in entry:
+            entry["variants"] = self._template_variants(entry["raw"])
+        return entry["variants"]
+
+    def _real(self, path: Path) -> str:
+        key = str(path)
+        real = self._real_paths.get(key)
+        if real is None:
+            real = self._real_paths[key] = str(path.resolve())
+        return real
+
+    def _scores_for(self, actual: GrayTemplate) -> dict:
+        """Scores against ``actual``; a new logo starts a new memo."""
+        held, memo = self._score_memo
+        if held is not actual:
+            memo = {}
+            self._score_memo = (actual, memo)
+        return memo
+
+    def _score(self, actual: GrayTemplate, key: str, entry: dict[str, object],
+               memo: dict) -> tuple[float, float]:
+        hit = memo.get(key)
+        if hit is None or hit[0] != entry["signature"]:
+            variants = self._variants_of(entry)
+            hit = (entry["signature"], min(v.difference(actual) for v in variants),
+                   max(v.correlation(actual) for v in variants))
+            memo[key] = hit
+        return hit[1], hit[2]
+
     @staticmethod
     def _template_variants(raw: dict[str, object]) -> tuple[GrayTemplate, ...]:
         templates = [GrayTemplate.from_dict(raw)]
@@ -1815,7 +1862,7 @@ class VisualFeedback:
         required_margin: float | None = None,
     ) -> dict[str, object]:
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
+            entry = self._template_file(path)
         except FileNotFoundError as exc:
             raise NavigationError(
                 f"No {surface} template has been calibrated for {channel!r}",
@@ -1823,6 +1870,7 @@ class VisualFeedback:
             ) from exc
         except (OSError, json.JSONDecodeError) as exc:
             raise NavigationError(f"Cannot read channel template {path}: {exc}") from exc
+        raw = entry["raw"]
         if not isinstance(raw, dict):
             raise NavigationError(f"Channel template {path} is not a JSON object")
         if self._template_kind(raw, path) != expected_kind:
@@ -1830,35 +1878,33 @@ class VisualFeedback:
                 f"Channel template {path} is not a {surface} template"
             )
 
-        expected_variants = self._template_variants(raw)
-        difference = min(expected.difference(actual) for expected in expected_variants)
-        correlation = max(
-            expected.correlation(actual) for expected in expected_variants
-        )
+        memo = self._scores_for(actual)
+        own = self._real(path)
+        difference, correlation = self._score(actual, own, entry, memo)
+        expected_variants = self._variants_of(entry)
         closest_competitor: dict[str, object] | None = None
         closest_correlation_competitor: dict[str, object] | None = None
         assert self.config.template_dir is not None
-        for candidate_path in self.config.template_dir.glob("*.json"):
-            if candidate_path.resolve() == path.resolve():
+        if "listing" not in memo:
+            memo["listing"] = sorted(self.config.template_dir.glob("*.json"))
+        for candidate_path in memo["listing"]:
+            candidate_key = self._real(candidate_path)
+            if candidate_key == own:
                 continue
             try:
-                candidate_raw = json.loads(candidate_path.read_text(encoding="utf-8"))
+                candidate_entry = self._template_file(candidate_path)
+                candidate_raw = candidate_entry["raw"]
                 if not isinstance(candidate_raw, dict):
                     continue
                 if self._template_kind(candidate_raw, candidate_path) != expected_kind:
                     continue
-                candidate_variants = self._template_variants(candidate_raw)
                 candidate_channel = str(
                     candidate_raw.get("channel", candidate_path.stem)
                 )
+                candidate_difference, candidate_correlation = self._score(
+                    actual, candidate_key, candidate_entry, memo)
             except (OSError, json.JSONDecodeError, NavigationError):
                 continue
-            candidate_difference = min(
-                candidate.difference(actual) for candidate in candidate_variants
-            )
-            candidate_correlation = max(
-                candidate.correlation(actual) for candidate in candidate_variants
-            )
             if candidate_difference >= 255:
                 continue
             if (
