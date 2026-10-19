@@ -497,9 +497,8 @@ const isRoku = (channel) => channel.kind === 'roku';
 // The Live Sports rows (games/61): football, baseball and hockey, one row per
 // number, each day's games numbered together by start time. Each airing is
 // its own game, with its own target; Watch puts it on the Roku when today's
-// and the Roku can reach it. ESPN Unlimited's NHL games it cannot reach yet.
+// and the Roku can reach it (hockey from YouTube TV's ESPN page).
 const isGames = (channel) => channel.kind === 'games';
-const ESPN_NOTE = 'It is on YouTube TV\'s ESPN page, under Live; TV Thing cannot send the Roku there yet.';
 function localDate() {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, '0');
@@ -508,7 +507,6 @@ function localDate() {
 // Why a game cannot be put on the Roku from here, or '' when it can.
 function gameRefusal(event) {
   if (!event) return 'Choose a game first.';
-  if (event.source_id === 'nhl') return ESPN_NOTE;
   if (!event.playable) return 'The Roku cannot reach this game.';
   if (event.date !== localDate()) return `${event.title} is not on today; Watch is for today's games.`;
   return '';
@@ -859,8 +857,7 @@ function select(channel, event, { keepTime = true, scroll = true } = {}) {
     + antennaNote(channel, '  · ', '') + (isRoku(channel) ? '  · YouTube TV' : '');
   $('d-title').textContent = event.title || 'No title';
   $('d-sub').innerHTML = parts.join('');
-  $('d-desc').textContent = event.source_id === 'nhl' ? `${event.description || ''} ${ESPN_NOTE}`.trim()
-    : event.description || (isRoku(channel)
+  $('d-desc').textContent = event.description || (isRoku(channel)
       ? 'No description in the listing.' : 'No description — this station sends titles only.');
   $('d-watch').hidden = isGames(channel) && Boolean(gameRefusal(event));
   $('d-watch').textContent = `Watch ${shownNumber(channel)}`;

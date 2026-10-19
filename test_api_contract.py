@@ -152,7 +152,7 @@ def test_roku_lane_lock_tune_and_reuse_over_http(roku_api):
     request, lane = roku_api
     code, sources = request("/api/v1/sources")
     roku_ids = [s["id"] for s in sources["sources"] if s.get("lane") == "roku"]
-    assert roku_ids == ["youtube-tv", "mlb", "thursday-night-football", "sunday-ticket", "roku-manual"]
+    assert roku_ids == ["youtube-tv", "mlb", "thursday-night-football", "sunday-ticket", "nhl", "roku-manual"]
     code, channels = request("/api/v1/sources/youtube-tv")
     assert code == 200 and [i["id"] for i in channels["items"]] == ["NBC", "ESPN"]
     code, games = request("/api/v1/sources/mlb?date=2026-10-01")
@@ -185,30 +185,35 @@ def test_roku_lane_lock_tune_and_reuse_over_http(roku_api):
     assert code == 404 and bad["error"]["code"] == "unknown_channel"
 
 
-def test_hockey_is_listed_for_the_watch_page_and_shares_the_days_numbers(roku_api):
+def test_hockey_is_a_roku_source_and_shares_the_days_numbers(roku_api):
     from test_roku_lane import NHL_SLATE
     from types import SimpleNamespace
     request, lane = roku_api
     nfl = lane.sports
-    lane.sports = SimpleNamespace(game=nfl.game, games=lambda league, day: {
-        "date": day, "games": [dict(game) for game in NHL_SLATE] if league == "nhl"
-        else nfl.games(league, day)["games"]})
+    by_id = {game["game_id"]: game for game in NHL_SLATE}
+    lane.sports = SimpleNamespace(
+        game=lambda league, game_id, day: dict(by_id[game_id]) if league == "nhl" else nfl.game(),
+        games=lambda league, day: {
+            "date": day, "games": [dict(game) for game in NHL_SLATE] if league == "nhl"
+            else nfl.games(league, day)["games"]})
     code, sources = request("/api/v1/sources")
-    # Not among the sources vizelVision and the VCR read: nothing can tune it.
-    assert "nhl" not in [source["id"] for source in sources["sources"]]
-    assert [(s["id"], s["lane"], s["tunable"], s["dated"], s["items_path"]) for s in sources["listed"]] == [
-        ("nhl", "roku", False, True, "/api/v1/sources/nhl")]
+    nhl = next(source for source in sources["sources"] if source["id"] == "nhl")
+    assert (nhl["lane"], nhl["dated"], nhl["items_path"]) == ("roku", True, "/api/v1/sources/nhl")
+    assert sources["listed"] == []
     code, hockey = request("/api/v1/sources/nhl?date=2026-10-20")
-    assert code == 200 and hockey["source"]["tunable"] is False
+    assert code == 200
     # The Thursday game (an earlier kickoff) has 60; ESPN+'s three games follow.
     assert [(i["id"], i["tv_number"], i["playable"]) for i in hockey["items"]] == [
-        ("1", 61, False), ("3", 62, False), ("4", 63, False)]
-    assert "ESPN page" in hockey["items"][0]["note"]
+        ("1", 61, True), ("3", 62, True), ("4", 63, True)]
     # Baseball's catalog numbers the day's hockey with it, as the guide does.
     code, games = request("/api/v1/sources/mlb?date=2026-10-20")
     assert [(i["id"], i["tv_number"]) for i in games["items"]] == [("823254", 64)]
-    code, refused = request("/api/v1/tune", {"source": "nhl", "channel_id": "1", "date": "2026-10-20"})
-    assert code == 400 and lane.controller.plays == []
+    code, tune = request("/api/v1/tune", {"source": "nhl", "channel_id": "1", "date": "2026-10-20"})
+    assert code == 202
+    roku = wait_for(request, lambda l: l["selection"] and l["selection"].get("source_id") == "nhl")
+    assert roku["selection"]["resolved_source"]["provider"] == "espn_unlimited"
+    code, refused = request("/api/v1/tune", {"source": "nhl", "channel_id": "2", "date": "2026-10-20"})
+    assert code == 400
 
 
 def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypatch):

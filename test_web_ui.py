@@ -463,7 +463,7 @@ def test_guide_lists_youtube_tv_and_sends_its_rows_to_the_watch_page():
     assert "./#watch=${encodeURIComponent(`${event.source_id}/${event.channel_id}`)}" in watch
     assert watch.index("gameRefusal(event)") < watch.index("#watch=")
     refusal = section(GUIDE, "function gameRefusal(event)", "async function load()")
-    assert "event.date !== localDate()" in refusal and "ESPN_NOTE" in refusal
+    assert "event.date !== localDate()" in refusal and "!event.playable" in refusal
     assert "watch(selected.channel, selected.event)" in GUIDE
     # A row with no listing stays; Antenna numbers is the antenna's own view.
     assert "isRoku(channel) ? !antennaNumbers\n" in GUIDE

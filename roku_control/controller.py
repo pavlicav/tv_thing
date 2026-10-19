@@ -1667,15 +1667,19 @@ class RokuStreamController:
         *,
         baseball_game: dict[str, object] | None = None,
         sunday_ticket: dict[str, object] | None = None,
+        espn_game: dict[str, object] | None = None,
+        espn_feed: str = "home",
         select: bool = True,
         _reserved: bool = False,
         _operation_id: str | None = None,
     ) -> dict[str, object]:
         """Play a guide row. With `sunday_ticket` (an NFL game), `requested_channel`
-        is the anchor row the scan starts from; `select=False` stops on the verified
-        row without pressing Select."""
+        is the anchor row the scan starts from. With `espn_game` (ESPN Unlimited's),
+        it is the ESPN row whose page lists the game (see espn_unlimited). `select=False`
+        stops on the verified row or card without pressing Select."""
         _, channel = self.config.resolve_channel(requested_channel)
-        label = str(sunday_ticket.get("title")) if sunday_ticket else channel.name
+        game_title = (sunday_ticket or espn_game or {}).get("title")
+        label = str(game_title) if sunday_ticket or espn_game else channel.name
         with self._cue_control(reserved=_reserved):
             operation_id = _operation_id or self._begin_channel_operation(label)
             started = datetime.now(timezone.utc)
@@ -1684,9 +1688,11 @@ class RokuStreamController:
                 phase="checking_control_path",
                 app_state=None,
                 channel=label,
-                provider="sunday_ticket" if sunday_ticket else "youtube_tv",
-                game_pk=(baseball_game or {}).get("game_pk") or (sunday_ticket or {}).get("game_id"),
-                game=(baseball_game or sunday_ticket or {}).get("title"),
+                provider=("sunday_ticket" if sunday_ticket else "espn_unlimited" if espn_game
+                          else "youtube_tv"),
+                game_pk=((baseball_game or {}).get("game_pk")
+                         or (sunday_ticket or espn_game or {}).get("game_id")),
+                game=(baseball_game or sunday_ticket or espn_game or {}).get("title"),
                 message="Checking the Roku and selected return feed",
                 started_at=started.isoformat(),
                 completed_at=None,
@@ -1717,6 +1723,17 @@ class RokuStreamController:
                     verification = self._open_sunday_ticket_row(
                         sunday_ticket, channel, events, guide_observation=guide_observation
                     )
+                elif espn_game:
+                    from .espn_unlimited import open_game
+                    # From Roku Home: while a stream plays behind it, the ESPN page
+                    # keeps the On Now row it first loaded (2026-10-19: 6:30 PM
+                    # events still listed at 7:01, the 7:00 games missing).
+                    self.ecp.keypress("Home")
+                    events.append({"event": "keypress", "key": "Home", "action": "fresh_espn_page"})
+                    self._sleep(self.config.navigation.post_exit_settle_seconds)
+                    guide_observation = self._drive_to_live_guide(app_id, events)
+                    row = self._open_channel_row(channel, events, guide_observation=guide_observation)
+                    verification = {**open_game(self, espn_game, events, feed=espn_feed), "guide_row": row}
                 else:
                     guide_observation = self._drive_to_live_guide(app_id, events)
                     verification = self._open_channel_row(
@@ -1735,8 +1752,9 @@ class RokuStreamController:
                     return result
                 self._publish_operation(
                     phase="starting_playback",
-                    app_state=AppState.LIVE_GUIDE,
-                    message=f"Starting {label} from the verified guide row",
+                    app_state=None if espn_game else AppState.LIVE_GUIDE,
+                    message=(f"Starting {label} from its card on the ESPN page" if espn_game
+                             else f"Starting {label} from the verified guide row"),
                 )
                 self.ecp.keypress("Select")
                 events.append(
@@ -1744,7 +1762,8 @@ class RokuStreamController:
                 )
                 self._sleep(self.config.navigation.play_settle_seconds)
                 try:
-                    player = self._wait_for_playback(app_id, events, confirmations=2 if sunday_ticket else 1)
+                    player = self._wait_for_playback(app_id, events,
+                                                     confirmations=2 if sunday_ticket or espn_game else 1)
                 except SundayTicketBlackoutError as exc:
                     if sunday_ticket is None or verification.get("surface") != "sunday_ticket_guide_row":
                         raise
@@ -1755,7 +1774,7 @@ class RokuStreamController:
                     "ok": True,
                     "operation_id": operation_id,
                     "channel": label,
-                    "guide_index": None if sunday_ticket else channel.guide_index,
+                    "guide_index": None if sunday_ticket or espn_game else channel.guide_index,
                     "started_at": started.isoformat(),
                     "completed_at": completed.isoformat(),
                     "duration_seconds": round((completed - started).total_seconds(), 3),
@@ -1773,6 +1792,12 @@ class RokuStreamController:
                                    "provider": "youtube_tv" if station else "sunday_ticket",
                                    "source": f"{station} (local station)" if station else "NFL Sunday Ticket",
                                    "local_station": station})
+                if espn_game is not None:
+                    stream = verification.get("stream")
+                    result.update({"game_id": espn_game.get("game_id"), "game": espn_game.get("title"),
+                                   "provider": "espn_unlimited",
+                                   "source": "ESPN Unlimited" + (f" ({stream} stream)" if stream else ""),
+                                   "stream": stream})
                 if baseball_game is not None:
                     result.update(
                         {
@@ -1815,11 +1840,16 @@ class RokuStreamController:
                 phase="complete",
                 app_state=AppState.FULL_PROGRAM,
                 message=(f"{label} is playing on {station}, the local station that carries it" if station
+                         else f"{label} is playing on ESPN Unlimited" if espn_game
                          else f"{label} was selected; Roku reported playback"),
                 completed_at=completed.isoformat(),
                 result=result,
             )
-            if sunday_ticket is not None:
+            if espn_game is not None:
+                self._set_on_air({"type": "espn_unlimited", "channel": label, "provider": "espn_unlimited",
+                                  "game_id": espn_game.get("game_id"), "title": espn_game.get("title"),
+                                  "stream": result.get("stream")})
+            elif sunday_ticket is not None:
                 self._set_on_air({"type": "sunday_ticket", "channel": label,
                                   "provider": "youtube_tv" if station else "sunday_ticket", "local_station": station,
                                   "game_id": sunday_ticket.get("game_id"), "title": sunday_ticket.get("title")})
@@ -2491,6 +2521,12 @@ class RokuStreamController:
         anchor = min(self.config.channels, key=lambda channel: channel.guide_index)
         return self.play(anchor.name, sunday_ticket=game, select=select,
                         _reserved=_reserved, _operation_id=_operation_id)
+
+    def play_espn_game(self, game: dict[str, object], *, feed: str = "home",
+                       select: bool = True) -> dict[str, object]:
+        """Play a live ESPN Unlimited game (an NHL game on ESPN+) from YouTube TV's
+        ESPN page, on its home stream when it has two (``feed``)."""
+        return self.play("ESPN", espn_game=game, espn_feed=feed, select=select)
 
     def play_prime_game(self, game: dict[str, object], *, catalog=None) -> dict[str, object]:
         """Resolve and visually verify a live NFL event in the installed Prime app."""

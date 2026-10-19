@@ -45,16 +45,16 @@ SOURCES = {
     MLB: ("Baseball", "games"),
     THURSDAY_NIGHT_FOOTBALL: ("Thursday Night Football", "games"),
     SUNDAY_TICKET: ("NFL Sunday Ticket", "games"),
+    # The NHL games ESPN Unlimited streams inside YouTube TV, found on its ESPN
+    # page (roku_control.espn_unlimited). TV Thing's own: vizelVision has no such source.
+    NHL: ("NHL on ESPN Unlimited", "games"),
     MANUAL: ("Manual Roku", "manual"),
 }
-GAME_SOURCES = (MLB, THURSDAY_NIGHT_FOOTBALL, SUNDAY_TICKET)
-# Games the lineup numbers and the guide lists, though the Roku cannot be sent
-# to them yet, so they are in no source list and refused by tune(): the NHL
-# games ESPN Unlimited streams inside YouTube TV. Finding one on the Roku is
-# still to be built: on 2026-10-19 they were on the ESPN page (its live-guide
-# logo), under Live, in one On Now row, two ESPN+ cards a game (away, home).
-LISTED_SOURCES = {NHL: ("NHL on ESPN Unlimited", "games")}
-NHL_NOTE = "On YouTube TV's ESPN page, under Live. TV Thing cannot send the Roku there yet."
+GAME_SOURCES = (MLB, THURSDAY_NIGHT_FOOTBALL, SUNDAY_TICKET, NHL)
+# Games the lineup numbers and the guide lists though the Roku cannot be sent
+# to them, so they are in no source list and refused by tune(). None now: the
+# NHL's were, until the ESPN page could be browsed (2026-10-19).
+LISTED_SOURCES = {}
 # The league each game source lists, for how long its games usually run.
 GAME_LEAGUES = {MLB: "mlb", THURSDAY_NIGHT_FOOTBALL: "nfl", SUNDAY_TICKET: "nfl", NHL: "nhl"}
 # How long the Roku can take to reach a target and verify it: YouTube TV
@@ -189,6 +189,11 @@ class RokuLane:
             if route.get("provider") not in ("youtube_tv", "mlb"):
                 raise ConfigError("No controllable source is listed for this game")
             return target, game
+        if source == NHL:
+            game = self.sports.game("nhl", int(channel), target["date"])
+            if nhl_on_espn_unlimited(game) is None:
+                raise ConfigError("This NHL game is not on ESPN Unlimited; watch its channel instead")
+            return target, game
         game = self.sports.game("nfl", int(channel), target["date"])
         if source == THURSDAY_NIGHT_FOOTBALL:
             from roku_control.prime_video import prime_nfl_game
@@ -285,6 +290,8 @@ class RokuLane:
                 result = self.controller.play_prime_game(game)
             elif source == MLB:
                 result = self.controller.play_baseball_game(game)
+            elif source == NHL:
+                result = self.controller.play_espn_game(game)
             else:
                 result = self.controller.play(target["channel_id"])
             selection = self._verified(target, result)
@@ -556,8 +563,8 @@ class RokuLane:
                 state = {"pre": "preview", "in": "live", "post": "final"}.get(game.get("state"), game.get("state"))
                 items.append({"id": str(game["game_id"]), "name": game["title"],
                               "start_time": game.get("start_time"), "state": state,
-                              "status": game.get("status"), "playable": False,
-                              "note": NHL_NOTE, "espn_unlimited": stream, "game": game})
+                              "status": game.get("status"), "playable": state != "final",
+                              "espn_unlimited": stream, "game": game})
             return {"date": catalog["date"], "items": items}
         catalog = self.sports.games("nfl", day)
         items = []

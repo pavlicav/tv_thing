@@ -90,6 +90,9 @@ class FakeController:
     def play_sunday_ticket(self, game):
         return self._play(game["title"], "sunday_ticket")
 
+    def play_espn_game(self, game):
+        return self._play(game["title"], "espn_unlimited")
+
     def cancel_operation(self):
         self.cancelled.set()
         self.release.set()
@@ -370,7 +373,7 @@ def test_catalogs(lane):
     assert lane.catalog("roku-manual")["items"][0]["id"] == "manual"
     sources = {source["id"]: source for source in lane.source_list(True)}
     assert set(sources) == set(roku_lane.SOURCES)
-    assert roku_lane.NHL not in sources
+    assert sources["nhl"]["dated"] and sources["nhl"]["name"] == "NHL on ESPN Unlimited"
     assert sources["mlb"]["dated"] and not sources["youtube-tv"]["dated"]
     assert all(source["lane"] == "roku" for source in sources.values())
 
@@ -404,17 +407,27 @@ def test_espn_unlimited_carries_the_out_of_market_games_and_the_exclusives():
     assert canadian == {"exclusive": False, "blackout": {}, "home": [], "away": []}
 
 
-def test_the_nhl_catalog_lists_espn_unlimited_games_the_roku_cannot_reach_yet(lane):
-    lane.sports = SimpleNamespace(games=lambda league, day: {
-        "date": day, "games": [dict(game) for game in NHL_SLATE] if league == "nhl" else []})
+def test_the_nhl_catalog_lists_espn_unlimited_games_and_the_roku_finds_them(lane):
+    by_id = {game["game_id"]: game for game in NHL_SLATE}
+    lane.sports = SimpleNamespace(
+        games=lambda league, day: {
+            "date": day, "games": [dict(game) for game in NHL_SLATE] if league == "nhl" else []},
+        game=lambda league, game_id, day: dict(by_id[game_id]))
     items = lane.catalog(roku_lane.NHL, "2026-10-20")["items"]
     assert [item["id"] for item in items] == ["1", "3", "4"]
-    assert not any(item["playable"] for item in items)
+    assert all(item["playable"] for item in items)
     assert items[0]["espn_unlimited"]["blackout"] == {"WSH": "DC"}
     assert items[0]["state"] == "preview"
+    # A game on ESPN itself is its channel's, not ESPN Unlimited's.
     with pytest.raises(ConfigError):
-        lane.tune({"source_id": roku_lane.NHL, "channel_id": "1", "date": "2026-10-20"})
-    assert lane.controller.plays == []
+        lane.tune({"source_id": roku_lane.NHL, "channel_id": "2", "date": "2026-10-20"})
+    status, _ = lane.tune({"source_id": roku_lane.NHL, "channel_id": "1", "date": "2026-10-20"})
+    assert status == 202
+    settle(lane)
+    assert lane.controller.plays == ["LA at WSH"]
+    selection = lane.selection_view()
+    assert (selection["source_id"], selection["channel_id"]) == ("nhl", "1")
+    assert selection["resolved_source"]["provider"] == "espn_unlimited"
 
 
 def test_status_never_waits_for_a_slow_roku(lane):

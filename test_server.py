@@ -990,7 +990,7 @@ def _nhl_item(game_id, start, away, home, state="preview", period=None, exclusiv
     stream = {"exclusive": exclusive, "blackout": blackout or {},
               "home": [] if exclusive else ["MSG"], "away": [] if exclusive else ["NBCSP"]}
     return {"id": str(game_id), "name": f"{away[1]} at {home[1]}", "start_time": start,
-            "state": state, "playable": False, "espn_unlimited": stream, "game": game}
+            "state": state, "playable": state != "final", "espn_unlimited": stream, "game": game}
 
 
 FLYERS = ("PHI", "Philadelphia Flyers", "Flyers")
@@ -1064,8 +1064,8 @@ def test_the_guide_lists_every_sport_together_on_the_live_sports_numbers(monkeyp
         "Guardians at Rays", "MLB Baseball", "mlb", "823254", "2027-01-15", True)
     assert game["description"] == "Cleveland Guardians at Tampa Bay Rays. On TBS from YouTube TV."
     flyers = rows["games/62"]["events"][0]
-    assert (flyers["title"], flyers["channel_id"], flyers["live"], flyers["playable"]) == (
-        "Flyers at Rangers", "12", True, False)
+    assert (flyers["title"], flyers["source_id"], flyers["channel_id"], flyers["live"], flyers["playable"]) == (
+        "Flyers at Rangers", "nhl", "12", True, True)
     assert flyers["episode_title"] == "NHL Hockey · ESPN Unlimited"
     # Live in the 3rd: about 19 minutes left, by the projection.
     assert flyers["start"] + flyers["duration"] == now + 19 * 60
@@ -1106,8 +1106,8 @@ def test_the_lineup_numbers_the_days_games_together(monkeypatch):
     rows = [row for row in server.api_v1_lineup("2027-01-15")["channels"]
             if row.get("source_id") in ("nhl", "mlb")]
     assert [(row["tv_number"], row["source_id"], row["channel_id"], row["playable"]) for row in rows] == [
-        (60, "nhl", "11", False), (61, "mlb", "823254", True), (62, "nhl", "12", False),
-        (63, "nhl", "13", False)]
+        (60, "nhl", "11", False), (61, "mlb", "823254", True), (62, "nhl", "12", True),
+        (63, "nhl", "13", True)]
 
 
 def test_a_youtube_tv_read_stores_the_listings(monkeypatch):

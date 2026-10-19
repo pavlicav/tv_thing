@@ -135,17 +135,18 @@ refreshed in the background), `generation` and `reuse_max_age_seconds`.
   `youtube-tv` (channels in Live-guide order, with aliases), `mlb` (the
   day's games and the route each would take: a national YouTube TV channel
   or MLB.TV), `thursday-night-football` (Prime Video), `sunday-ticket`
-  (Sunday-afternoon CBS/FOX games), and `roku-manual`. Every item has an
+  (Sunday-afternoon CBS/FOX games), `nhl` (NHL games on ESPN Unlimited,
+  found on YouTube TV's ESPN page; each item's `espn_unlimited` says whether
+  it is an exclusive and which markets may black it out), and `roku-manual`.
+  Every item has an
   `id` (the `channel_id` to tune) and a `name`; games carry `game`,
   `state`, `start_time` and `playable`.
   `GET api/v1/sources` also has `listed`: catalogs in the same shape, with
-  `tunable: false`, that nothing can tune yet. Today that is `nhl`, the NHL
-  games ESPN Unlimited streams in YouTube TV (`GET api/v1/sources/nhl?date=`,
-  every item `playable: false` with a `note` on where to find it). They are
-  not under `sources`, so a client that tunes what it lists never offers
-  them; a tune of one is **400**. A day's games are numbered across the whole
-  games block, `nhl` included, so a game's `tv_number` is the same in every
-  catalog, the lineup and the guide.
+  `tunable: false`, that nothing can tune (none at present; `nhl` was one
+  until the ESPN page could be browsed). They are not under `sources`, so a
+  client that tunes what it lists never offers them; a tune of one is
+  **400**. A day's games are numbered across the whole games block, so a
+  game's `tv_number` is the same in every catalog, the lineup and the guide.
 * **Tune**: POST `api/v1/tune` `{"source": "youtube-tv", "channel_id": "ESPN",
   "token": …}` (games add `"date"`). **200** with `reused: true` when the Roku
   already shows that verified selection, recently and on the current capture,
@@ -246,8 +247,7 @@ starting in the next N hours). Three kinds of row share it:
   projected final; finished games are left out. The `nhl` source is NHL
   games on ESPN Unlimited (out-of-market and ESPN+ exclusives), with
   `exclusive` and, for a team that may be blacked out, `blackout` (the
-  markets: `["DC"]`). It is listed only: `playable` is false and a tune of it
-  is **400**. `sports` describes them: `available`, `games`, `by_source` and
+  markets: `["DC"]`). `sports` describes them: `available`, `games`, `by_source` and
   `errors` (a schedule that did not answer, by `source_id` and `date`). A
   request for one other row (`?channel=7.1`) reads no schedule and gives
   `sports: null`.

@@ -562,8 +562,8 @@ are numbered together by start time, so 61 can be a hockey game tonight and a
 football game on Sunday. An airing runs from its start to the projected final
 and goes once the game is over. **Watch** puts one of today's games on the
 Roku through the Watch page, as its own source would (Sunday Ticket, Thursday
-Night Football, MLB). Record is not offered on these rows yet; the VCR page
-tapes a game.
+Night Football, MLB, NHL). Record is not offered on these rows yet; the VCR
+page tapes a game.
 
 **Hockey is ESPN Unlimited's.** YouTube TV's main plan has carried ESPN
 Unlimited since 2026-09-01, and with it the NHL's out-of-market games (NHL
@@ -573,12 +573,22 @@ an exclusive also lists Disney+ and Hulu. Games on ESPN, ABC, TNT or NHL
 Network are left out, since they are on those channels' rows. Out-of-market
 games are blacked out locally, and YouTube TV places the Roku in DC or
 Lansing, so Capitals and Red Wings games are marked "may be blacked out"
-(exclusives never are). In YouTube TV the games are on the ESPN page (the
-network row's logo in the live guide), under **Live**: one On Now row of
-cards, labelled ESPN+, two per game (away stream, then home), seen on
-2026-10-19. TV Thing cannot send the Roku there yet, so these rows have no
-Watch: the `nhl` source is listed (`roku_lane.LISTED_SOURCES`) but not
-tunable.
+(exclusives never are).
+
+The Roku finds a game on YouTube TV's ESPN page (`nhl` source,
+`roku_control/espn_unlimited.py`). The games have no guide rows of their
+own; the page, opened from the ESPN row's station tile, lists them under
+**Live**, in one On Now row of cards labelled ESPN+, two per game: the away
+stream, then the home (seen on 2026-10-19). A tune starts from Roku Home,
+because while a stream plays behind it the page keeps the row it first
+loaded. It walks the verified guide to the ESPN row and opens its page,
+checked against the calibrated ESPN page logo. Then Down to the section menu
+(Live focused), Right into On Now, and right again card by card. The focused
+card is always the leftmost, under a white ring; OCR reads its caption until
+it names both teams. It takes the home stream's card when there are two,
+re-reads it, and Select plays it, verified as any YouTube TV tune (two
+playing frames). A game not on the row (not started, or blacked out) fails
+with "not on the ESPN page's On Now row".
 
 The guide shows these rows by their TV Thing numbers among the antenna's.
 **Watch** opens the Watch page, which sends the Roku there and shows its
