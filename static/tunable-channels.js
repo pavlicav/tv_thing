@@ -1,24 +1,42 @@
-/* Shared shape for the Watch page's tunable channel list. */
+/* Shared shape for the Watch page's tunable channel list: the TV Thing
+   lineup, in channel-number order. The server numbers every channel
+   (lineup.json; tv_number on each catalog item) and says which numbers are
+   the station's (/api/v1/sources lineup.house); this only puts them in
+   order. Anything the server did not number follows, by name. */
 (function (root) {
-  function catalog(channels, sources, feeds, date) {
-    const items = [{ id: 'vizelvision', kind: 'vizelvision', name: 'VizelVision',
-      key: 'VV', sourceName: 'VizelVision', tag: 'LIVE', search: 'vizelvision vizel vision live station' }];
+  function numbered(entry, from) {
+    const number = from && Number.isInteger(from.tv_number) ? from.tv_number : null;
+    entry.number = number;
+    entry.section = (from && from.tv_section) || null;
+    if (from && from.tv_name) entry.name = from.tv_name;
+    if (number !== null) entry.search = `${number} ch ${number} ${entry.search}`;
+    return entry;
+  }
+
+  function catalog(channels, sources, feeds, date, lineup) {
+    const house = lineup && Array.isArray(lineup.house) && lineup.house.length ? lineup.house : [null];
+    const items = house.map(view => numbered({
+      id: view && Number.isInteger(view.tv_number) ? `vizelvision:${view.tv_number}` : 'vizelvision',
+      kind: 'vizelvision', name: 'VizelVision', sourceName: 'VizelVision', tag: 'LIVE',
+      search: 'vizelvision vizel vision live station' }, view));
     for (const channel of channels) {
-      items.push({ id: `digital:${channel.id}`, kind: 'digital', name: channel.name,
-        key: channel.number, sourceName: 'ATSC', tag: 'ATSC', channel,
-        search: `${channel.number} ${channel.name} ATSC digital antenna RF ${channel.rf_channel}` });
+      items.push(numbered({ id: `digital:${channel.id}`, kind: 'digital', name: channel.name,
+        sourceName: 'ATSC', tag: channel.number, channel,
+        search: `${channel.number} ${channel.name} ATSC digital antenna RF ${channel.rf_channel}` }, channel));
     }
     for (const source of sources) {
       for (const item of feeds[source.id] || []) {
-        items.push({ id: `roku:${source.id}:${source.dated ? date + ':' : ''}${item.id}`,
+        items.push(numbered({ id: `roku:${source.id}:${source.dated ? date + ':' : ''}${item.id}`,
           kind: 'roku', name: item.name, sourceName: source.name, tag: 'ROKU', source, item,
-          search: `Roku ${source.name} ${item.name} ${(item.aliases || []).join(' ')} ${item.status || ''}` });
+          search: `Roku ${source.name} ${item.name} ${(item.aliases || []).join(' ')} ${item.status || ''}` }, item));
       }
     }
-    // One alphabetical lineup; the house station stays at the top.
-    return [items[0], ...items.slice(1).sort((a, b) =>
-      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
-      || a.id.localeCompare(b.id))];
+    // Without a lineup the station stays at the top of an alphabetical list.
+    const rank = entry => entry.number !== null ? 0 : (entry.kind === 'vizelvision' ? -1 : 1);
+    return items.sort((a, b) => rank(a) - rank(b)
+      || (a.number !== null && b.number !== null ? a.number - b.number : 0)
+      || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+      || a.id.localeCompare(b.id));
   }
   const api = { catalog };
   if (typeof module === 'object' && module.exports) module.exports = api;

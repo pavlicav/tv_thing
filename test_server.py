@@ -847,6 +847,16 @@ def test_guide_payload_can_narrow_to_one_channel_and_a_window(monkeypatch):
     assert [e["title"] for e in narrow["channels"]["9.1"]["events"]] == ["On now"]
 
 
+def test_guide_payload_names_each_channel_by_its_tv_thing_number(monkeypatch):
+    now = 1_800_000_000
+    monkeypatch.setattr(server.epg, "load_guide", lambda: _stored_guide(now))
+    monkeypatch.setattr(server, "load_channels", lambda: [
+        {"id": "wusa_hd_9_1", "number": "9.1", "name": "WUSA-HD", "rf_channel": 9}])
+    channel = server.guide_payload(now=now)["channels"]["9.1"]
+    assert (channel["number"], channel["tv_number"], channel["tv_section"]) == (
+        "9.1", 9, "Local stations")
+
+
 def test_guide_payload_without_data_says_so_rather_than_failing(monkeypatch):
     monkeypatch.setattr(server.epg, "load_guide", lambda: None)
     payload = server.guide_payload()

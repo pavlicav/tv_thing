@@ -442,6 +442,9 @@
       <label class="k opt" title="Programme descriptions ride in a separate table that only repeats once a minute, so this turns a one-minute refresh into a long one.">
         <input type="checkbox" id="opt-desc"> Descriptions
       </label>
+      <label class="k opt" title="List the channels by the antenna's own numbers (4.1, 22.4…) instead of TV Thing's lineup">
+        <input type="checkbox" id="opt-antenna"> Antenna numbers
+      </label>
       <div class="guide-meta" id="meta"></div>
     </footer>
   </main>
@@ -467,6 +470,9 @@ let selected = null;        // { channel, event }
 let focusTime = 0;          // the time up/down moves keep to, as a real box does
 let tunedNumber = null;
 let userMoved = false;     // until then, follow the tuned channel
+// TV Thing's lineup numbers, or the antenna's own: this browser's choice.
+let antennaNumbers = false;
+try { antennaNumbers = localStorage.getItem('tv-thing.guide.antenna-numbers') === '1'; } catch (_) {}
 
 const fmtTime = (unix) => new Date(unix * 1000)
   .toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -552,8 +558,16 @@ function drawGrid() {
   drawNowLine(now);
 }
 
-// The same order the channel list uses: every primary first by major number,
-// then the subchannels grouped under their major. server.py's
+// The number a viewer goes by: the lineup's, unless antenna numbers are on
+// or the lineup has none for it. Tuning and recording always use the
+// antenna's own (channel.number).
+function shownNumber(channel) {
+  return !antennaNumbers && Number.isInteger(channel.tv_number)
+    ? String(channel.tv_number) : channel.number;
+}
+
+// Antenna numbers: the order the Antenna tab uses, every primary first by
+// major number, then the subchannels grouped under their major. server.py's
 // channel_sort_key is the reference -- the two must not drift apart.
 function channelSortKey(number) {
   const [major, minor] = String(number).split('.').map(Number);
@@ -562,6 +576,11 @@ function channelSortKey(number) {
 }
 
 function compareChannels(a, b) {
+  const numbered = (channel) => Number.isInteger(channel.tv_number);
+  if (!antennaNumbers && (numbered(a) || numbered(b))) {
+    if (!numbered(a) || !numbered(b)) return numbered(a) ? -1 : 1;
+    if (a.tv_number !== b.tv_number) return a.tv_number - b.tv_number;
+  }
   const left = channelSortKey(a.number);
   const right = channelSortKey(b.number);
   return left[0] - right[0] || left[1] - right[1] || left[2] - right[2];
@@ -617,11 +636,12 @@ function drawRows(list, width, now) {
     if (channel.number === tunedNumber) chan.classList.add('tuned');
     chan.style.width = `${CHAN_W}px`;
     chan.innerHTML =
-      `<span class="chan-num">${escape(channel.number)}</span>` +
+      `<span class="chan-num">${escape(shownNumber(channel))}</span>` +
       `<span class="chan-name">${escape(channel.name)}</span>`;
     chan.title = channel.stale
       ? `${channel.name} — from an earlier refresh; this frequency did not read this time`
-      : `Watch ${channel.number} ${channel.name}`;
+      : `Watch ${shownNumber(channel)} ${channel.name}` + (shownNumber(channel) !== channel.number
+        ? ` (antenna ${channel.number})` : '');
     chan.onclick = () => watch(channel);
     row.appendChild(chan);
 
@@ -746,13 +766,14 @@ function select(channel, event, { keepTime = true, scroll = true } = {}) {
   if (event.captions) parts.push('<span class="badge">CC</span>');
   if (channel.stale) parts.push('<span class="badge">EARLIER REFRESH</span>');
 
-  $('d-chan').textContent = `${channel.number}  ${channel.name || ''}`;
+  $('d-chan').textContent = `${shownNumber(channel)}  ${channel.name || ''}`
+    + (shownNumber(channel) !== channel.number ? `  · ${channel.number}` : '');
   $('d-title').textContent = event.title || 'No title';
   $('d-sub').innerHTML = parts.join('');
   $('d-desc').textContent = event.description
     || 'No description — this station sends titles only.';
   $('d-watch').hidden = false;
-  $('d-watch').textContent = `Watch ${channel.number}`;
+  $('d-watch').textContent = `Watch ${shownNumber(channel)}`;
   $('d-record').hidden = end <= now;
   $('btn-record-key').disabled = end <= now;
   $('d-record').disabled = false;
@@ -991,9 +1012,10 @@ async function pollPreview() {
   }
   const stream = lane && lane.stream;
   const selection = (lane && lane.selection) || {};
+  const known = lane && lane.id === 'digital' && channels.find((c) => c.number === selection.number);
   const label = lane && lane.id === 'analog'
     ? `Cable ${selection.channel || ''}`
-    : [selection.number, selection.name].filter(Boolean).join(' ');
+    : [known ? shownNumber(known) : selection.number, selection.name].filter(Boolean).join(' ');
   $('pip-label').textContent = label;
 
   const number = lane && lane.id === 'digital' ? selection.number || null : null;
@@ -1044,6 +1066,16 @@ $('btn-now').onclick = () => jumpToNow();
 $('btn-prev').onclick = () => page(-1);
 $('btn-next').onclick = () => page(1);
 $('btn-refresh').onclick = refresh;
+$('opt-antenna').checked = antennaNumbers;
+$('opt-antenna').onchange = () => {
+  antennaNumbers = $('opt-antenna').checked;
+  try { localStorage.setItem('tv-thing.guide.antenna-numbers', antennaNumbers ? '1' : '0'); } catch (_) {}
+  if (!guide || !guide.available) return;
+  render();
+  // The detail line and the preview name the channel by number too.
+  if (selected) select(selected.channel, selected.event, { scroll: true });
+  pollPreview();
+};
 $('d-watch').onclick = () => selected && watch(selected.channel);
 $('d-record').onclick = () => selected && record(selected.channel, selected.event);
 $('btn-record-key').onclick = () => selected && !$('d-record').hidden

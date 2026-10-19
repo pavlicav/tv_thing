@@ -109,8 +109,8 @@ Browse to `http://<server-ip>:8080` on any device on your LAN.
 - One player and source panel for Digital and Analog; the dormant FM markup and backend remain available for compatible hardware
 - Digital and analog stream concurrently; switching tabs does not retune the other lane
 - Frequency-ordered analog list with all channels 1–135 and no channel scan
-- Channel list sorted by virtual channel number (primaries first, then subchannels)
-- Shows RF channel alongside virtual channel number
+- One channel lineup with **TV Thing channel numbers** across the antenna, the Roku and VizelVision (see [TV Thing channel numbers](#tv-thing-channel-numbers))
+- **Antenna** tab: the antenna channels by their own virtual numbers (primaries first, then subchannels), with the RF channel
 - Quality selector: **Low** (480p / 1 Mbps), **Medium** (720p / 2.5 Mbps), **High** (native / 4.5 Mbps)
 - Filter box (`/` to focus) over channels
 - Live HLS playback via [hls.js](https://github.com/video-dev/hls.js) — bundled locally, no internet required
@@ -337,6 +337,10 @@ Two things make that materially faster than the previous `w_scan` pipeline:
   eight serial section reads at about 1.2 s each. The demux supports many
   simultaneous filters, so they now cost one PMT cycle in total -- which took
   a locked frequency from roughly 12 s to under 4 s.
+
+A rescan replaces `channels.json`. A channel it finds that the lineup does
+not list is numbered automatically in 250–299 ("New on the antenna"); see
+[TV Thing channel numbers](#tv-thing-channel-numbers).
 
 Scan the whole band from the Scan page, or drive it directly:
 
@@ -771,12 +775,14 @@ chips, alongside the S5H1409 demodulator.
 
 ### Unified tunable channels (Watch)
 
-Watch opens with **All channels**: one searchable alphabetical lineup containing
-ATSC antenna channels, the Roku’s YouTube TV channels and dated game feeds, and
-**VizelVision**, pinned first. Each row names its source; matching station names
-on ATSC and Roku remain separate choices. Search accepts channel numbers,
-station names, Roku aliases, and source names. Cable and Roku filters remain
-available, including the Roku game date, locks and Manual Roku remote.
+Watch opens with **All channels**: one searchable lineup, in TV Thing channel
+number order under lineup-card headings, containing ATSC antenna channels, the
+Roku’s YouTube TV channels and dated game feeds, Manual Roku, and
+**VizelVision** (channels 0 and 70). Each row names its source; matching station
+names on ATSC and Roku remain separate choices. Search accepts TV Thing and
+antenna channel numbers, station names, Roku aliases, and source names. The
+Antenna, Cable and Roku tabs remain available, including the Roku game date,
+locks and Manual Roku remote.
 
 Selecting VizelVision watches its existing station output in the same player.
 It does not tune the Roku or ATSC receiver, take a source lock, change master
@@ -791,6 +797,39 @@ must supply relative, flat playlist/media references (as VizelVision does).
 Playlist query strings, initialization segments and byte ranges are preserved.
 Only GETs for HLS assets are relayed, with a 5-second upstream timeout and a
 16 MiB response limit.
+
+### TV Thing channel numbers
+
+Every channel has a TV Thing number, laid out like an old cable lineup card in
+[`lineup.json`](lineup.json):
+
+| Numbers | Section |
+|---|---|
+| 0, 70 | VizelVision (the house channel) |
+| 1–20 | Local stations: DC's network stations on their own dial positions (4, 5, 7, 9), NHK World on 1, the other DC stations, and the Roku's Lansing locals (YouTube TV) on 15–20 |
+| 21–49 | Cable networks from YouTube TV; 39 up is free |
+| 50–69 | Football: the day's NFL Sunday Ticket and Thursday Night Football games, by kickoff |
+| 71–89 | Baseball: the day's MLB games, by first pitch |
+| 90–99 | Roku (Manual Roku on 99) |
+| 100–179 | The antenna's diginets and public-television subchannels, by genre |
+| 200–229 | Shopping, faith, and repeaters of other channels |
+| 250–299 | New on the antenna |
+| 300 up | Overflow |
+
+Games are numbered afresh each day from the start of their section, so a
+day's slate keeps its numbers all day. Anything `lineup.json` does not list
+is numbered automatically: a channel a rescan turns up takes the first free
+number in 250–299, a YouTube TV row added to `roku.json` the first free one in
+the cable section. That number is kept in `lineup_state.json` (not in git) so
+it never moves. To move a channel, list it in `lineup.json`; that takes
+precedence, and a UI reload shows it. An unusable `lineup.json` leaves
+channels unnumbered (the Watch list falls back to alphabetical) rather than
+renumbering anything.
+
+The Guide shows TV Thing numbers too; its **Antenna numbers** option (kept
+per browser) lists the antenna's own numbers in antenna order instead. Tuning
+and recording always use the antenna channel itself, so either view tunes
+and tapes the same channel.
 
 Additional fast checks: `node --test test_tunable_channels.cjs test_live_player.cjs`
 and `node test_tunable_browser.cjs /path/to/playwright`. The browser check mocks

@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "TV Thing core integration API",
-    "version": "1.1.0",
-    "description": "Core control contract. API.md defines ownership, retry, addressing, and trusted-LAN rules. Additional discovery and diagnostic endpoints are listed by GET /api/v1. 1.1.0 adds the roku lane: Roku sources, asynchronous Roku tunes (202 with an operation), the Roku remote, the still-playing check, and Roku recordings."
+    "version": "1.2.0",
+    "description": "Core control contract. API.md defines ownership, retry, addressing, and trusted-LAN rules. Additional discovery and diagnostic endpoints are listed by GET /api/v1. 1.1.0 adds the roku lane: Roku sources, asynchronous Roku tunes (202 with an operation), the Roku remote, the still-playing check, and Roku recordings. 1.2.0 adds TV Thing channel numbers: tv_number, tv_name and tv_section on catalog items and guide channels, the lineup in GET /sources, and GET /lineup."
   },
   "servers": [
     {
@@ -56,6 +56,103 @@
               "application/json": {
                 "schema": {
                   "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/lineup": {
+      "get": {
+        "summary": "Every channel with its TV Thing number, in number order",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "description": "YYYY-MM-DD: the day whose games are listed",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "channels",
+                    "sections"
+                  ],
+                  "properties": {
+                    "date": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "sections": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "channels": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "tv_number": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "tv_name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "tv_section": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "kind": {
+                            "enum": [
+                              "vizelvision",
+                              "digital",
+                              "roku"
+                            ]
+                          },
+                          "source_id": {
+                            "type": "string"
+                          },
+                          "channel_id": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "lineup_error": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
                 }
               }
             }

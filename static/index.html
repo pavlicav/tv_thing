@@ -493,6 +493,7 @@
       <div class="topbar-tools">
         <div class="segmented source-tabs" id="source-tabs" role="tablist" aria-label="Source">
           <button role="tab" id="tab-tv" aria-selected="true">All channels</button>
+          <button role="tab" id="tab-antenna" aria-selected="false" title="The antenna's own channel numbers, the way a TV lists them">Antenna</button>
           <button role="tab" id="tab-cable" aria-selected="false">Cable</button>
           <button role="tab" id="tab-roku" aria-selected="false">Roku</button>
           <button role="tab" id="tab-radio" aria-selected="false" hidden>FM Radio</button>
@@ -655,7 +656,7 @@
     const FM_UI_ENABLED = false; // backend is retained for compatible hardware
 
     const els = {
-      tabTv: $("tab-tv"), tabCable: $("tab-cable"),
+      tabTv: $("tab-tv"), tabAntenna: $("tab-antenna"), tabCable: $("tab-cable"),
       tabRadio: $("tab-radio"), tabRoku: $("tab-roku"),
       rokuTools: $("roku-tools"), rokuLockText: $("roku-lock-text"),
       rokuLock: $("roku-lock"), rokuDate: $("roku-date"), rokuStop: $("roku-stop"),
@@ -687,6 +688,8 @@
       mode: "tv",        // all channels, or a source filter
       playing: null,     // stage source: tv, cable, roku, vizelvision, fm or null
       channels: [],
+      lineup: null,      // /api/v1/sources lineup: section names and the station's numbers
+      houseNumber: null, // which of the station's numbers was chosen
       cableChannels: [],
       cableAvailable: false,
       cableTuner: null,
@@ -785,7 +788,7 @@
         return;   // the banner keeps what it had; the guide is optional
       }
       renderBanner();
-      if (state.mode === "tv") renderList();
+      if (["tv", "antenna"].includes(state.mode)) renderList();
     }
 
     // The airing on now, even if the cached "now" has just ended and the
@@ -809,7 +812,8 @@
       const now = Date.now() / 1000;
       if (state.playing === "tv") {
         const ch = state.channels.find(c => c.id === state.currentChannelId);
-        num.textContent = ch ? ch.number : "– –";
+        num.textContent = ch ? (Number.isInteger(ch.tv_number) ? String(ch.tv_number) : ch.number) : "– –";
+        num.title = ch ? `Antenna ${ch.number} · RF ${ch.rf_channel}` : "";
         const { now: on, next } = ch ? listingFor(ch.number, now) : {};
         if (!on && !next) {
           body.innerHTML = '<div class="bn-none">No listing for this channel</div>';
@@ -836,18 +840,24 @@
         const html = `<div class="bn-split"><div class="bn-now">${nowHtml}</div>${later}</div>`;
         body.innerHTML = html;
       } else if (state.playing === "vizelvision") {
-        num.textContent = "VV";
+        num.textContent = state.houseNumber !== null ? String(state.houseNumber) : "VV";
+        num.title = "";
         body.innerHTML = '<div class="bn-row"><span class="bn-k">NOW</span>' +
           '<span class="bn-title">VizelVision</span></div>' +
           '<div class="bn-desc">The station’s live broadcast</div>';
       } else if (state.playing === "cable") {
         num.textContent = state.currentCableChannel != null ? String(state.currentCableChannel) : "– –";
+        num.title = "";
         body.innerHTML = '<div class="bn-none">Analog cable carries no guide</div>';
       } else if (state.playing === "roku") {
         const roku = (state.roku.lane && state.roku.lane.roku) || {};
         const selection = roku.selection;
         const operation = roku.operation;
-        num.textContent = rokuShortName(selection && selection.source_id);
+        // The channel it is on, or on its way to.
+        const shown = rokuItem(operation && operation.active ? operation.target : selection);
+        num.textContent = shown && Number.isInteger(shown.tv_number) ? String(shown.tv_number)
+          : rokuShortName(selection && selection.source_id);
+        num.title = "";
         let html = "";
         if (operation && operation.active) {
           html += `<div class="bn-row"><span class="bn-k">SEEK</span>` +
@@ -872,6 +882,7 @@
         body.innerHTML = html;
       } else {
         num.textContent = "– –";
+        num.title = "";
         body.innerHTML = '<div class="bn-none">Choose a channel</div>';
       }
     }
@@ -1160,6 +1171,7 @@
         if (cable) state.cableAvailable = cable.available !== false;
         state.roku.sources = sources.filter(source => source.lane === "roku");
         state.roku.available = state.roku.sources.length > 0;
+        if (data.lineup) state.lineup = data.lineup;
         sourcePollMs = Math.max(
           1000,
           Number((data.source && data.source.poll_interval_ms)
@@ -1199,19 +1211,21 @@
       // The panel follows the selected tab; the stage follows what is
       // actually playing, so switching tabs never hides live controls.
       const tv = state.mode === "tv";
+      const antenna = state.mode === "antenna";
       const cable = state.mode === "cable";
       const radio = state.mode === "radio";
       const rokuTab = state.mode === "roku";
       els.tabTv.setAttribute("aria-selected", String(tv));
+      els.tabAntenna.setAttribute("aria-selected", String(antenna));
       els.tabCable.setAttribute("aria-selected", String(cable));
       els.tabRadio.setAttribute("aria-selected", String(radio));
       els.tabRoku.setAttribute("aria-selected", String(rokuTab));
       els.tabRoku.hidden = !state.roku.available;
       // The Roku sends its own picture: there is no quality to choose.
       els.qualityGroup.classList.toggle("hidden", radio || ["roku", "vizelvision"].includes(state.playing));
-      els.panelLabel.textContent = tv ? "Tunable channels"
+      els.panelLabel.textContent = tv ? "Tunable channels" : antenna ? "Antenna Channels"
         : (cable ? "Analog Channels" : (rokuTab ? "Roku Feeds" : "Stations"));
-      els.filter.placeholder = tv ? "Filter all channels…"
+      els.filter.placeholder = tv ? "Filter all channels…" : antenna ? "Filter antenna channels…"
         : (cable ? "Filter analog channels…"
           : (rokuTab ? "Filter Roku feeds…" : "Filter stations…"));
       els.rokuTools.hidden = !(state.roku.available && (tv || rokuTab));
@@ -1226,9 +1240,9 @@
       els.placeholder.classList.toggle("hidden", state.playing !== null);
 
       if (state.playing === null) {
-        els.phTitle.textContent = tv ? "No Signal"
+        els.phTitle.textContent = tv || antenna ? "No Signal"
           : (cable ? "Analog Idle" : (rokuTab ? "Roku" : "Radio Idle"));
-        els.phSub.textContent = tv ? "Choose a channel to begin"
+        els.phSub.textContent = tv || antenna ? "Choose a channel to begin"
           : rokuTab ? "Choose a feed, or Manual Roku to drive it yourself"
           : (cable ? (state.cableAvailable
               ? "Choose an analog channel to begin"
@@ -1274,6 +1288,11 @@
 
       if (state.mode === "tv") {
         renderTunableList();
+        return;
+      }
+
+      if (state.mode === "antenna") {
+        renderAntennaList();
         return;
       }
 
@@ -1334,7 +1353,17 @@
 
     function tunableChannels() {
       return TunableChannels.catalog(state.channels, state.roku.sources,
-                                     state.roku.items, state.roku.date);
+                                     state.roku.items, state.roku.date, state.lineup);
+    }
+
+    // A lineup-card heading; a games section says which day it lists.
+    function sectionHeading(name) {
+      const sections = (state.lineup && state.lineup.sections) || [];
+      const games = sections.some(section => section.name === name && section.games);
+      const header = document.createElement("div");
+      header.className = "list-section";
+      header.textContent = games && state.roku.date ? `${name} · ${state.roku.date}` : name;
+      return header;
     }
 
     function renderTunableList() {
@@ -1345,13 +1374,19 @@
       const operation = roku.operation || {};
       rokuListKey = [state.playing, selection.source_id, selection.channel_id, selection.date,
                     operation.active && operation.target && operation.target.channel_id].join("|");
+      let section = null;
       for (const entry of items) {
+        if (entry.section && entry.section !== section) els.list.appendChild(sectionHeading(entry.section));
+        section = entry.section;
         const button = document.createElement("button");
         button.className = "list-item";
         button.dataset.channelKey = entry.id;
-        let key = entry.key, sub = "", tag = entry.tag, current = false, progress = "";
+        const numbered = entry.number !== null;
+        let key = numbered ? String(entry.number) : "", sub = "", tag = entry.tag, current = false, progress = "";
         if (entry.kind === "digital") {
           current = state.playing === "tv" && state.currentChannelId === entry.channel.id;
+          // The antenna's own number rides in the tag, as the Antenna tab lists it.
+          if (!numbered) { key = entry.channel.number; tag = "ATSC"; }
           const on = listingFor(entry.channel.number, Date.now() / 1000).now;
           sub = on ? on.title || "No title" : `Antenna · RF ${entry.channel.rf_channel}`;
           if (on) progress = `<span class="item-bar"><i style="width:${progressOf(on, Date.now() / 1000).toFixed(0)}%"></i></span>`;
@@ -1360,16 +1395,19 @@
           const { source, item } = entry;
           current = state.playing === "roku" && selection.source_id === source.id
             && selection.channel_id === item.id && (!source.dated || selection.date === state.roku.date);
-          key = source.dated ? gameClock(item) || rokuShortName(source.id) : rokuShortName(source.id);
+          const clock = source.dated ? gameClock(item) : "";
+          if (!numbered) key = clock || rokuShortName(source.id);
+          else if (clock) tag = clock;
           sub = [source.name, source.dated ? item.status : item.note].filter(Boolean).join(" · ");
           if (operation.active && operation.target && operation.target.source_id === source.id
               && operation.target.channel_id === item.id) tag = "MOVING";
           button.disabled = source.available === false || item.playable === false;
           button.addEventListener("click", () => tuneRoku(source, item));
         } else {
-          current = state.playing === "vizelvision";
+          current = state.playing === "vizelvision" && state.houseNumber === entry.number;
+          if (!numbered) key = "VV";
           sub = "The station’s live broadcast";
-          button.addEventListener("click", tuneVizelVision);
+          button.addEventListener("click", () => tuneVizelVision(entry.number));
         }
         button.setAttribute("aria-current", String(current));
         button.innerHTML = `<span class="item-key">${escapeHtml(key)}</span>` +
@@ -1386,8 +1424,50 @@
       }
     }
 
-    function tuneVizelVision() {
+    // The antenna channels by their own numbers, as a TV lists them after a
+    // scan: primaries first, then each station's subchannels, with the RF.
+    function renderAntennaList() {
+      const items = state.channels.filter(channel => matches(
+        `${channel.number} ${channel.name} rf ${channel.rf_channel} ch ${channel.tv_number ?? ""}`));
+      els.panelCount.textContent = String(items.length);
+      const now = Date.now() / 1000;
+      for (const channel of items) {
+        const button = document.createElement("button");
+        button.className = "list-item";
+        button.dataset.channelKey = `antenna:${channel.id}`;
+        button.setAttribute("aria-current",
+                            String(state.playing === "tv" && state.currentChannelId === channel.id));
+        const on = listingFor(channel.number, now).now;
+        const sub = [Number.isInteger(channel.tv_number) ? `Ch ${channel.tv_number}` : "",
+                     on ? on.title || "No title" : ""].filter(Boolean).join(" · ");
+        const progress = on
+          ? `<span class="item-bar"><i style="width:${progressOf(on, now).toFixed(0)}%"></i></span>` : "";
+        button.innerHTML = `<span class="item-key">${escapeHtml(channel.number)}</span>` +
+          `<span class="item-body"><span class="item-name">${escapeHtml(channel.name)}</span>` +
+          (sub ? `<span class="item-sub">${escapeHtml(sub)}</span>` : "") + `${progress}</span>` +
+          `<span class="item-tag">RF ${escapeHtml(channel.rf_channel)}</span>`;
+        button.addEventListener("click", () => tuneTv(channel.id));
+        els.list.appendChild(button);
+      }
+      if (!items.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = state.filter ? "Nothing matches that filter." : "No channels yet — run a scan.";
+        els.list.appendChild(empty);
+      }
+    }
+
+    // The tune message's "Channel 4 · antenna 4.1"; the antenna number alone
+    // when the lineup has not numbered it.
+    function digitalLabel(channel) {
+      const known = state.channels.find(c => c.id === channel.id) || channel;
+      return Number.isInteger(known.tv_number)
+        ? `Channel ${known.tv_number} · antenna ${known.number}` : `Channel ${known.number}`;
+    }
+
+    function tuneVizelVision(number) {
       const serial = ++state.tuneSerial;
+      state.houseNumber = Number.isInteger(number) ? number : null;
       state.tuning = false;
       state.needsReconnect = false;
       state.currentChannelId = null;
@@ -1429,6 +1509,9 @@
       if (state.mode === "tv") {
         els.footLeft.textContent = `${tunableChannels().length} channels`;
         els.footRight.textContent = "ATSC · Roku · VizelVision";
+      } else if (state.mode === "antenna") {
+        els.footLeft.textContent = `${state.channels.length} channels`;
+        els.footRight.textContent = "ATSC · antenna numbers";
       } else if (state.mode === "cable") {
         els.footLeft.textContent = `${state.cableChannels.length} channels`;
         els.footRight.textContent = state.cableAvailable
@@ -1671,7 +1754,7 @@
         if (!state.streamId) throw new Error("Server returned no stream ID");
         render();
         setStatus(tuned.name, "busy");
-        setNowPlaying(tuned.name, `Channel ${tuned.number} · buffering`);
+        setNowPlaying(tuned.name, `${digitalLabel(tuned)} · buffering`);
 
         // Do not hand hls.js a manifest URL until the matching generation has
         // published one. A fatal 404 on the initial manifest load cannot be
@@ -1685,7 +1768,7 @@
           if (tuneSerial !== state.tuneSerial) return;
           setStatus(tuned.name, "live");
           setNowPlaying(tuned.name,
-                        `Channel ${tuned.number} · ${state.quality}`);
+                        `${digitalLabel(tuned)} · ${state.quality}`);
         });
       } catch (e) {
         if (tuneSerial !== state.tuneSerial) return;
@@ -2302,6 +2385,7 @@
 
     els.tabTv.addEventListener("click", () => selectSource("tv"));
     els.tabCable.addEventListener("click", () => selectSource("cable"));
+    els.tabAntenna.addEventListener("click", () => selectSource("antenna"));
     els.tabRoku.addEventListener("click", () => selectSource("roku"));
     els.tabRadio.addEventListener("click", () => selectSource("radio"));
 
@@ -2415,7 +2499,7 @@
           render();
           setStatus(selection.name, "busy");
           setNowPlaying(selection.name,
-                        `Channel ${selection.number} · buffering`);
+                        `${digitalLabel(selection)} · buffering`);
           const resumeStreamId = state.streamId;
           await waitForTvStream(resumeStreamId);
           if (state.streamId !== resumeStreamId || state.tuneSerial) return;
@@ -2423,7 +2507,7 @@
             if (state.streamId !== resumeStreamId || state.tuneSerial) return;
             setStatus(selection.name, "live");
             setNowPlaying(selection.name,
-                          `Channel ${selection.number} · ${state.quality}`);
+                          `${digitalLabel(selection)} · ${state.quality}`);
           });
           return;
         }

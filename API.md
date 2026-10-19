@@ -36,6 +36,27 @@ playlist segments. LIVE is displayed after playback starts, not after parsing
 a manifest. Pause is local; resume returns to the live position. There is no
 DVR timeline.
 
+## Channel numbers
+
+Every catalog item carries its TV Thing channel number: the antenna
+(`/api/v1/sources/digital`), each Roku source (`/api/v1/sources/{source}`) and
+the guide's channels (`/api/v1/guide`) add
+
+* `tv_number`: the channel's number in the lineup (an integer);
+* `tv_name`: its name there (usually the item's own `name`);
+* `tv_section`: the lineup-card heading it sits under.
+
+They are absent when the server's `lineup.json` is unusable. Identity is
+unchanged: tune and record by `channel_id` (or the antenna `number`) as before,
+never by `tv_number`. A day's games are numbered per date, so a game's number
+belongs to the date it was listed for.
+
+`GET /api/v1/sources` adds `lineup`: `{path, sections, house}`, where `house`
+lists VizelVision's numbers. `GET /api/v1/lineup[?date=YYYY-MM-DD]` returns
+the whole lineup in number order: VizelVision, every antenna channel and every
+Roku catalog item, each with `kind`, `source_id`, `channel_id` and (for games)
+`date`. A Roku catalog that could not be read is named in `errors` and left out.
+
 ## Integration flow
 
 1. GET `api/v1/sources/digital` (or `sources/cable`) and select an item.

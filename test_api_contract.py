@@ -185,6 +185,38 @@ def test_roku_lane_lock_tune_and_reuse_over_http(roku_api):
     assert code == 404 and bad["error"]["code"] == "unknown_channel"
 
 
+def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypatch):
+    request, _ = roku_api
+    monkeypatch.setattr(server, "load_channels", lambda: [
+        {"id": "wrc_hd_4_1", "number": "4.1", "name": "WRC-HD", "rf_channel": 34},
+        {"id": "surprise_7_5", "number": "7.5", "name": "Surprise", "rf_channel": 7}])
+    code, digital = request("/api/v1/sources/digital")
+    assert code == 200
+    # The antenna keeps its own numbers; a channel lineup.json has never heard
+    # of (a rescan's surprise) is numbered in the hundreds, and keeps it.
+    assert [(i["number"], i["tv_number"]) for i in digital["items"]] == [("4.1", 4), ("7.5", 250)]
+    code, feeds = request("/api/v1/sources/youtube-tv")
+    assert [(i["id"], i["tv_number"], i["tv_name"]) for i in feeds["items"]] == [
+        ("NBC", 15, "NBC Lansing"), ("ESPN", 23, "ESPN")]
+    code, tnf = request("/api/v1/sources/thursday-night-football?date=2026-10-01")
+    assert [(i["id"], i["tv_number"], i["tv_section"]) for i in tnf["items"]] == [
+        ("401872964", 50, "Football")]
+    code, sources = request("/api/v1/sources")
+    assert [view["tv_number"] for view in sources["lineup"]["house"]] == [0, 70]
+    assert {"first": 1, "last": 20, "name": "Local stations"} in sources["lineup"]["sections"]
+
+    code, card = request("/api/v1/lineup?date=2026-10-01")
+    assert code == 200 and card["errors"] == [] and card["lineup_error"] is None
+    assert [(row["tv_number"], row["kind"], row.get("channel_id")) for row in card["channels"]] == [
+        (0, "vizelvision", None), (4, "digital", "wrc_hd_4_1"), (15, "roku", "NBC"),
+        (23, "roku", "ESPN"), (50, "roku", "401872964"), (70, "vizelvision", None),
+        (71, "roku", "823254"), (99, "roku", "manual"), (250, "digital", "surprise_7_5")]
+    assert card["channels"][4]["source_id"] == "thursday-night-football"
+    assert card["channels"][4]["date"] == "2026-10-01"
+    code, discovery = request("/api/v1")
+    assert discovery["endpoints"]["lineup"]["path"] == "/api/v1/lineup"
+
+
 def test_roku_remote_and_check_over_http(roku_api):
     request, lane = roku_api
     code, _ = request("/api/v1/tune", {"source": "youtube-tv", "channel_id": "ESPN"})

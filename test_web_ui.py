@@ -502,3 +502,28 @@ def test_watch_page_video_leaves_room_for_the_banner():
 def test_hidden_attribute_always_wins():
     css = (STATIC / "app.css").read_text()
     assert "[hidden] { display: none !important; }" in css
+
+
+# ---------------------------------------------------------------------------
+# TV Thing channel numbers
+# ---------------------------------------------------------------------------
+
+def test_watch_lists_the_lineup_by_number_with_the_antenna_a_tab_away():
+    assert 'id="tab-antenna"' in INDEX
+    assert "if (data.lineup) state.lineup = data.lineup;" in INDEX
+    tunable = section(INDEX, "function renderTunableList()", "function renderAntennaList()")
+    assert "sectionHeading(entry.section)" in tunable
+    assert "tuneVizelVision(entry.number)" in tunable
+    # The Antenna tab is the old Digital list: antenna numbers and RF channels.
+    antenna = section(INDEX, "function renderAntennaList()", "function digitalLabel(")
+    assert "escapeHtml(channel.number)" in antenna and "RF ${escapeHtml(channel.rf_channel)}" in antenna
+    assert "tuneTv(channel.id)" in antenna
+
+
+def test_guide_follows_the_lineup_unless_antenna_numbers_are_chosen():
+    assert 'id="opt-antenna"' in GUIDE
+    assert "tv-thing.guide.antenna-numbers" in GUIDE
+    assert "escape(shownNumber(channel))" in GUIDE
+    # Tuning and taping still name the antenna channel itself.
+    assert "channel_number: channel.number" in GUIDE
+    assert "channel_id: channel.id" in GUIDE

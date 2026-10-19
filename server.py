@@ -29,6 +29,7 @@ from urllib.error import HTTPError, URLError
 import analog_tuner
 import atsc_scan
 import epg
+import lineup
 import recorder
 import roku_lane
 from roku_control.errors import (BaseballScheduleError, ChannelNotFoundError,
@@ -41,6 +42,10 @@ STREAMS_DIR = Path(os.environ.get(
     "TV_THING_STREAMS_DIR", str(BASE_DIR / "streams")
 ))
 CHANNELS_FILE = BASE_DIR / "channels.json"
+# The TV Thing channel lineup, and the numbers it has given channels it does
+# not list (a rescan's surprises); see lineup.py.
+LINEUP_FILE = BASE_DIR / "lineup.json"
+LINEUP_STATE_FILE = BASE_DIR / "lineup_state.json"
 WSCAN_OUTPUT = BASE_DIR / "w_scan_output.txt"
 
 # ATSC frequency ranges (lower-edge MHz)
@@ -680,6 +685,39 @@ def load_channels():
         with open(CHANNELS_FILE) as f:
             return json.load(f)
     return []
+
+
+channel_lineup = lineup.Lineup(LINEUP_FILE, LINEUP_STATE_FILE)
+
+
+def numbered_channels(channels):
+    """Antenna channels with their TV Thing numbers (tv_number, tv_name,
+    tv_section). A channel lineup.json does not list -- one a rescan has
+    just found -- is given the next number in its section here."""
+    views = channel_lineup.number(lineup.ANTENNA, list(zip(
+        lineup.antenna_keys(channels), (channel.get("name") for channel in channels))))
+    return [dict(channel, **(view or {})) for channel, view in zip(channels, views)]
+
+
+def numbered_roku_listings(listings):
+    """Number the items of Roku catalogs, ``{source_id: listing}``, in place.
+
+    A day's games are numbered together across every listing given, so a
+    caller numbering one game source passes the sources it shares a block
+    with (``channel_lineup.game_partners``) as well.
+    """
+    pools = {source_id: listing["items"] for source_id, listing in listings.items()
+             if source_id in roku_lane.GAME_SOURCES}
+    games = channel_lineup.number_games(pools)
+    for source_id, listing in listings.items():
+        if source_id in pools:
+            views = [games.get((source_id, str(item.get("id")))) for item in listing["items"]]
+        else:
+            views = channel_lineup.number(source_id, [
+                (item.get("id"), item.get("name")) for item in listing["items"]])
+        listing["items"] = [dict(item, **(view or {}))
+                            for item, view in zip(listing["items"], views)]
+    return listings
 
 
 def channel_sort_key(channel):
@@ -2002,6 +2040,14 @@ def roku_sources_available():
 def api_v1_roku_source(source_id, requested_date=None):
     def catalog():
         listing = roku.catalog(source_id, requested_date)
+        listings = {source_id: listing}
+        for partner in channel_lineup.game_partners(source_id):
+            if partner != source_id and partner in roku_lane.SOURCES:
+                try:
+                    listings[partner] = roku.catalog(partner, listing.get("date") or requested_date)
+                except Exception:   # noqa: BLE001 - numbering never fails the catalog asked for
+                    pass    # Numbered without it; its own request will say why.
+        numbered_roku_listings(listings)
         source = next(item for item in roku.source_list(
             roku_sources_available()) if item["id"] == source_id)
         return {
@@ -3630,6 +3676,11 @@ def guide_payload(number=None, window_hours=None, now=None):
     # Keep the hour already in progress so the grid has a left edge.
     floor = now - 3600
     ceiling = now + window_hours * 3600 if window_hours else None
+    lineup_numbers = {}
+    for channel in numbered_channels(load_channels()):
+        if "tv_number" in channel:
+            lineup_numbers.setdefault(channel.get("number"), {
+                key: channel[key] for key in ("tv_number", "tv_name", "tv_section")})
     channels = {}
     for key, channel in guide["channels"].items():
         if number and key != number:
@@ -3639,7 +3690,7 @@ def guide_payload(number=None, window_hours=None, now=None):
             if event["start"] + event["duration"] > floor
             and (ceiling is None or event["start"] < ceiling)
         ]
-        channels[key] = {**channel, "events": events}
+        channels[key] = {**channel, **lineup_numbers.get(key, {}), "events": events}
 
     return {
         "available": True,
@@ -3961,7 +4012,7 @@ def api_v1_digital_source():
             "selector": "channel_id",
             "stream_path": f"/stream/{LANE_PLAYLIST[LANE_DIGITAL]}",
         },
-        "items": channels,
+        "items": numbered_channels(channels),
     }
 
 
@@ -4003,8 +4054,62 @@ def api_v1_source_catalog():
             dict(cable, items_path="/api/v1/sources/cable"),
             *roku_sources,
         ],
+        # The lineup card's sections and the station's own numbers. Every
+        # catalog item carries its tv_number; the cable tab is the analog
+        # tuner's RF plan and is not part of the lineup.
+        "lineup": {"path": "/api/v1/lineup", "sections": channel_lineup.sections(),
+                   "house": channel_lineup.house()},
         "status_path": "/api/v1/status",
         "tune_path": "/api/v1/tune",
+    }
+
+
+def api_v1_lineup(requested_date=None):
+    """Every channel with its TV Thing number, in number order.
+
+    The station, the antenna channels and every Roku catalog (the day's
+    games for ``requested_date``). A Roku catalog that cannot be read is left
+    out and named in ``errors``.
+    """
+    try:
+        channel_lineup.plan()
+        problem = None
+    except lineup.LineupError as error:
+        problem = str(error)
+    rows = [dict(view, kind="vizelvision", name="VizelVision",
+                 stream_path="/stream/vizelvision/index.m3u8")
+            for view in channel_lineup.house()]
+    for channel in numbered_channels(load_channels()):
+        rows.append({key: channel.get(key) for key in ("tv_number", "tv_name", "tv_section")}
+                    | {"kind": "digital", "source_id": "digital", "channel_id": channel["id"],
+                       "name": channel.get("name"), "antenna_number": channel.get("number"),
+                       "rf_channel": channel.get("rf_channel")})
+    errors, day = [], None
+    if roku is not None:
+        listings = {}
+        for source_id in roku_lane.SOURCES:
+            try:
+                listings[source_id] = roku.catalog(source_id, requested_date)
+            except Exception as error:   # noqa: BLE001 - one catalog never sinks the lineup
+                errors.append({"source_id": source_id, "message": str(error)})
+        for source_id, listing in numbered_roku_listings(listings).items():
+            day = listing.get("date") or day
+            for item in listing["items"]:
+                rows.append({key: item.get(key) for key in ("tv_number", "tv_name", "tv_section")}
+                            | {"kind": "roku", "source_id": source_id,
+                               "channel_id": str(item.get("id")), "name": item.get("name"),
+                               "date": listing.get("date"),
+                               **{key: item[key] for key in ("start_time", "state", "status", "playable")
+                                  if key in item}})
+    rows.sort(key=lambda row: (row["tv_number"] is None, row["tv_number"] or 0,
+                               str(row.get("name") or "")))
+    return {
+        "api_version": API_VERSION,
+        "date": day or requested_date,
+        "sections": channel_lineup.sections(),
+        "channels": rows,
+        "errors": errors,
+        "lineup_error": problem,
     }
 
 
@@ -4387,6 +4492,11 @@ class TVHandler(SimpleHTTPRequestHandler):
                 "endpoints": {
                     "status": {"method": "GET", "path": "/api/v1/status"},
                     "sources": {"method": "GET", "path": "/api/v1/sources"},
+                    "lineup": {
+                        "method": "GET", "path": "/api/v1/lineup",
+                        "query": {"date": "YYYY-MM-DD (games)"},
+                        "note": "every channel with its TV Thing number",
+                    },
                     "digital_channels": {
                         "method": "GET",
                         "path": "/api/v1/sources/digital",
@@ -4623,6 +4733,11 @@ class TVHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/v1/sources":
             self.send_json(api_v1_source_catalog())
+            return
+
+        if path == "/api/v1/lineup":
+            self.send_json(api_v1_lineup(
+                parse_qs(parsed.query).get("date", [None])[0]))
             return
 
         if path == "/api/v1/sources/digital":
