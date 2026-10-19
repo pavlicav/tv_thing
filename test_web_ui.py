@@ -158,9 +158,11 @@ def test_guide_clips_events_that_started_before_the_window():
 
 
 def test_guide_titles_are_escaped_not_interpolated_raw():
-    """Titles come off the air, so they are untrusted input."""
+    """Titles come off the air or the web, so they are untrusted input."""
     assert "escape(event.title" in GUIDE
-    assert "escape(channel.name)" in GUIDE
+    assert "escape(nameOf(channel))" in GUIDE
+    assert "escape([episode, event.episode_title]" in GUIDE
+    assert "escape(event.rating)" in GUIDE
     assert "node.textContent = text == null" in GUIDE
 
 
@@ -316,6 +318,26 @@ def test_live_player_runtime():
                    check=True, capture_output=True, text=True, timeout=15)
 
 
+def test_every_page_script_parses():
+    """A syntax error stops a page's whole script, and the string checks in
+    this file cannot see one: a doubled const once left the guide on
+    "Loading…"."""
+    import re
+    import shutil
+    import subprocess
+    import pytest
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is required to parse the pages' scripts")
+    compile_stdin = "new (require('vm').Script)(require('fs').readFileSync(0, 'utf8'))"
+    for page in sorted(STATIC.glob("*.html")):
+        scripts = re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", page.read_text(), re.S)
+        for index, script in enumerate(scripts):
+            result = subprocess.run([node, "-e", compile_stdin], input=script,
+                                    capture_output=True, text=True, timeout=15)
+            assert result.returncode == 0, f"{page.name} script {index}: {result.stderr[-400:]}"
+
+
 # ---------------------------------------------------------------------------
 # VCR
 # ---------------------------------------------------------------------------
@@ -420,8 +442,42 @@ def test_erasing_a_tape_asks_first_with_the_safe_choice_focused():
 def test_the_guide_can_hand_an_airing_to_the_vcr():
     assert 'id="d-record"' in GUIDE
     record = GUIDE[GUIDE.index("async function record"):]
-    assert "'api/v1/recordings'" in record[:400]
+    assert "'api/v1/recordings'" in record[:700]
     assert "mode: 'guide'" in record[:600]
+    # A YouTube TV airing tapes the Roku, named by its channel, not a number.
+    assert "lane: 'roku', mode: 'guide'" in record[:600]
+    assert "target: { source_id: channel.source_id, channel_id: channel.channel_id }" in record[:600]
+
+
+def test_guide_lists_youtube_tv_and_sends_its_rows_to_the_watch_page():
+    # Rows are told apart by key: an antenna number or youtube-tv/NAME.
+    assert "const keyOf = (channel) => channel.key || channel.number;" in GUIDE
+    assert "row.dataset.key = keyOf(channel);" in GUIDE
+    assert ".row[data-key=" in GUIDE and "data-number" not in GUIDE
+    assert "fetch('api/guide?hours=30')" in GUIDE
+    # The Watch page tunes the Roku, showing its progress and any lock.
+    watch = section(GUIDE, "async function watch(channel)", "// Hand the airing to the VCR")
+    assert "./#watch=${encodeURIComponent(keyOf(channel))}" in watch
+    assert watch.index("isRoku(channel)") < watch.index("api/tune")
+    # A row with no listing stays; Antenna numbers is the antenna's own view.
+    assert "isRoku(channel) ? !antennaNumbers : channel.events.length" in GUIDE
+    assert "guide.youtube_tv" in GUIDE
+
+
+def test_watch_page_tunes_the_roku_channel_the_guide_links_to():
+    linked = section(INDEX, "function linkedRokuTarget()", "startSourcePolling();")
+    assert "#watch=" in linked
+    # Used once: a reload must not send the Roku off again.
+    assert "history.replaceState(" in linked
+    assert "tuneRoku(linked.source, linked.item)" in linked
+    assert "else resume();" in linked
+
+
+def test_watch_page_shows_what_is_on_youtube_tv():
+    tunable = section(INDEX, "function renderTunableList()", "function renderAntennaList()")
+    assert "listingFor(`${source.id}/${item.id}`" in tunable
+    banner = section(INDEX, "// ---------- info banner", "// Controls fade away")
+    assert "listingHtml(rokuGuideKey(selection), now)" in banner
 
 
 # ---------------------------------------------------------------------------

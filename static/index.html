@@ -788,7 +788,7 @@
         return;   // the banner keeps what it had; the guide is optional
       }
       renderBanner();
-      if (["tv", "antenna"].includes(state.mode)) renderList();
+      if (["tv", "antenna", "roku"].includes(state.mode)) renderList();
     }
 
     // The airing on now, even if the cached "now" has just ended and the
@@ -806,6 +806,39 @@
       return Math.max(0, Math.min(100, ((now - event.start) / event.duration) * 100));
     }
 
+    // NOW and LATER for one guide row -- an antenna number, or a YouTube TV
+    // row's key (youtube-tv/NBC) -- or null when the guide has nothing.
+    function listingHtml(key, now) {
+      const { now: on, next } = listingFor(key, now);
+      if (!on && !next) return null;
+      let nowHtml = "";
+      if (on) {
+        nowHtml +=
+          `<div class="bn-row"><span class="bn-k">NOW</span>` +
+          `<span class="bn-title">${escapeHtml(on.title || "No title")}</span>` +
+          `<span class="bn-time">${fmtClock(on.start)} – ${fmtClock(on.start + on.duration)}</span>` +
+          (on.captions ? '<span class="bn-cc">CC</span>' : "") + `</div>` +
+          `<div class="bn-progress"><i style="width:${progressOf(on, now).toFixed(1)}%"></i></div>`;
+        const about = [on.episode_title, on.description].filter(Boolean).join(" — ");
+        if (about) nowHtml += `<div class="bn-desc">${escapeHtml(about)}</div>`;
+      }
+      loadSchedule(key);
+      let later = laterStrip(key, on ? on.start + on.duration : now);
+      if (!later && next) {
+        later =
+          `<div class="bn-row next"><span class="bn-k">NEXT</span>` +
+          `<span class="bn-title">${escapeHtml(next.title || "No title")}</span>` +
+          `<span class="bn-time">${fmtClock(next.start)}</span></div>`;
+      }
+      return `<div class="bn-split"><div class="bn-now">${nowHtml}</div>${later}</div>`;
+    }
+
+    // A Roku selection's guide key; only YouTube TV's channels have listings.
+    function rokuGuideKey(target) {
+      return target && target.source_id === "youtube-tv" && target.channel_id
+        ? `youtube-tv/${target.channel_id}` : null;
+    }
+
     function renderBanner() {
       const body = $("bn-body");
       const num = $("bn-num");
@@ -814,31 +847,8 @@
         const ch = state.channels.find(c => c.id === state.currentChannelId);
         num.textContent = ch ? (Number.isInteger(ch.tv_number) ? String(ch.tv_number) : ch.number) : "– –";
         num.title = ch ? `Antenna ${ch.number} · RF ${ch.rf_channel}` : "";
-        const { now: on, next } = ch ? listingFor(ch.number, now) : {};
-        if (!on && !next) {
-          body.innerHTML = '<div class="bn-none">No listing for this channel</div>';
-          return;
-        }
-        let nowHtml = "";
-        if (on) {
-          nowHtml +=
-            `<div class="bn-row"><span class="bn-k">NOW</span>` +
-            `<span class="bn-title">${escapeHtml(on.title || "No title")}</span>` +
-            `<span class="bn-time">${fmtClock(on.start)} – ${fmtClock(on.start + on.duration)}</span>` +
-            (on.captions ? '<span class="bn-cc">CC</span>' : "") + `</div>` +
-            `<div class="bn-progress"><i style="width:${progressOf(on, now).toFixed(1)}%"></i></div>`;
-          if (on.description) nowHtml += `<div class="bn-desc">${escapeHtml(on.description)}</div>`;
-        }
-        loadSchedule(ch.number);
-        let later = laterStrip(ch.number, on ? on.start + on.duration : now);
-        if (!later && next) {
-          later =
-            `<div class="bn-row next"><span class="bn-k">NEXT</span>` +
-            `<span class="bn-title">${escapeHtml(next.title || "No title")}</span>` +
-            `<span class="bn-time">${fmtClock(next.start)}</span></div>`;
-        }
-        const html = `<div class="bn-split"><div class="bn-now">${nowHtml}</div>${later}</div>`;
-        body.innerHTML = html;
+        body.innerHTML = (ch && listingHtml(ch.number, now))
+          || '<div class="bn-none">No listing for this channel</div>';
       } else if (state.playing === "vizelvision") {
         num.textContent = state.houseNumber !== null ? String(state.houseNumber) : "VV";
         num.title = "";
@@ -867,6 +877,9 @@
           html += '<div class="bn-row"><span class="bn-k">NOW</span>' +
             '<span class="bn-title">Manual Roku</span></div>' +
             '<div class="bn-desc">Drive it with the remote beside the list.</div>';
+        } else if (selection && rokuGuideKey(selection) && listingFor(rokuGuideKey(selection), now).now) {
+          // A YouTube TV channel: what is on it, from its published listing.
+          html += listingHtml(rokuGuideKey(selection), now);
         } else if (selection) {
           const route = selection.resolved_source && selection.resolved_source.label;
           html += `<div class="bn-row"><span class="bn-k">NOW</span>` +
@@ -1398,7 +1411,11 @@
           const clock = source.dated ? gameClock(item) : "";
           if (!numbered) key = clock || rokuShortName(source.id);
           else if (clock) tag = clock;
-          sub = [source.name, source.dated ? item.status : item.note].filter(Boolean).join(" · ");
+          // A YouTube TV channel shows what is on, as an antenna channel does.
+          const on = source.dated ? null : listingFor(`${source.id}/${item.id}`, Date.now() / 1000).now;
+          sub = on ? on.title || "No title"
+            : [source.name, source.dated ? item.status : item.note].filter(Boolean).join(" · ");
+          if (on) progress = `<span class="item-bar"><i style="width:${progressOf(on, Date.now() / 1000).toFixed(0)}%"></i></span>`;
           if (operation.active && operation.target && operation.target.source_id === source.id
               && operation.target.channel_id === item.id) tag = "MOVING";
           button.disabled = source.available === false || item.playable === false;
@@ -2522,12 +2539,31 @@
     const loaders = FM_UI_ENABLED
       ? [loadChannels(), loadCableChannels(false), loadSources(false), loadStations()]
       : [loadChannels(), loadCableChannels(false), loadSources(false)];
-    Promise.all(loaders).then(() => {
-      loadRokuItems(true);
+    // The guide links here as #watch=youtube-tv%2FNBC to put a Roku channel
+    // on, so the tune shows its progress and asks about a lock as usual. The
+    // link is used once: a reload must not send the Roku off again.
+    function linkedRokuTarget() {
+      const match = /^#watch=(.+)$/.exec(location.hash);
+      if (!match) return null;
+      history.replaceState(null, "", location.pathname + location.search);
+      let value;
+      try { value = decodeURIComponent(match[1]); } catch (_) { return null; }
+      const slash = value.indexOf("/");
+      if (slash <= 0) return null;
+      const source = state.roku.sources.find(s => s.id === value.slice(0, slash) && !s.dated);
+      const item = source && (state.roku.items[source.id] || [])
+        .find(i => String(i.id) === value.slice(slash + 1));
+      return item ? { source, item } : null;
+    }
+
+    Promise.all(loaders).then(async () => {
+      const rokuItems = loadRokuItems(true);
       syncRokuPolling();
       render();
       loadGuideNow();
-      resume();
+      const linked = /^#watch=/.test(location.hash) ? await rokuItems.then(linkedRokuTarget) : null;
+      if (linked) tuneRoku(linked.source, linked.item);
+      else resume();
       startSourcePolling();
       // vizelVision links here as /tv/#roku to watch and drive the Roku.
       if (location.hash === "#roku" && state.roku.available) selectSource("roku");

@@ -13,3 +13,7 @@ def _private_lineup_state(tmp_path, monkeypatch):
         import lineup
         monkeypatch.setattr(server, "channel_lineup", lineup.Lineup(
             server.LINEUP_FILE, tmp_path / "lineup_state.json"))
+    # Likewise YouTube TV's stored listings: a test reads and writes its own.
+    yttv_epg = sys.modules.get("yttv_epg")
+    if yttv_epg is not None:
+        monkeypatch.setattr(yttv_epg, "GUIDE_FILE", tmp_path / "yttv_epg.json")

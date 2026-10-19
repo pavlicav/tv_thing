@@ -210,6 +210,33 @@ playback. Integrations should release ownership instead of stopping shared
 playback. Future breaking changes require
 an explicit API version change.
 
+## Programme guide
+
+GET `api/v1/guide[?channel=KEY][&hours=N]` returns `channels`, an object
+keyed by row, with events that have finished dropped (`hours` keeps those
+starting in the next N hours). Two kinds of row share it:
+
+* **Antenna channels**, keyed by antenna number (`7.1`), read off the air
+  (PSIP) at the `refresh_times`. A read retunes the digital lane, so it runs
+  at night. `available`, `event_count`, `coverage_hours` and the other
+  top-level figures describe this guide.
+* **YouTube TV's channels**, keyed `youtube-tv/NAME` (the Roku catalog's
+  `channel_id`), with `kind: "roku"`, `source_id`, `channel_id` and `listing`
+  (where the schedule came from, or null where none is published, as for
+  Local Now). The listings are read from the web daily, two days ahead,
+  without touching a tuner. `youtube_tv` describes them: `available`,
+  `generated_at`, `coverage_hours`, `event_count`, `next_refresh`,
+  `last_error` and `failed_channels`. A row whose source failed keeps its
+  last listing with `stale: true`. Every YouTube TV row is listed, with or
+  without events.
+
+Every row has `key` and `kind` (`digital` or `roku`) and the channel-number
+fields above. Antenna events have `start`, `duration`, `title`, `captions`
+and sometimes `description`. YouTube TV events may also have `episode_title`,
+`season`, `episode`, `new`, `live` and `rating`. GET `api/v1/guide/now` gives
+`now` and `next` per row under the same keys. Tune a YouTube TV row through
+its Roku source (`source: "youtube-tv"`, `channel_id`), never by its key.
+
 ## Recording
 
 The VCR records the digital lane and the Roku lane into the DLNA media
@@ -255,6 +282,12 @@ by side.
     `roku-manual` (whatever is on) at a time.
   * `{"lane": "roku", "mode": "otr", "end"?}`: what the Roku shows now, for
     half an hour unless `end` says otherwise.
+  * `{"lane": "roku", "mode": "guide", "target": {"source_id": "youtube-tv",
+    "channel_id"}, "event_start"}`: a YouTube TV airing from the guide,
+    padded like a digital guide timer. It starts `lead_seconds` earlier still,
+    so the Roku has reached the channel when the programme starts. The VCR
+    page's GUIDE NAME search covers the antenna only, so the Roku input's
+    `modes` do not list `guide`.
 
   The `target` fields may also be given flat, beside `lane`. The VCR page
   sends every manual timer as `{"lane", "mode": "manual", "source_id",

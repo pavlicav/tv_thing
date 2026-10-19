@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "TV Thing core integration API",
-    "version": "1.2.0",
-    "description": "Core control contract. API.md defines ownership, retry, addressing, and trusted-LAN rules. Additional discovery and diagnostic endpoints are listed by GET /api/v1. 1.1.0 adds the roku lane: Roku sources, asynchronous Roku tunes (202 with an operation), the Roku remote, the still-playing check, and Roku recordings. 1.2.0 adds TV Thing channel numbers: tv_number, tv_name and tv_section on catalog items and guide channels, the lineup in GET /sources, and GET /lineup."
+    "version": "1.3.0",
+    "description": "Core control contract. API.md defines ownership, retry, addressing, and trusted-LAN rules. Additional discovery and diagnostic endpoints are listed by GET /api/v1. 1.1.0 adds the roku lane: Roku sources, asynchronous Roku tunes (202 with an operation), the Roku remote, the still-playing check, and Roku recordings. 1.2.0 adds TV Thing channel numbers: tv_number, tv_name and tv_section on catalog items and guide channels, the lineup in GET /sources, and GET /lineup. 1.3.0 adds YouTube TV's listings to the guide: rows keyed youtube-tv/NAME with kind roku, every row's key and kind, the youtube_tv summary, and Roku guide recordings."
   },
   "servers": [
     {
@@ -213,7 +213,7 @@
     },
     "/guide": {
       "get": {
-        "summary": "Broadcast programme guide",
+        "summary": "Programme guide: the antenna's, read off the air, and YouTube TV's, read from the web",
         "responses": {
           "200": {
             "description": "Success",

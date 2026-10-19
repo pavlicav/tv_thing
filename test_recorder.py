@@ -829,6 +829,37 @@ def test_roku_and_digital_timers_never_conflict(roku_vcr):
     assert status == 404
 
 
+def test_a_youtube_tv_airing_in_the_guide_tapes_the_roku_from_early_enough(roku_vcr, monkeypatch):
+    now = int(time.time())
+    start = now + 3600
+    monkeypatch.setattr(server.yttv_epg, "load_guide", lambda: {"channels": {"NBC": {
+        "events": [{"start": start, "duration": 1800, "title": "NBC Nightly News"},
+                   {"start": now - 7200, "duration": 600, "title": "Over"}]}}})
+    payload, status = server.create_recording({
+        "lane": "roku", "mode": "guide", "event_start": start,
+        "target": {"source_id": "youtube-tv", "channel_id": "nbc"}})
+    assert status == 201, payload
+    timer = payload["timer"]
+    assert timer["kind"] == "guide" and timer["title"] == "NBC Nightly News"
+    assert timer["target"] == {"source_id": "youtube-tv", "channel_id": "NBC"}
+    # The Roku needs time to reach the channel before the padded start.
+    assert timer["start"] == start - recorder.GUIDE_PRE_PAD_SECONDS - roku_lane.NAVIGATION_SECONDS
+    assert timer["end"] == start + 1800 + recorder.GUIDE_POST_PAD_SECONDS
+
+    payload, status = server.create_recording({
+        "lane": "roku", "mode": "guide", "event_start": now - 7200,
+        "target": {"source_id": "youtube-tv", "channel_id": "NBC"}})
+    assert status == 400 and payload["error"]["code"] == "in_the_past"
+    payload, status = server.create_recording({
+        "lane": "roku", "mode": "guide", "event_start": start + 1,
+        "target": {"source_id": "youtube-tv", "channel_id": "NBC"}})
+    assert status == 404 and payload["error"]["code"] == "unknown_event"
+    payload, status = server.create_recording({
+        "lane": "roku", "mode": "guide", "event_start": start,
+        "target": {"source_id": "roku-manual"}})
+    assert status == 400 and payload["error"]["code"] == "invalid_mode"
+
+
 def test_a_roku_recording_navigates_then_copies_from_the_live_edge(roku_vcr):
     schedule_roku()
     server.recording_tick()

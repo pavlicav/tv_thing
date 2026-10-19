@@ -877,7 +877,155 @@ def test_guide_now_is_empty_without_a_guide(monkeypatch):
     monkeypatch.setattr(server.epg, "load_guide", lambda: None)
     payload = server.guide_now_payload()
     assert payload == {"available": False, "generated_at": None,
-                       "channels": {}}
+                       "youtube_tv_available": False, "channels": {}}
+
+
+# ---------------------------------------------------------------------------
+# YouTube TV's listings (yttv_epg.py) in the guide
+# ---------------------------------------------------------------------------
+
+def _youtube_tv(monkeypatch, now, stored=True):
+    """A Roku lane listing NBC, CNN and Local Now, and a stored web guide."""
+    from types import SimpleNamespace
+    names = ("NBC", "CNN", "Local Now")
+    monkeypatch.setattr(server, "roku", SimpleNamespace(
+        catalog=lambda source_id, requested_date=None: {
+            "items": [{"id": name, "name": name, "number": None} for name in names]}))
+    guide = {
+        "generated_at": now - 3600, "event_count": 3, "channels_with_events": 2,
+        "horizon": now + 30 * 3600,
+        "channels": {
+            "NBC": {"name": "NBC", "source": "gracenote", "station": 35543,
+                    "call_sign": "WILXDT",
+                    "events": [{"start": now - 9000, "duration": 1800, "title": "Over"},
+                               {"start": now - 600, "duration": 3600, "title": "NFL Football",
+                                "episode_title": "Cowboys at Packers", "live": True},
+                               {"start": now + 3000, "duration": 1800, "title": "News"}]},
+            "CNN": {"name": "CNN", "source": "gracenote", "station": 10142, "stale": True,
+                    "events": [{"start": now - 60, "duration": 3600, "title": "Newsroom"}]},
+        },
+    }
+    if stored:
+        server.yttv_epg.save_guide(guide)
+    return guide
+
+
+def test_guide_lists_youtube_tv_rows_keyed_by_source_and_numbered(monkeypatch):
+    now = 1_800_000_000
+    monkeypatch.setattr(server.epg, "load_guide", lambda: _stored_guide(now))
+    _youtube_tv(monkeypatch, now)
+    payload = server.guide_payload(now=now)
+
+    nbc = payload["channels"]["youtube-tv/NBC"]
+    assert (nbc["kind"], nbc["source_id"], nbc["channel_id"], nbc["tv_number"]) == (
+        "roku", "youtube-tv", "NBC", 16)
+    assert nbc["listing"] == {"source": "gracenote", "station": 35543, "call_sign": "WILXDT"}
+    assert [e["title"] for e in nbc["events"]] == ["NFL Football", "News"]
+    assert payload["channels"]["youtube-tv/CNN"]["stale"] is True
+    # A row with no listing anywhere is still offered, with nothing in it.
+    assert payload["channels"]["youtube-tv/Local Now"]["events"] == []
+    assert payload["channels"]["youtube-tv/Local Now"]["listing"] is None
+    # The antenna's rows keep their keys, and the counts stay the broadcast's.
+    assert payload["channels"]["9.1"]["kind"] == "digital"
+    assert payload["channels"]["9.1"]["key"] == "9.1"
+    assert payload["event_count"] == 3
+    youtube_tv = payload["youtube_tv"]
+    assert youtube_tv["available"] is True and youtube_tv["coverage_hours"] == 30.0
+    assert youtube_tv["age_seconds"] == 3600 and youtube_tv["refresh_times"] == ["04:30"]
+
+
+def test_guide_narrows_to_one_youtube_tv_row_and_a_window(monkeypatch):
+    now = 1_800_000_000
+    monkeypatch.setattr(server.epg, "load_guide", lambda: _stored_guide(now))
+    _youtube_tv(monkeypatch, now)
+    payload = server.guide_payload(number="youtube-tv/NBC", window_hours=0.5, now=now)
+    assert list(payload["channels"]) == ["youtube-tv/NBC"]
+    assert [e["title"] for e in payload["channels"]["youtube-tv/NBC"]["events"]] == ["NFL Football"]
+
+
+def test_youtube_tv_rows_show_without_a_broadcast_guide(monkeypatch):
+    now = 1_800_000_000
+    monkeypatch.setattr(server.epg, "load_guide", lambda: None)
+    _youtube_tv(monkeypatch, now)
+    payload = server.guide_payload(now=now)
+    assert payload["available"] is False
+    assert set(payload["channels"]) == {"youtube-tv/NBC", "youtube-tv/CNN",
+                                        "youtube-tv/Local Now"}
+    assert payload["youtube_tv"]["available"] is True
+
+
+def test_youtube_tv_rows_are_listed_before_their_first_read(monkeypatch):
+    now = 1_800_000_000
+    monkeypatch.setattr(server.epg, "load_guide", lambda: None)
+    _youtube_tv(monkeypatch, now, stored=False)
+    payload = server.guide_payload(now=now)
+    assert payload["channels"]["youtube-tv/NBC"]["events"] == []
+    assert payload["youtube_tv"]["available"] is False
+    assert payload["youtube_tv"]["coverage_hours"] == 0
+
+
+def test_guide_now_covers_youtube_tv(monkeypatch):
+    now = 1_800_000_000
+    monkeypatch.setattr(server.epg, "load_guide", lambda: _stored_guide(now))
+    _youtube_tv(monkeypatch, now)
+    payload = server.guide_now_payload(now=now)
+    assert payload["channels"]["youtube-tv/NBC"]["now"]["title"] == "NFL Football"
+    assert payload["channels"]["youtube-tv/NBC"]["next"]["title"] == "News"
+    assert payload["channels"]["9.1"]["now"]["title"] == "On now"
+    assert "youtube-tv/Local Now" not in payload["channels"]
+    assert payload["youtube_tv_available"] is True
+
+
+def test_a_youtube_tv_read_stores_the_listings(monkeypatch):
+    now = int(time.time())
+    _youtube_tv(monkeypatch, now, stored=False)
+    asked = {}
+
+    def refresh(listings, names, *args, **kwargs):
+        asked["names"] = names
+        return {"generated_at": now, "requested": 2, "unmapped": ["Local Now"],
+                "errors": {"CNN": "Gracenote 10142: timed out"}, "elapsed_seconds": 1.0,
+                "channels": {"NBC": {"name": "NBC", "events": [
+                    {"start": now, "duration": 1800, "title": "News"}]}}}
+
+    monkeypatch.setattr(server.yttv_epg, "refresh", refresh)
+    monkeypatch.setattr(server, "yttv_guide_status", {
+        "running": False, "last_error": "old", "last_attempt": None, "failed_channels": {}})
+    assert server.run_yttv_guide_refresh("test") is True
+    assert asked["names"] == ["NBC", "CNN", "Local Now"]
+    stored = server.yttv_epg.load_guide()
+    assert stored["reason"] == "test" and stored["event_count"] == 1
+    assert server.yttv_guide_status["last_error"] is None
+    assert server.yttv_guide_status["failed_channels"] == {"CNN": "Gracenote 10142: timed out"}
+    assert server.yttv_guide_status["running"] is False
+
+
+def test_a_youtube_tv_read_where_nothing_answers_keeps_the_old_guide(monkeypatch):
+    now = int(time.time())
+    old = _youtube_tv(monkeypatch, now)
+    monkeypatch.setattr(server.yttv_epg, "refresh", lambda *a, **k: {
+        "generated_at": now, "requested": 2, "unmapped": [], "elapsed_seconds": 1.0,
+        "channels": {}, "errors": {"NBC": "no network", "CNN": "no network"}})
+    monkeypatch.setattr(server, "yttv_guide_status", {
+        "running": False, "last_error": None, "last_attempt": None, "failed_channels": {}})
+    assert server.run_yttv_guide_refresh("test") is False
+    assert "no network" in server.yttv_guide_status["last_error"]
+    assert server.yttv_epg.load_guide()["generated_at"] == old["generated_at"]
+
+
+def test_a_failed_youtube_tv_read_retries_hourly_until_the_next_slot(monkeypatch):
+    monkeypatch.setattr(server, "YTTV_GUIDE_REFRESH_TIMES", [(4, 30)])
+    local = time.localtime()
+    at = lambda hour, minute: time.mktime((local.tm_year, local.tm_mon, local.tm_mday,  # noqa: E731
+                                           hour, minute, 0, 0, 0, -1))
+    assert server.yttv_guide_next_wait(False, at(12, 0)) == (3600, "retry")
+    wait, reason = server.yttv_guide_next_wait(False, at(4, 0))
+    assert (wait, reason) == (1800, "scheduled")
+    assert server.yttv_guide_next_wait(True, at(12, 0)) == (
+        server.next_refresh_at([(4, 30)], at(12, 0)) - at(12, 0), "scheduled")
+    monkeypatch.setattr(server, "YTTV_GUIDE_REFRESH_TIMES", [])
+    assert server.yttv_guide_next_wait(True, at(12, 0)) == (None, None)
+    assert server.yttv_guide_next_wait(False, at(12, 0)) == (3600, "retry")
 
 
 def test_v1_tune_returns_a_status_document_not_a_crash(monkeypatch):

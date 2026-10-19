@@ -468,7 +468,8 @@ let channels = [];
 let windowStart = 0;
 let selected = null;        // { channel, event }
 let focusTime = 0;          // the time up/down moves keep to, as a real box does
-let tunedNumber = null;
+// What is on screen now: an antenna number, or a Roku row's key (youtube-tv/NBC).
+let tunedKey = null;
 let userMoved = false;     // until then, follow the tuned channel
 // TV Thing's lineup numbers, or the antenna's own: this browser's choice.
 let antennaNumbers = false;
@@ -489,9 +490,18 @@ function fmtAge(seconds) {
   return `${(mins / 60).toFixed(1)} h ago`;
 }
 
+// A row's identity. The antenna's channels are keyed by their antenna number,
+// YouTube TV's by source and name (youtube-tv/NBC), as the lineup keys them.
+const keyOf = (channel) => channel.key || channel.number;
+const isRoku = (channel) => channel.kind === 'roku';
+// The lineup's name for it (NBC Lansing), as the Watch page lists it.
+const nameOf = (channel) => channel.tv_name || channel.name || '';
+
 async function load() {
   try {
-    const response = await fetch('api/guide');
+    // A day and a bit: YouTube TV's listings run two days ahead, and the
+    // grid is for tonight and tomorrow, not for downloading all of it.
+    const response = await fetch('api/guide?hours=30');
     guide = await response.json();
   } catch (error) {
     $('state').hidden = false;
@@ -510,11 +520,15 @@ function minStart() {
 
 function render() {
   renderMeta();
-  channels = Object.values(guide.channels || {})
-    .filter((channel) => channel.events.length)
+  // An antenna channel with no listing is left out, as ever. A YouTube TV
+  // row stays: some have no listing anywhere (Local Now), and the guide is
+  // still where to tune them. Antenna numbers is the antenna's own view.
+  channels = Object.entries(guide.channels || {})
+    .map(([key, channel]) => ({ ...channel, key: channel.key || key }))
+    .filter((channel) => isRoku(channel) ? !antennaNumbers : channel.events.length)
     .sort(compareChannels);
 
-  if (!channels.length) {
+  if (!channels.some((channel) => channel.events.length)) {
     $('scroller').hidden = true;
     $('nowline').hidden = true;
     showEmptyState();
@@ -540,7 +554,7 @@ function fitWindow() {
 }
 
 function horizon() {
-  return Math.max(...channels.flatMap(
+  return Math.max(0, ...channels.flatMap(
     (channel) => channel.events.map((event) => event.start + event.duration)
   ));
 }
@@ -560,10 +574,16 @@ function drawGrid() {
 
 // The number a viewer goes by: the lineup's, unless antenna numbers are on
 // or the lineup has none for it. Tuning and recording always use the
-// antenna's own (channel.number).
+// antenna's own (channel.number), or a Roku row's channel_id.
 function shownNumber(channel) {
   return !antennaNumbers && Number.isInteger(channel.tv_number)
-    ? String(channel.tv_number) : channel.number;
+    ? String(channel.tv_number) : channel.number || 'YTTV';
+}
+
+// "· antenna 7.1" where the lineup number differs from the antenna's.
+function antennaNote(channel, before, after) {
+  return !isRoku(channel) && shownNumber(channel) !== channel.number
+    ? `${before}${channel.number}${after}` : '';
 }
 
 // Antenna numbers: the order the Antenna tab uses, every primary first by
@@ -588,22 +608,36 @@ function compareChannels(a, b) {
 
 function renderMeta() {
   const meta = $('meta');
+  const parts = [];
   if (!guide.available) {
-    meta.innerHTML = `<span>Refreshes at <b>${
-      (guide.refresh_times || []).join('</b>, <b>')}</b></span>`;
-    return;
+    parts.push(`<span>Antenna guide refreshes at <b>${
+      (guide.refresh_times || []).join('</b>, <b>')}</b></span>`);
+  } else {
+    parts.push(
+      `<span>Antenna <b>${guide.event_count}</b> programmes · <b>${
+        guide.channels_with_events}</b> channels</span>`,
+      `<span><b>${guide.coverage_hours} h</b> ahead</span>`,
+      `<span>read <b>${fmtAge(guide.age_seconds)}</b></span>`,
+      `<span>next <b>${guide.next_refresh
+        ? fmtTime(guide.next_refresh) : 'off'}</b></span>`,
+    );
+    if (guide.compressed_strings) {
+      parts.push(`<span title="ATSC A/65 Annex C Huffman tables are not implemented"><b>${
+        guide.compressed_strings}</b> compressed titles skipped</span>`);
+    }
   }
-  const parts = [
-    `<span><b>${guide.event_count}</b> programmes · <b>${
-      guide.channels_with_events}</b> channels</span>`,
-    `<span><b>${guide.coverage_hours} h</b> ahead</span>`,
-    `<span>read <b>${fmtAge(guide.age_seconds)}</b></span>`,
-    `<span>next <b>${guide.next_refresh
-      ? fmtTime(guide.next_refresh) : 'off'}</b></span>`,
-  ];
-  if (guide.compressed_strings) {
-    parts.push(`<span title="ATSC A/65 Annex C Huffman tables are not implemented"><b>${
-      guide.compressed_strings}</b> compressed titles skipped</span>`);
+  // YouTube TV's listings come from the web on their own daily schedule.
+  const yttv = guide.youtube_tv;
+  if (yttv && yttv.available) {
+    const failed = (yttv.failed_channels || []).length;
+    const note = `Read from the web ${fmtAge(yttv.age_seconds)}`
+      + (yttv.next_refresh ? `; next at ${fmtTime(yttv.next_refresh)}` : '')
+      + (failed ? `; ${failed} channels did not answer and show their last listing` : '');
+    parts.push(`<span title="${escape(note)}">YouTube TV <b>${yttv.channels_with_events}</b> channels · <b>${
+      yttv.coverage_hours} h</b> ahead</span>`);
+  } else if (yttv && (yttv.refreshing || yttv.last_error)) {
+    parts.push(`<span title="${escape(yttv.last_error || '')}">YouTube TV listings ${
+      yttv.refreshing ? 'loading…' : 'unavailable'}</span>`);
   }
   meta.innerHTML = parts.join('');
 }
@@ -628,20 +662,22 @@ function drawRows(list, width, now) {
     const row = document.createElement('div');
     row.className = 'row';
     row.style.height = `${ROW_H}px`;
-    row.dataset.number = channel.number;
-    if (selected && selected.channel.number === channel.number) row.classList.add('focus');
+    row.dataset.key = keyOf(channel);
+    if (selected && keyOf(selected.channel) === keyOf(channel)) row.classList.add('focus');
 
     const chan = document.createElement('div');
     chan.className = channel.stale ? 'chan stale' : 'chan';
-    if (channel.number === tunedNumber) chan.classList.add('tuned');
+    if (keyOf(channel) === tunedKey) chan.classList.add('tuned');
     chan.style.width = `${CHAN_W}px`;
     chan.innerHTML =
       `<span class="chan-num">${escape(shownNumber(channel))}</span>` +
-      `<span class="chan-name">${escape(channel.name)}</span>`;
+      `<span class="chan-name">${escape(nameOf(channel))}</span>`;
     chan.title = channel.stale
-      ? `${channel.name} — from an earlier refresh; this frequency did not read this time`
-      : `Watch ${shownNumber(channel)} ${channel.name}` + (shownNumber(channel) !== channel.number
-        ? ` (antenna ${channel.number})` : '');
+      ? `${nameOf(channel)} — from an earlier refresh; ` + (isRoku(channel)
+        ? 'its listing did not answer this time' : 'this frequency did not read this time')
+      : `Watch ${shownNumber(channel)} ${nameOf(channel)}` + antennaNote(channel, ' (antenna ', ')')
+        + (isRoku(channel) ? ' on the Roku (YouTube TV)' : '')
+        + (isRoku(channel) && !channel.listing ? ' — no listings are published for it' : '');
     chan.onclick = () => watch(channel);
     row.appendChild(chan);
 
@@ -700,7 +736,7 @@ function block(channel, event, now) {
   node.title = `${event.title || 'No title'} · ${fmtTime(event.start)}–${fmtTime(end)}`;
   node.onclick = () => { userMoved = true; select(channel, event, { keepTime: false }); };
   node.ondblclick = () => watch(channel);
-  if (selected && selected.channel.number === channel.number
+  if (selected && keyOf(selected.channel) === keyOf(channel)
       && selected.event.start === event.start) {
     node.setAttribute('aria-current', 'true');
     node.tabIndex = 0;
@@ -733,7 +769,8 @@ function eventAt(channel, time) {
 function selectInitial() {
   const now = nowUnix();
   windowStart = minStart();
-  const channel = channels.find((c) => c.number === tunedNumber) || channels[0];
+  const channel = channels.find((c) => keyOf(c) === tunedKey)
+    || channels.find((c) => c.events.length) || channels[0];
   const event = eventAt(channel, now);
   if (event) select(channel, event, { keepTime: false, scroll: true });
   else drawGrid();
@@ -753,25 +790,35 @@ function select(channel, event, { keepTime = true, scroll = true } = {}) {
   reveal(event);
   drawGrid();
 
-  const row = document.querySelector(`.row[data-number="${CSS.escape(channel.number)}"]`);
+  const row = document.querySelector(`.row[data-key="${CSS.escape(keyOf(channel))}"]`);
   if (row && scroll) row.scrollIntoView({ block: 'nearest' });
 
   const end = event.start + event.duration;
   const now = nowUnix();
-  const parts = [
+  const parts = [];
+  // YouTube TV's listings name the episode, as a set-top box's guide does.
+  const episode = [event.season && `S${event.season}`, event.episode && `E${event.episode}`]
+    .filter(Boolean).join(' ');
+  if (event.episode_title || episode) {
+    parts.push(`<span>${escape([episode, event.episode_title].filter(Boolean).join(' · '))}</span>`);
+  }
+  parts.push(
     `<span>${fmtDay(event.start)} ${fmtTime(event.start)} – ${fmtTime(end)}</span>`,
     `<span>${Math.round(event.duration / 60)} min</span>`,
-  ];
+  );
   if (event.start <= now && now < end) parts.push('<span class="badge live">ON NOW</span>');
+  if (event.live) parts.push('<span class="badge">LIVE</span>');
+  if (event.new) parts.push('<span class="badge">NEW</span>');
   if (event.captions) parts.push('<span class="badge">CC</span>');
+  if (event.rating) parts.push(`<span class="badge">${escape(event.rating)}</span>`);
   if (channel.stale) parts.push('<span class="badge">EARLIER REFRESH</span>');
 
-  $('d-chan').textContent = `${shownNumber(channel)}  ${channel.name || ''}`
-    + (shownNumber(channel) !== channel.number ? `  · ${channel.number}` : '');
+  $('d-chan').textContent = `${shownNumber(channel)}  ${nameOf(channel)}`
+    + antennaNote(channel, '  · ', '') + (isRoku(channel) ? '  · YouTube TV' : '');
   $('d-title').textContent = event.title || 'No title';
   $('d-sub').innerHTML = parts.join('');
-  $('d-desc').textContent = event.description
-    || 'No description — this station sends titles only.';
+  $('d-desc').textContent = event.description || (isRoku(channel)
+    ? 'No description in the listing.' : 'No description — this station sends titles only.');
   $('d-watch').hidden = false;
   $('d-watch').textContent = `Watch ${shownNumber(channel)}`;
   $('d-record').hidden = end <= now;
@@ -784,7 +831,7 @@ function select(channel, event, { keepTime = true, scroll = true } = {}) {
 // page is skipped rather than allowed to drag the whole grid hours ahead.
 function moveRow(delta) {
   if (!selected) return;
-  const index = channels.findIndex((c) => c.number === selected.channel.number);
+  const index = channels.findIndex((c) => keyOf(c) === keyOf(selected.channel));
   const windowEnd = windowStart + WINDOW_MIN * 60;
   const time = Math.max(focusTime, windowStart);
   const step = Math.sign(delta);
@@ -825,6 +872,12 @@ function page(delta) {
 }
 
 async function watch(channel) {
+  // The Roku takes a minute or two to find a YouTube TV channel, and may be
+  // locked; the Watch page shows that progress and asks about the lock.
+  if (isRoku(channel)) {
+    location.href = `./#watch=${encodeURIComponent(keyOf(channel))}`;
+    return;
+  }
   if (!channel.id) {
     alert(`${channel.number} is in the guide but not in the channel list. `
         + 'Run a band scan.');
@@ -842,14 +895,19 @@ async function watch(channel) {
 
 // Hand the airing to the VCR. It pads the guide times itself, and refuses
 // with the clashing timer named if the one digital tuner is already booked.
+// A YouTube TV airing tapes the Roku, which the timer sends to the channel
+// a few minutes early.
 async function record(channel, event) {
   const button = $('d-record');
   button.disabled = true;
+  const timer = isRoku(channel)
+    ? { lane: 'roku', mode: 'guide', event_start: event.start,
+        target: { source_id: channel.source_id, channel_id: channel.channel_id } }
+    : { mode: 'guide', channel_number: channel.number, event_start: event.start };
   const response = await fetch('api/v1/recordings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode: 'guide', channel_number: channel.number,
-                           event_start: event.start }),
+    body: JSON.stringify(timer),
   });
   if (response.ok) { button.innerHTML = '<span class="rec">●</span> Timer set'; return; }
   button.disabled = false;
@@ -1012,15 +1070,20 @@ async function pollPreview() {
   }
   const stream = lane && lane.stream;
   const selection = (lane && lane.selection) || {};
-  const known = lane && lane.id === 'digital' && channels.find((c) => c.number === selection.number);
+  // The row on screen: the antenna channel, or the Roku's YouTube TV row.
+  const key = !lane ? null
+    : lane.id === 'digital' ? selection.number || null
+    : lane.id === 'roku' && selection.source_id && !selection.manual
+      ? `${selection.source_id}/${selection.channel_id}` : null;
+  const known = key && channels.find((c) => keyOf(c) === key);
   const label = lane && lane.id === 'analog'
     ? `Cable ${selection.channel || ''}`
-    : [known ? shownNumber(known) : selection.number, selection.name].filter(Boolean).join(' ');
+    : [known ? shownNumber(known) : selection.number, known ? nameOf(known) : selection.name]
+      .filter(Boolean).join(' ');
   $('pip-label').textContent = label;
 
-  const number = lane && lane.id === 'digital' ? selection.number || null : null;
-  if (number !== tunedNumber) {
-    tunedNumber = number;
+  if (key !== tunedKey) {
+    tunedKey = key;
     if (channels.length && !userMoved) selectInitial();
     else if (channels.length && selected) drawGrid();
   }
@@ -1070,7 +1133,7 @@ $('opt-antenna').checked = antennaNumbers;
 $('opt-antenna').onchange = () => {
   antennaNumbers = $('opt-antenna').checked;
   try { localStorage.setItem('tv-thing.guide.antenna-numbers', antennaNumbers ? '1' : '0'); } catch (_) {}
-  if (!guide || !guide.available) return;
+  if (!guide) return;
   render();
   // The detail line and the preview name the channel by number too.
   if (selected) select(selected.channel, selected.event, { scroll: true });
@@ -1118,7 +1181,7 @@ new ResizeObserver(() => {
 // the page forward once the half hour on the left edge has finished.
 setInterval(() => {
   tickClock();
-  if (guide && guide.available && !$('scroller').hidden) {
+  if (guide && !$('scroller').hidden) {
     if (windowStart < minStart()) {
       windowStart = minStart();
       drawGrid();

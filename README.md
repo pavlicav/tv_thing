@@ -86,6 +86,7 @@ Antenna → DVB frontend → minimal DVB source → localhost UDP
 | `analog_tuner.py` | Tuner-only V4L2 discovery, fixed US cable channel plan, direct analog tuner control |
 | `atsc_scan.py` | Native ATSC band scan, single-channel DX probe, PSIP/PSI parsing, signal statistics |
 | `epg.py` | Broadcast guide: PSIP MGT/EIT/ETT/STT parsing, scheduled schedule refresh |
+| `yttv_epg.py` | YouTube TV's guide, read from the web (Gracenote, FAST-app XMLTV); `yttv_listings.json` maps each row to its source |
 | `recorder.py` | VCR: timer schedule, guide-name matching, library file naming, recording/remux commands |
 | `dvb_source.py` | Minimal direct DVB demux-to-UDP source used for TV |
 | `fm_tuner.py` | FM radio: V4L2 radio-node ioctls, signal strength, band sweep |
@@ -95,6 +96,7 @@ Antenna → DVB frontend → minimal DVB source → localhost UDP
 | `scan_channels.sh` | Runs `w_scan` to detect active ATSC frequencies |
 | `channels.json` | Channel database: name, virtual ch #, RF ch #, frequency, SID |
 | `epg.json` | Stored programme guide, rebuilt on a schedule from the broadcast |
+| `yttv_epg.json` | Stored YouTube TV guide, two days ahead, rebuilt daily from the web |
 | `fm_stations.json` | FM station presets, updated by the FM band sweep |
 | `static/` | Web UI: `app.css` design system, player, scan page |
 | `roku_app/` | Roku sideload app (BrightScript / SceneGraph) |
@@ -418,6 +420,7 @@ python3 fm_tuner.py 88.5       # tune and hold, showing live signal
 ```bash
 pytest test_server.py -q                     # streaming command/GPU unit tests
 pytest test_epg.py -q                        # PSIP guide parsers, no hardware
+pytest test_yttv_epg.py -q                   # YouTube TV listings parsers and map, no network
 pytest test_fm.py -q -m "not api"          # FM unit tests, no server/hardware
 pytest -q -m "not slow and not hardware"   # fast suite against the running server
 TV_THING_URL=http://localhost:8099 pytest test_fm.py -q -m api  # target a dev instance
@@ -441,8 +444,10 @@ particularly slow tuner with `TV_THING_MAX_CHANNEL_CHANGE_SECONDS`,
 
 ### Programme guide
 
-The schedule is not fetched from the internet — every ATSC station transmits
-its own, and `epg.py` reads it off the air with DVB section filters.
+The antenna's schedule is not fetched from the internet — every ATSC station
+transmits its own, and `epg.py` reads it off the air with DVB section filters.
+YouTube TV's channels are the exception; see [YouTube TV's
+listings](#youtube-tvs-listings) below.
 
 **How much guide there is.** The Event Information Table is sent in three-hour
 blocks. A/65 requires stations to send EIT-0 through EIT-3, so **twelve hours
@@ -518,6 +523,58 @@ refresh.
 Titles may also be Huffman-coded against the tables in A/65 Annex C, which are
 not implemented. Such strings are counted and reported rather than silently
 blanked — the DC stations measured send none.
+
+#### YouTube TV's listings
+
+The Roku's YouTube TV channels carry no schedule TV Thing can read, but theirs
+are published on the web, free, and `yttv_epg.py` reads them. It runs daily at
+04:30, and at startup when less than a day is left. It needs no tuner, so it
+never interrupts anything:
+
+- **Gracenote**, which supplies YouTube TV's own guide, serves two weeks for
+  any station by its station id through the listings site Zap2it used to front.
+  The networks are their national East feeds. The locals are the Lansing
+  stations the Roku's YouTube TV market carries (WILX, WSYM, WLAJ, WLNS, WKAR,
+  and WLAJ-DT2 for The CW). 92 rows read this way.
+- **Free streaming channels** in YouTube TV's guide (Stories by AMC, AMC
+  Thrillers, Portlandia, Pickleball TV, T2, Scripps News, Bloomberg Originals,
+  All Reality, Discovery Turbo) are in no public Gracenote lineup. Their
+  schedules come from the Plex, Roku and Samsung TV Plus apps' XMLTV, mirrored
+  at i.mjh.nz. Stories by AMC, AMC Thrillers and Discovery Turbo run different
+  schedules on different apps; if one disagrees with the Roku, point it at
+  another feed. T2's listing only runs a couple of hours ahead.
+- **Local Now** (a local loop) and **World at War** have no listing anywhere.
+  Their rows are in the guide, empty, so they can still be tuned from it.
+
+A read is about 100 requests a second apart, roughly 25 MB, and takes about
+three minutes. Gracenote only answers for its full fortnight; two days are kept
+(`yttv_epg.json`, about 2 MB). A row whose source fails keeps its last
+listing, marked stale. A read where nothing answers is retried hourly.
+`yttv_listings.json` maps every `roku.json` row to its source, or to `null`.
+A test fails if a row is added to one and not the other.
+
+The guide shows these rows by their TV Thing numbers among the antenna's.
+**Watch** opens the Watch page, which sends the Roku there and shows its
+progress. **Record** sets a Roku timer that starts early enough for the Roku
+to reach the channel. The Watch page's list and banner show what is on them.
+**Antenna numbers** hides them; that view is the antenna's own.
+
+```bash
+# Read YouTube TV's listings now and store them (the server picks them up).
+python3 yttv_epg.py
+
+# Check one row's source without saving anything.
+python3 yttv_epg.py --only "Stories by AMC"
+
+# Print one row's stored schedule.
+python3 yttv_epg.py --show CNN
+```
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TV_THING_YTTV_GUIDE` | `1` | Set to `0` to stop reading YouTube TV's listings |
+| `TV_THING_YTTV_GUIDE_TIMES` | `04:30` | Local wall-clock read times |
+| `TV_THING_YTTV_GUIDE_MIN_COVERAGE_HOURS` | `24` | Hours still ahead below which a starting server reads at once |
 
 ```bash
 # The stored guide, past programmes dropped.

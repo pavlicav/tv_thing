@@ -32,6 +32,7 @@ import epg
 import lineup
 import recorder
 import roku_lane
+import yttv_epg
 from roku_control.errors import (BaseballScheduleError, ChannelNotFoundError,
                                  ConfigError, ControlBusyError, EcpError,
                                  RokuStreamError)
@@ -127,6 +128,20 @@ def parse_refresh_times(spec):
 EPG_REFRESH_TIMES = parse_refresh_times(
     os.environ.get("TV_THING_EPG_TIMES", "03:00,15:00")
 )
+
+# YouTube TV's channels get their listings from the web (yttv_epg.py), which
+# needs no tuner, so one read a day is enough: it stores two days. A starting
+# server with less than a day left reads at once, and a read that fails is
+# tried again hourly until the next slot.
+YTTV_GUIDE_ENABLED = os.environ.get("TV_THING_YTTV_GUIDE", "1") != "0"
+YTTV_GUIDE_REFRESH_TIMES = parse_refresh_times(
+    os.environ.get("TV_THING_YTTV_GUIDE_TIMES", "04:30")
+)
+YTTV_GUIDE_MIN_COVERAGE_HOURS = float(
+    os.environ.get("TV_THING_YTTV_GUIDE_MIN_COVERAGE_HOURS", "24")
+)
+YTTV_GUIDE_RETRY_SECONDS = 3600
+YTTV_GUIDE_STARTUP_DELAY = 30.0
 
 
 def next_refresh_at(times, now=None):
@@ -322,6 +337,10 @@ guide_abort = threading.Event()
 guide_wakeup = threading.Event()
 guide_status = {"last_error": None, "last_reason": None, "running": False,
                 "deferred_by_lock": False}
+# YouTube TV's listings, read from the web; see yttv_guide_worker.
+yttv_guide_status = {"running": False, "last_error": None, "last_attempt": None,
+                     "failed_channels": {}}
+yttv_guide_wakeup = threading.Event()
 always_on_wakeup = threading.Event()
 _video_encoder_config = None
 _disabled_video_encoders = set()
@@ -2576,7 +2595,8 @@ def _recording_window(body, now, default_seconds=None):
 
 
 def create_roku_recording(body, mode):
-    """A Roku timer: a channel or game at a time, or whatever is on now.
+    """A Roku timer: a channel or game at a time, a YouTube TV airing from
+    the guide, or whatever is on now.
 
     The tape is a copy of the Roku lane's stream, so it needs no encoder.
     A timer navigates the Roku when it starts, holding the roku lock as the
@@ -2604,8 +2624,31 @@ def create_roku_recording(body, mode):
             "Manual Roku" if target["source_id"] == roku_lane.MANUAL
             else f"{roku_lane.SOURCES[target['source_id']][0]} {target['channel_id']}")
         window, error = _recording_window(body, now)
+    elif mode == "guide":
+        # A YouTube TV airing from the guide (yttv_epg.py), by its channel and
+        # start. The timer begins early enough for the Roku to reach the
+        # channel before the padded start, as the VCR page sets a game's.
+        try:
+            target, _game = roku.normalize(body.get("target") or body)
+        except RokuStreamError as exc:
+            return roku_error(exc)
+        if target["source_id"] != roku_lane.YOUTUBE_TV:
+            return api_v1_error("only YouTube TV channels have guide airings", 400,
+                                "invalid_mode")
+        found = recorder.find_event(yttv_epg.load_guide(), target["channel_id"],
+                                    body.get("event_start"))
+        if found is None:
+            return api_v1_error("that airing is not in the guide", 404, "unknown_event")
+        _channel, event = found
+        start, end = recorder.guide_window(event)
+        if end <= now:
+            return api_v1_error("that programme has already finished", 400,
+                                "in_the_past")
+        window, error = (max(now, start - roku_lane.NAVIGATION_SECONDS), end), None
+        name = f"{roku_lane.SOURCES[roku_lane.YOUTUBE_TV][0]} {target['channel_id']}"
+        body = dict(body, title=event.get("title"))
     else:
-        return api_v1_error('a Roku recording\'s mode must be "manual" or "otr"',
+        return api_v1_error('a Roku recording\'s mode must be "manual", "guide" or "otr"',
                             400, "invalid_mode")
     if error:
         return error
@@ -2615,6 +2658,7 @@ def create_roku_recording(body, mode):
     return _schedule_timer(recorder.make_timer(
         {"id": target["channel_id"], "number": None, "name": name},
         start, end, title=title, kind=mode, now=now,
+        program=recorder.program_of(event, None) if mode == "guide" else None,
         lane=LANE_ROKU, target=target,
     ))
 
@@ -3644,6 +3688,76 @@ def _run_scheduled_refresh(reason):
     return False
 
 
+def run_yttv_guide_refresh(reason="manual"):
+    """Read YouTube TV's listings from the web and store them.
+
+    Returns True when anything was read. A row whose source failed keeps its
+    last listing, marked stale, until that runs out.
+    """
+    yttv_guide_status.update(running=True, last_attempt=int(time.time()))
+    try:
+        listings = yttv_epg.load_listings()
+        names = [str(item["id"]) for item in roku.catalog(roku_lane.YOUTUBE_TV)["items"]]
+        fresh = yttv_epg.refresh(listings, names)
+        if fresh["requested"] and len(fresh["errors"]) >= fresh["requested"]:
+            raise RuntimeError("no source answered: "
+                               + next(iter(fresh["errors"].values())))
+        guide = yttv_epg.merge_guides(yttv_epg.load_guide(), fresh)
+        guide["reason"] = reason
+        yttv_epg.save_guide(guide)
+    except Exception as error:   # noqa: BLE001 - the worker must not die
+        yttv_guide_status["last_error"] = str(error)
+        print(f"YouTube TV guide ({reason}) failed: {error}", flush=True)
+        return False
+    finally:
+        yttv_guide_status["running"] = False
+    yttv_guide_status.update(last_error=None, failed_channels=fresh["errors"])
+    print(f"YouTube TV guide ({reason}): {guide['event_count']} programmes on "
+          f"{guide['channels_with_events']} channels, {guide['coverage_hours']}h ahead, "
+          f"in {fresh['elapsed_seconds']}s"
+          + (f"; failed: {', '.join(sorted(fresh['errors']))}" if fresh["errors"] else ""),
+          flush=True)
+    return True
+
+
+def yttv_guide_next_wait(succeeded, now=None):
+    """``(seconds, reason)`` until the next YouTube TV read; None to stop.
+
+    A read that failed outright is tried again in an hour, unless the next
+    slot comes sooner.
+    """
+    now = time.time() if now is None else now
+    slot = next_refresh_at(YTTV_GUIDE_REFRESH_TIMES, now)
+    wait = slot - now if slot else None
+    if not succeeded and (wait is None or wait > YTTV_GUIDE_RETRY_SECONDS):
+        return YTTV_GUIDE_RETRY_SECONDS, "retry"
+    return (None, None) if wait is None else (max(1.0, wait), "scheduled")
+
+
+def yttv_guide_worker():
+    """Read YouTube TV's listings on their schedule, and at startup when short.
+
+    Nothing is tuned, so nothing waits on a lock or interrupts a viewer. The
+    startup read waits a moment so it does not compete with the service
+    coming up.
+    """
+    if not YTTV_GUIDE_ENABLED or roku is None:
+        return
+    due = remaining_coverage_hours(yttv_epg.load_guide()) < YTTV_GUIDE_MIN_COVERAGE_HOURS
+    if due:
+        yttv_guide_wakeup.wait(timeout=YTTV_GUIDE_STARTUP_DELAY)
+        yttv_guide_wakeup.clear()
+    reason = "startup"
+    while True:
+        succeeded = run_yttv_guide_refresh(reason) if due else True
+        wait, reason = yttv_guide_next_wait(succeeded)
+        if wait is None:
+            return
+        yttv_guide_wakeup.wait(timeout=wait)
+        yttv_guide_wakeup.clear()
+        due = True
+
+
 def remaining_coverage_hours(guide, now=None):
     """Hours of guide still ahead of the clock, from the stored horizon."""
     if not guide:
@@ -3655,42 +3769,109 @@ def remaining_coverage_hours(guide, now=None):
     return round(max(0, horizon - now) / 3600, 1)
 
 
+def yttv_guide_channels():
+    """YouTube TV's rows as guide channels, keyed as the lineup keys them.
+
+    ``{"youtube-tv/NBC": channel}``, every row roku.json lists, numbered.
+    A row with no listing -- none exists for it, or it has not been read
+    yet -- is there with no events, so the guide can still offer it.
+    Returns ``(channels, stored guide or None)``.
+    """
+    guide = yttv_epg.load_guide()
+    if roku is None:
+        return {}, guide
+    stored = (guide or {}).get("channels") or {}
+    catalog = numbered_roku_listings(
+        {roku_lane.YOUTUBE_TV: roku.catalog(roku_lane.YOUTUBE_TV)})[roku_lane.YOUTUBE_TV]
+    channels = {}
+    for item in catalog["items"]:
+        channel_id = str(item["id"])
+        found = stored.get(channel_id) or {}
+        key = f"{roku_lane.YOUTUBE_TV}/{channel_id}"
+        channels[key] = {
+            **{field: item[field] for field in ("tv_number", "tv_name", "tv_section")
+               if field in item},
+            "key": key, "kind": "roku", "source_id": roku_lane.YOUTUBE_TV,
+            "channel_id": channel_id, "name": item.get("name"),
+            "listing": {field: found[field] for field in
+                        ("source", "station", "call_sign", "feed", "feed_channel")
+                        if field in found} or None,
+            **({"stale": True} if found.get("stale") else {}),
+            "events": found.get("events") or [],
+        }
+    return channels, guide
+
+
+def yttv_guide_summary(guide, now):
+    """How much YouTube TV guide there is, for the guide's meta line."""
+    return {
+        "available": bool(guide and guide.get("channels_with_events")),
+        "generated_at": (guide or {}).get("generated_at"),
+        "age_seconds": now - guide["generated_at"] if guide and guide.get("generated_at")
+        else None,
+        "coverage_hours": remaining_coverage_hours(guide, now),
+        "event_count": (guide or {}).get("event_count", 0),
+        "channels_with_events": (guide or {}).get("channels_with_events", 0),
+        "refresh_times": [f"{h:02d}:{m:02d}" for h, m in YTTV_GUIDE_REFRESH_TIMES],
+        "next_refresh": next_refresh_at(YTTV_GUIDE_REFRESH_TIMES)
+        if YTTV_GUIDE_ENABLED else None,
+        "refreshing": yttv_guide_status["running"],
+        "last_error": yttv_guide_status["last_error"],
+        "failed_channels": sorted(yttv_guide_status["failed_channels"]),
+    }
+
+
 def guide_payload(number=None, window_hours=None, now=None):
     """The stored guide, with events that have already finished dropped.
 
     Past events are dead weight in a grid that starts at the current hour,
     and a full day of them across seventy channels is most of the response.
+
+    The antenna's channels are keyed by their antenna number, as always;
+    YouTube TV's follow, keyed ``youtube-tv/NAME`` (see yttv_guide_channels).
+    ``available`` and the counts beside it describe the broadcast guide;
+    ``youtube_tv`` describes the other.
     """
     guide = epg.load_guide()
     now = int(time.time()) if now is None else now
+    # Keep the hour already in progress so the grid has a left edge.
+    floor = now - 3600
+    ceiling = now + window_hours * 3600 if window_hours else None
+
+    def current(events):
+        return [event for event in events
+                if event["start"] + event["duration"] > floor
+                and (ceiling is None or event["start"] < ceiling)]
+
+    channels = {}
+    if guide:
+        lineup_numbers = {}
+        for channel in numbered_channels(load_channels()):
+            if "tv_number" in channel:
+                lineup_numbers.setdefault(channel.get("number"), {
+                    key: channel[key] for key in ("tv_number", "tv_name", "tv_section")})
+        for key, channel in guide["channels"].items():
+            if number and key != number:
+                continue
+            channels[key] = {**channel, **lineup_numbers.get(key, {}), "key": key,
+                             "kind": "digital", "events": current(channel["events"])}
+    yttv_channels, yttv_guide = yttv_guide_channels()
+    for key, channel in yttv_channels.items():
+        if number and key != number:
+            continue
+        channels[key] = {**channel, "events": current(channel["events"])}
+    youtube_tv = yttv_guide_summary(yttv_guide, now)
+
     if not guide:
         return {
             "available": False,
-            "channels": {},
+            "channels": channels,
             "refresh_times": [f"{h:02d}:{m:02d}" for h, m in
                               EPG_REFRESH_TIMES],
             "refreshing": guide_refreshing,
             "last_error": guide_status["last_error"],
+            "youtube_tv": youtube_tv,
         }
-
-    # Keep the hour already in progress so the grid has a left edge.
-    floor = now - 3600
-    ceiling = now + window_hours * 3600 if window_hours else None
-    lineup_numbers = {}
-    for channel in numbered_channels(load_channels()):
-        if "tv_number" in channel:
-            lineup_numbers.setdefault(channel.get("number"), {
-                key: channel[key] for key in ("tv_number", "tv_name", "tv_section")})
-    channels = {}
-    for key, channel in guide["channels"].items():
-        if number and key != number:
-            continue
-        events = [
-            event for event in channel["events"]
-            if event["start"] + event["duration"] > floor
-            and (ceiling is None or event["start"] < ceiling)
-        ]
-        channels[key] = {**channel, **lineup_numbers.get(key, {}), "events": events}
 
     return {
         "available": True,
@@ -3713,16 +3894,22 @@ def guide_payload(number=None, window_hours=None, now=None):
         "next_refresh": next_refresh_at(EPG_REFRESH_TIMES),
         "refreshing": guide_refreshing,
         "last_error": guide_status["last_error"],
+        "youtube_tv": youtube_tv,
         "channels": channels,
     }
 
 
 def guide_now_payload(now=None):
-    """What is on right now, and what is next, per channel."""
+    """What is on right now, and what is next, per channel.
+
+    Antenna channels by number, YouTube TV's as ``youtube-tv/NAME``.
+    """
     now = int(time.time()) if now is None else now
     guide = epg.load_guide()
+    yttv_channels, yttv_guide = yttv_guide_channels()
+    everything = {**(guide or {}).get("channels", {}), **yttv_channels}
     entries = {}
-    for number, channel in (guide or {}).get("channels", {}).items():
+    for number, channel in everything.items():
         current = None
         following = None
         for event in channel["events"]:
@@ -3735,6 +3922,7 @@ def guide_now_payload(now=None):
     return {
         "available": bool(guide),
         "generated_at": (guide or {}).get("generated_at"),
+        "youtube_tv_available": bool(yttv_guide and yttv_guide.get("channels_with_events")),
         "channels": entries,
     }
 
@@ -5822,6 +6010,7 @@ def main():
     start_roku_lane()
     threading.Thread(target=always_on_worker, daemon=True).start()
     threading.Thread(target=guide_worker, daemon=True).start()
+    threading.Thread(target=yttv_guide_worker, daemon=True).start()
     threading.Thread(target=recording_worker, daemon=True).start()
     if ALWAYS_ON:
         always_on_wakeup.set()
