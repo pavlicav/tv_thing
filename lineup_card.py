@@ -92,9 +92,11 @@ def card_blocks(payload):
 
 
 def _games_note(sources, section_name):
-    labels = [roku_lane.SOURCES.get(source, (source,))[0] for source in sources]
+    named = {**roku_lane.SOURCES, **roku_lane.LISTED_SOURCES}
+    labels = [named.get(source, (source,))[0] for source in sources]
     labels = [label for label in labels if label.lower() != section_name.lower()]
-    which = f"{' and '.join(labels)} games" if labels else "The day's games"
+    listed = ", ".join(labels[:-1]) + f" and {labels[-1]}" if len(labels) > 1 else "".join(labels)
+    which = f"{listed} games" if labels else "The day's games"
     return f"{which}, numbered each morning by start time."
 
 

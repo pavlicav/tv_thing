@@ -214,7 +214,7 @@ an explicit API version change.
 
 GET `api/v1/guide[?channel=KEY][&hours=N]` returns `channels`, an object
 keyed by row, with events that have finished dropped (`hours` keeps those
-starting in the next N hours). Two kinds of row share it:
+starting in the next N hours). Three kinds of row share it:
 
 * **Antenna channels**, keyed by antenna number (`7.1`), read off the air
   (PSIP) at the `refresh_times`. A read retunes the digital lane, so it runs
@@ -229,13 +229,29 @@ starting in the next N hours). Two kinds of row share it:
   `last_error` and `failed_channels`. A row whose source failed keeps its
   last listing with `stale: true`. Every YouTube TV row is listed, with or
   without events.
+* **Live Sports**, keyed `games/NUMBER` (`kind: "games"`), one row per
+  number of the lineup's games block. Each day's games of every game source
+  are numbered together by start time, so a row's airings are different
+  games, each with its own `source_id`, `channel_id` (the game ID), `date`,
+  `episode_title` (the sport and what carries it) and `playable` (whether
+  the Roku can be sent to it). An airing runs from the start to the
+  projected final; finished games are left out. The `nhl` source is NHL
+  games on ESPN Unlimited (out-of-market and ESPN+ exclusives), with
+  `exclusive` and, for a team that may be blacked out, `blackout` (the
+  markets: `["DC"]`). It is listed only: `playable` is false and a tune of it
+  is **400**. `sports` describes them: `available`, `games`, `by_source` and
+  `errors` (a schedule that did not answer, by `source_id` and `date`). A
+  request for one other row (`?channel=7.1`) reads no schedule and gives
+  `sports: null`.
 
-Every row has `key` and `kind` (`digital` or `roku`) and the channel-number
-fields above. Antenna events have `start`, `duration`, `title`, `captions`
+Every row has `key` and `kind` (`digital`, `roku` or `games`) and the
+channel-number fields above. Antenna events have `start`, `duration`, `title`, `captions`
 and sometimes `description`. YouTube TV events may also have `episode_title`,
 `season`, `episode`, `new`, `live` and `rating`. GET `api/v1/guide/now` gives
-`now` and `next` per row under the same keys. Tune a YouTube TV row through
-its Roku source (`source: "youtube-tv"`, `channel_id`), never by its key.
+`now` and `next` per row under the same keys (Live Sports is not in it).
+Tune a YouTube TV row through its Roku source (`source: "youtube-tv"`,
+`channel_id`), and a game by its airing's `source_id`, `channel_id` and
+`date`, never by a row's key.
 
 ## Recording
 

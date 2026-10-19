@@ -456,11 +456,19 @@ def test_guide_lists_youtube_tv_and_sends_its_rows_to_the_watch_page():
     assert ".row[data-key=" in GUIDE and "data-number" not in GUIDE
     assert "fetch('api/guide?hours=30')" in GUIDE
     # The Watch page tunes the Roku, showing its progress and any lock.
-    watch = section(GUIDE, "async function watch(channel)", "// Hand the airing to the VCR")
+    watch = section(GUIDE, "async function watch(channel, event)", "// Hand the airing to the VCR")
     assert "./#watch=${encodeURIComponent(keyOf(channel))}" in watch
     assert watch.index("isRoku(channel)") < watch.index("api/tune")
+    # A Live Sports row is a different game each day: its airing names the target.
+    assert "./#watch=${encodeURIComponent(`${event.source_id}/${event.channel_id}`)}" in watch
+    assert watch.index("gameRefusal(event)") < watch.index("#watch=")
+    refusal = section(GUIDE, "function gameRefusal(event)", "async function load()")
+    assert "event.date !== localDate()" in refusal and "ESPN_NOTE" in refusal
+    assert "watch(selected.channel, selected.event)" in GUIDE
     # A row with no listing stays; Antenna numbers is the antenna's own view.
-    assert "isRoku(channel) ? !antennaNumbers : channel.events.length" in GUIDE
+    assert "isRoku(channel) ? !antennaNumbers\n" in GUIDE
+    assert "isGames(channel) ? !antennaNumbers && channel.events.length > 0" in GUIDE
+    assert "guide.sports" in GUIDE
     assert "guide.youtube_tv" in GUIDE
 
 
@@ -470,6 +478,8 @@ def test_watch_page_tunes_the_roku_channel_the_guide_links_to():
     # Used once: a reload must not send the Roku off again.
     assert "history.replaceState(" in linked
     assert "tuneRoku(linked.source, linked.item)" in linked
+    # A game is one of today's, as the Watch page lists them.
+    assert "(!s.dated || state.roku.date === localDate())" in linked
     assert "else resume();" in linked
 
 

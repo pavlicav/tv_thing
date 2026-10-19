@@ -41,6 +41,17 @@ LOCAL_NFL_TEAMS = {'WSH', 'BAL'}
 # channel -> the station's call sign. ESPN's feed does not list these. NFL Network on FOX 5
 # was seen on 2026-10-04 (Colts at Commanders, in London); add others once seen.
 LOCAL_SIMULCASTS = {'WSH': {'NFL Network': 'WTTG'}}
+# ESPN Unlimited, which YouTube TV's main plan includes since 2026-09-01, streams the
+# NHL's out-of-market games (NHL Power Play) and its ESPN+ exclusives inside YouTube TV.
+# ESPN's scoreboard names both with a national "ESPN+" broadcast; a game on ESPN, ABC,
+# TNT or NHL Network has none and is in the guide on that channel instead. An exclusive
+# also streams on Disney+ and Hulu (LA at NYI, 2026-10-22); a game between Canadian teams
+# has no US regional broadcast but is out of market all the same (TOR at EDM, 10-24).
+ESPN_UNLIMITED_NHL = 'ESPN+'
+ESPN_EXCLUSIVE_ALSO = frozenset({'DISNEY+', 'HULU'})
+# Teams ESPN Unlimited blacks out, and where: YouTube TV's market for the Roku moves
+# between DC and Lansing, so their games may or may not be watchable.
+NHL_LOCAL_TEAMS = {'WSH': 'DC', 'DET': 'Lansing'}
 # ESPN network labels that differ from a configured channel name or alias.
 NETWORK_ALIASES = {'NFL NET': 'NFL Network', 'NFL NETWORK': 'NFL Network', 'ESPN 2': 'ESPN2',
                    'FOX SPORTS 1': 'FS1', 'NBA TV': 'NBA TV', 'NHL NET': 'NHL Network',
@@ -80,6 +91,27 @@ def closing(league, game):
     if league == 'nwsl':
         return clock >= 90 * 60 - CLOSING_SECONDS
     return clock <= CLOSING_SECONDS
+
+
+def nhl_on_espn_unlimited(game):
+    """How an NHL game streams on ESPN Unlimited, or None when it does not.
+
+    ``exclusive``: an ESPN+ exclusive, with no regional broadcast to black it
+    out. ``blackout``: the markets that may black it out, by team
+    (``{'WSH': 'DC'}``). ``home``/``away``: the regional broadcasts whose
+    commentary the home and away streams carry.
+    """
+    broadcasts = game.get('broadcasts') or []
+    national = {str(b.get('name') or '').upper() for b in broadcasts
+                if b.get('market') in (None, 'national')}
+    if ESPN_UNLIMITED_NHL not in national:
+        return None
+    feeds = {side: [str(b['name']) for b in broadcasts if b.get('market') == side and b.get('name')]
+             for side in ('home', 'away')}
+    exclusive = bool(national & ESPN_EXCLUSIVE_ALSO)
+    teams = [(game.get(side) or {}).get('abbreviation') for side in ('away', 'home')]
+    blackout = {} if exclusive else {team: NHL_LOCAL_TEAMS[team] for team in teams if team in NHL_LOCAL_TEAMS}
+    return {'exclusive': exclusive, 'blackout': blackout, **feeds}
 
 
 def estimated_end(league, game, now):

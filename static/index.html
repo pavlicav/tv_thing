@@ -2540,8 +2540,9 @@
       ? [loadChannels(), loadCableChannels(false), loadSources(false), loadStations()]
       : [loadChannels(), loadCableChannels(false), loadSources(false)];
     // The guide links here as #watch=youtube-tv%2FNBC to put a Roku channel
-    // on, so the tune shows its progress and asks about a lock as usual. The
-    // link is used once: a reload must not send the Roku off again.
+    // on, so the tune shows its progress and asks about a lock as usual. A
+    // game (#watch=mlb%2F823254) is one of today's, as the games are listed.
+    // The link is used once: a reload must not send the Roku off again.
     function linkedRokuTarget() {
       const match = /^#watch=(.+)$/.exec(location.hash);
       if (!match) return null;
@@ -2550,7 +2551,8 @@
       try { value = decodeURIComponent(match[1]); } catch (_) { return null; }
       const slash = value.indexOf("/");
       if (slash <= 0) return null;
-      const source = state.roku.sources.find(s => s.id === value.slice(0, slash) && !s.dated);
+      const source = state.roku.sources.find(s => s.id === value.slice(0, slash)
+        && (!s.dated || state.roku.date === localDate()));
       const item = source && (state.roku.items[source.id] || [])
         .find(i => String(i.id) === value.slice(slash + 1));
       return item ? { source, item } : null;

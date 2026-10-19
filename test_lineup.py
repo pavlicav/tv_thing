@@ -226,9 +226,11 @@ def test_the_card_reads_like_a_cable_lineup():
     assert all(key.startswith("youtube-tv/") for number, key in by_number.items() if 30 <= number <= 59)
     assert {"youtube-tv/CNN", "youtube-tv/MS NOW", "youtube-tv/Discovery Channel",
             "youtube-tv/HGTV"} <= {by_number[n] for n in range(30, 60)}
-    # Football from 60 around VizelVision on 70, baseball from 80.
-    assert [(s.first, s.last) for s in plan.games_sections("sunday-ticket")] == [(60, 69), (71, 79)]
-    assert plan.games_sections("mlb")[0].first == 80
+    # Live Sports from 60 around VizelVision on 70: football, baseball and
+    # hockey in one block, numbered together.
+    for source in ("sunday-ticket", "thursday-night-football", "mlb", "nhl"):
+        assert [(s.first, s.last, s.name) for s in plan.games_sections(source)] == [
+            (60, 69, "Live Sports"), (71, 99, "Live Sports")]
     assert by_number[109] == "roku-manual/manual"
     assert plan.new_section("digital").first >= 300 and plan.new_section("youtube-tv").first >= 300
     assert all(number >= 110 for number, key in by_number.items()

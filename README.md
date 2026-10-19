@@ -553,6 +553,33 @@ listing, marked stale. A read where nothing answers is retried hourly.
 `yttv_listings.json` maps every `roku.json` row to its source, or to `null`.
 A test fails if a row is added to one and not the other.
 
+#### Live Sports
+
+The Live Sports numbers (60–99) are in the guide too, read from the leagues'
+schedules (ESPN's scoreboard, MLB's Stats API) each time the guide loads, two
+days ahead. A row is a number, not a channel: each day's games of every sport
+are numbered together by start time, so 61 can be a hockey game tonight and a
+football game on Sunday. An airing runs from its start to the projected final
+and goes once the game is over. **Watch** puts one of today's games on the
+Roku through the Watch page, as its own source would (Sunday Ticket, Thursday
+Night Football, MLB). Record is not offered on these rows yet; the VCR page
+tapes a game.
+
+**Hockey is ESPN Unlimited's.** YouTube TV's main plan has carried ESPN
+Unlimited since 2026-09-01, and with it the NHL's out-of-market games (NHL
+Power Play, 1,050 a season, each with home and away streams) and its ESPN+
+exclusives. ESPN's scoreboard marks both with a national "ESPN+" broadcast;
+an exclusive also lists Disney+ and Hulu. Games on ESPN, ABC, TNT or NHL
+Network are left out, since they are on those channels' rows. Out-of-market
+games are blacked out locally, and YouTube TV places the Roku in DC or
+Lansing, so Capitals and Red Wings games are marked "may be blacked out"
+(exclusives never are). In YouTube TV the games are on the ESPN page (the
+network row's logo in the live guide), under **Live**: one On Now row of
+cards, labelled ESPN+, two per game (away stream, then home), seen on
+2026-10-19. TV Thing cannot send the Roku there yet, so these rows have no
+Watch: the `nhl` source is listed (`roku_lane.LISTED_SOURCES`) but not
+tunable.
+
 The guide shows these rows by their TV Thing numbers among the antenna's.
 **Watch** opens the Watch page, which sends the Roku there and shows its
 progress. **Record** sets a Roku timer that starts early enough for the Roku
@@ -865,8 +892,7 @@ Every channel has a TV Thing number, laid out like an old cable lineup card in
 | 0, 70 | VizelVision (the house channel) |
 | 1–29 | Local stations: DC's network stations on their own dial positions (4, 5, 7, 9), NHK World on 1, the other DC and Baltimore stations, the Roku's Lansing locals (YouTube TV) on 16–21; 22–29 are held for a Lansing / Flint antenna receiver |
 | 30–59 | Cable from YouTube TV: the Weather Channel, TBS, TNT, the sports networks, then CNN, MS NOW, FOX News, CNBC, Discovery, HGTV, Food, TLC, USA, FX, Comedy Central |
-| 60–69, 71–79 | Football: the day's NFL Sunday Ticket and Thursday Night Football games, by kickoff (one block, split around VizelVision) |
-| 80–99 | Baseball: the day's MLB games, by first pitch |
+| 60–69, 71–99 | Live Sports: the day's games, football, baseball and hockey together by start time (NFL Sunday Ticket, Thursday Night Football, MLB, and the NHL on ESPN Unlimited); one block, split around VizelVision |
 | 100–109 | Roku (Manual Roku on 109) |
 | 110–299 | The digital tier, by genre, YouTube TV's other channels and the antenna's subchannels together: news and business, learning and lifestyle, kids, entertainment, music, classic TV, movies and westerns, crime and reality, game shows, Spanish, shopping, faith, repeaters |
 | 300–349 | New on the antenna |

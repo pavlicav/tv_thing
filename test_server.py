@@ -976,6 +976,140 @@ def test_guide_now_covers_youtube_tv(monkeypatch):
     assert payload["youtube_tv_available"] is True
 
 
+# ---------------------------------------------------------------------------
+# Live Sports: every game source's games in the guide, numbered together
+# ---------------------------------------------------------------------------
+
+def _nhl_item(game_id, start, away, home, state="preview", period=None, exclusive=False,
+              blackout=None):
+    """One item of the lane's NHL catalog; a team is (abbreviation, name, nickname)."""
+    team = lambda t: {"abbreviation": t[0], "name": t[1], "nickname": t[2]}  # noqa: E731
+    game = {"game_id": game_id, "start_time": start, "period": period,
+            "state": {"preview": "pre", "live": "in", "final": "post"}[state],
+            "finished": state == "final", "away": team(away), "home": team(home)}
+    stream = {"exclusive": exclusive, "blackout": blackout or {},
+              "home": [] if exclusive else ["MSG"], "away": [] if exclusive else ["NBCSP"]}
+    return {"id": str(game_id), "name": f"{away[1]} at {home[1]}", "start_time": start,
+            "state": state, "playable": False, "espn_unlimited": stream, "game": game}
+
+
+FLYERS = ("PHI", "Philadelphia Flyers", "Flyers")
+RANGERS = ("NYR", "New York Rangers", "Rangers")
+KINGS = ("LA", "Los Angeles Kings", "Kings")
+CAPITALS = ("WSH", "Washington Capitals", "Capitals")
+# Live in the top of the 5th, on TBS.
+GUARDIANS_AT_RAYS = {
+    "id": "823254", "name": "Cleveland Guardians at Tampa Bay Rays",
+    "start_time": "2027-01-16T00:10:00Z", "state": "live", "status": "In Progress",
+    "playable": True, "route": {"provider": "youtube_tv", "channel": "TBS"},
+    "game": {"state": "Live", "period": 5, "half": "Top",
+             "away": {"nickname": "Guardians"}, "home": {"nickname": "Rays"}}}
+
+
+def _sports(monkeypatch):
+    """A Roku lane with two days of games and a third whose NHL schedule fails.
+
+    Now is 23:00 Eastern on 2027-01-15. That day's 19:00 hockey game is over;
+    a 19:10 baseball game and the 19:30 and 22:00 hockey games are on.
+    2027-01-16 has a 13:00 hockey exclusive.
+    """
+    from types import SimpleNamespace
+    days = {
+        ("nhl", "2027-01-15"): [
+            _nhl_item(11, "2027-01-16T00:00Z", KINGS, RANGERS, state="final"),
+            _nhl_item(12, "2027-01-16T00:30Z", FLYERS, RANGERS, state="live", period=3),
+            _nhl_item(13, "2027-01-16T03:00Z", KINGS, CAPITALS, state="live", period=1,
+                      blackout={"WSH": "DC"}),
+        ],
+        ("nhl", "2027-01-16"): [_nhl_item(14, "2027-01-16T18:00Z", FLYERS, KINGS, exclusive=True)],
+        ("mlb", "2027-01-15"): [GUARDIANS_AT_RAYS],
+    }
+    asked = []
+
+    def catalog(source_id, requested_date=None):
+        if source_id == "youtube-tv":
+            return {"items": []}
+        asked.append((source_id, requested_date))
+        if source_id == "nhl" and requested_date == "2027-01-17":
+            raise BaseballScheduleError("Could not load the NHL schedule: timed out")
+        return {"date": requested_date,
+                "items": [dict(item) for item in days.get((source_id, requested_date), [])]}
+
+    monkeypatch.setattr(server, "roku", SimpleNamespace(catalog=catalog))
+    return asked
+
+
+from roku_control.errors import BaseballScheduleError  # noqa: E402
+
+
+def test_the_guide_lists_every_sport_together_on_the_live_sports_numbers(monkeypatch):
+    now = 1_800_072_000     # 2027-01-16T04:00Z, 23:00 Eastern on the 15th
+    monkeypatch.setattr(server.epg, "load_guide", lambda: _stored_guide(now))
+    asked = _sports(monkeypatch)
+    payload = server.guide_payload(now=now)
+
+    assert {day for _, day in asked} == {"2027-01-15", "2027-01-16", "2027-01-17"}
+    assert {source for source, _ in asked} == {
+        "mlb", "sunday-ticket", "thursday-night-football", "nhl"}
+    rows = {key: channel for key, channel in payload["channels"].items() if key.startswith("games/")}
+    # The day's games share the block from 60 by start time, whatever the sport;
+    # the game already over keeps its number and leaves the guide.
+    assert sorted(rows) == ["games/60", "games/61", "games/62", "games/63"]
+    baseball = rows["games/61"]
+    assert (baseball["kind"], baseball["tv_number"], baseball["tv_name"], baseball["tv_section"]) == (
+        "games", 61, "Live Sports", "Live Sports")
+    game = baseball["events"][0]
+    assert (game["title"], game["episode_title"], game["source_id"], game["channel_id"],
+            game["date"], game["playable"]) == (
+        "Guardians at Rays", "MLB Baseball", "mlb", "823254", "2027-01-15", True)
+    assert game["description"] == "Cleveland Guardians at Tampa Bay Rays. On TBS from YouTube TV."
+    flyers = rows["games/62"]["events"][0]
+    assert (flyers["title"], flyers["channel_id"], flyers["live"], flyers["playable"]) == (
+        "Flyers at Rangers", "12", True, False)
+    assert flyers["episode_title"] == "NHL Hockey · ESPN Unlimited"
+    # Live in the 3rd: about 19 minutes left, by the projection.
+    assert flyers["start"] + flyers["duration"] == now + 19 * 60
+    assert flyers["description"] == ("Philadelphia Flyers at New York Rangers. Out of market on"
+                                     " ESPN Unlimited in YouTube TV. Home stream: MSG. Away stream: NBCSP.")
+    capitals = rows["games/63"]["events"][0]
+    assert capitals["blackout"] == ["DC"] and "blacks out the Capitals in DC" in capitals["description"]
+    # The next day's slate is numbered afresh, from 60.
+    exclusive = rows["games/60"]["events"][0]
+    assert (exclusive["title"], exclusive["date"], exclusive["exclusive"]) == (
+        "Flyers at Kings", "2027-01-16", True)
+    assert "blackout" not in exclusive and "no blackouts" in exclusive["description"]
+    # A schedule that did not answer costs its own games only.
+    sports = payload["sports"]
+    assert (sports["available"], sports["games"], sports["by_source"]) == (
+        True, 4, {"mlb": 1, "nhl": 3})
+    assert [(error["source_id"], error["date"]) for error in sports["errors"]] == [
+        ("nhl", "2027-01-17")]
+    assert payload["channels"]["9.1"]["kind"] == "digital"
+
+
+def test_the_sports_rows_follow_the_window_and_the_channel_asked_for(monkeypatch):
+    now = 1_800_072_000
+    monkeypatch.setattr(server.epg, "load_guide", lambda: None)
+    asked = _sports(monkeypatch)
+    payload = server.guide_payload(window_hours=12, now=now)
+    assert {day for _, day in asked} == {"2027-01-15", "2027-01-16"}
+    assert payload["sports"]["errors"] == []
+    asked.clear()
+    # The Watch page asks for one channel at a time: no schedule is read for another's.
+    assert server.guide_payload(number="9.1", now=now)["sports"] is None and asked == []
+    assert list(server.guide_payload(number="games/63", now=now)["channels"]) == ["games/63"]
+
+
+def test_the_lineup_numbers_the_days_games_together(monkeypatch):
+    _sports(monkeypatch)
+    monkeypatch.setattr(server, "load_channels", lambda: [])
+    rows = [row for row in server.api_v1_lineup("2027-01-15")["channels"]
+            if row.get("source_id") in ("nhl", "mlb")]
+    assert [(row["tv_number"], row["source_id"], row["channel_id"], row["playable"]) for row in rows] == [
+        (60, "nhl", "11", False), (61, "mlb", "823254", True), (62, "nhl", "12", False),
+        (63, "nhl", "13", False)]
+
+
 def test_a_youtube_tv_read_stores_the_listings(monkeypatch):
     now = int(time.time())
     _youtube_tv(monkeypatch, now, stored=False)

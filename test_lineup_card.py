@@ -78,6 +78,10 @@ def test_channels_tex_escapes_names_and_dates_the_card():
     assert r"\chan{16}{WILX}{NBC}{}" in tex
     assert ("\\games{NFL Sunday Ticket and Thursday Night Football games, "
             "numbered each morning by start time.}") in tex
+    assert lineup_card._games_note(["nhl"], "Hockey") == (
+        "NHL on ESPN Unlimited games, numbered each morning by start time.")
+    assert lineup_card._games_note(["sunday-ticket", "mlb", "nhl"], "Live Sports") == (
+        "NFL Sunday Ticket, Baseball and NHL on ESPN Unlimited games, numbered each morning by start time.")
     # The section name is not repeated back as a source.
     assert "\\games{The day's games, numbered each morning by start time.}" in tex
 

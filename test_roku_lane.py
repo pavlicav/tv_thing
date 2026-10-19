@@ -370,8 +370,51 @@ def test_catalogs(lane):
     assert lane.catalog("roku-manual")["items"][0]["id"] == "manual"
     sources = {source["id"]: source for source in lane.source_list(True)}
     assert set(sources) == set(roku_lane.SOURCES)
+    assert roku_lane.NHL not in sources
     assert sources["mlb"]["dated"] and not sources["youtube-tv"]["dated"]
     assert all(source["lane"] == "roku" for source in sources.values())
+
+
+def _nhl(game_id, away, home, *broadcasts, state="pre"):
+    """An NHL game as ESPN's scoreboard normalizes it; broadcasts are (market, name)."""
+    return {"league": "nhl", "game_id": game_id, "title": f"{away} at {home}",
+            "start_time": "2026-10-20T23:00Z", "state": state, "status": "Scheduled",
+            "away": {"abbreviation": away}, "home": {"abbreviation": home},
+            "broadcasts": [{"name": name, "market": market} for market, name in broadcasts]}
+
+
+NHL_SLATE = [
+    _nhl(1, "LA", "WSH", ("national", "ESPN+"), ("home", "MNMT"), ("away", "ABTV")),
+    _nhl(2, "BOS", "DAL", ("national", "ESPN")),
+    _nhl(3, "CHI", "DET", ("national", "Disney+"), ("national", "ESPN+"), ("national", "Hulu")),
+    _nhl(4, "TOR", "EDM", ("national", "ESPN+")),
+    _nhl(5, "PHI", "WSH", ("national", "TNT"), ("away", "NBC Sports Phil +")),
+]
+
+
+def test_espn_unlimited_carries_the_out_of_market_games_and_the_exclusives():
+    from roku_control.sports import nhl_on_espn_unlimited
+    caps, national, exclusive, canadian, tnt = map(nhl_on_espn_unlimited, NHL_SLATE)
+    assert caps == {"exclusive": False, "blackout": {"WSH": "DC"}, "home": ["MNMT"], "away": ["ABTV"]}
+    # On ESPN or TNT: in the guide on that channel, not on ESPN Unlimited.
+    assert national is None and tnt is None
+    # An exclusive is blacked out nowhere, a Red Wings home game included.
+    assert exclusive["exclusive"] and exclusive["blackout"] == {}
+    # Two Canadian teams have no US broadcast, and are out of market all the same.
+    assert canadian == {"exclusive": False, "blackout": {}, "home": [], "away": []}
+
+
+def test_the_nhl_catalog_lists_espn_unlimited_games_the_roku_cannot_reach_yet(lane):
+    lane.sports = SimpleNamespace(games=lambda league, day: {
+        "date": day, "games": [dict(game) for game in NHL_SLATE] if league == "nhl" else []})
+    items = lane.catalog(roku_lane.NHL, "2026-10-20")["items"]
+    assert [item["id"] for item in items] == ["1", "3", "4"]
+    assert not any(item["playable"] for item in items)
+    assert items[0]["espn_unlimited"]["blackout"] == {"WSH": "DC"}
+    assert items[0]["state"] == "preview"
+    with pytest.raises(ConfigError):
+        lane.tune({"source_id": roku_lane.NHL, "channel_id": "1", "date": "2026-10-20"})
+    assert lane.controller.plays == []
 
 
 def test_status_never_waits_for_a_slow_roku(lane):

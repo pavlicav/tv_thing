@@ -19,12 +19,15 @@ import sys
 import threading
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+from zoneinfo import ZoneInfo
 
 import analog_tuner
 import atsc_scan
@@ -36,6 +39,7 @@ import yttv_epg
 from roku_control.errors import (BaseballScheduleError, ChannelNotFoundError,
                                  ConfigError, ControlBusyError, EcpError,
                                  RokuStreamError)
+from roku_control.sports import estimated_end
 
 BASE_DIR = Path(__file__).parent
 PULSE_CLIENT_CONFIG = BASE_DIR / "pulse-client-no-shm.conf"
@@ -726,7 +730,7 @@ def numbered_roku_listings(listings):
     with (``channel_lineup.game_partners``) as well.
     """
     pools = {source_id: listing["items"] for source_id, listing in listings.items()
-             if source_id in roku_lane.GAME_SOURCES}
+             if source_id in roku_lane.GAME_SOURCES or source_id in roku_lane.LISTED_SOURCES}
     games = channel_lineup.number_games(pools)
     for source_id, listing in listings.items():
         if source_id in pools:
@@ -3802,6 +3806,131 @@ def yttv_guide_channels():
     return channels, guide
 
 
+# Days of games the guide reads when it is not given a window: as far ahead
+# as YouTube TV's listings go.
+SPORTS_GUIDE_HOURS = 48
+_EASTERN = ZoneInfo("America/New_York")
+# The line under a game's title in the guide: its sport, and what carries it.
+SPORTS_LABELS = {
+    roku_lane.SUNDAY_TICKET: "NFL Football · Sunday Ticket",
+    roku_lane.THURSDAY_NIGHT_FOOTBALL: "NFL Football · Prime Video",
+    roku_lane.MLB: "MLB Baseball",
+    roku_lane.NHL: "NHL Hockey · ESPN Unlimited",
+}
+
+
+def _nhl_text(game, stream):
+    """How an ESPN Unlimited NHL game streams, for its guide description."""
+    if stream["exclusive"]:
+        text = "An ESPN+ exclusive on ESPN Unlimited in YouTube TV: no blackouts."
+    else:
+        text = "Out of market on ESPN Unlimited in YouTube TV."
+        for side in ("home", "away"):
+            if stream.get(side):
+                text += f" {side.title()} stream: {', '.join(stream[side])}."
+    if stream["blackout"]:
+        names = {team.get("abbreviation"): team.get("nickname") or team.get("name")
+                 for team in (game.get("away") or {}, game.get("home") or {})}
+        out = " and ".join(f"the {names.get(team) or team} in {market}"
+                           for team, market in stream["blackout"].items())
+        text += (f" May be blacked out: ESPN Unlimited blacks out {out}, and YouTube TV"
+                 " places the Roku in DC or Lansing.")
+    return text
+
+
+def sports_event(source_id, item, now):
+    """One game of a Roku game catalog as a guide event; None once it is over.
+
+    It runs from its start to the projected final (estimated_end), and
+    carries its target (``source_id``, ``channel_id``) and ``playable``:
+    whether the Roku can be sent to it.
+    """
+    game = item.get("game") or {}
+    if game.get("finished") is True or str(item.get("state") or "").lower() == "final":
+        return None
+    try:
+        start = datetime.fromisoformat(str(item["start_time"]).replace("Z", "+00:00"))
+    except (KeyError, ValueError):
+        return None
+    if start.tzinfo is None:
+        return None
+    end = estimated_end(roku_lane.GAME_LEAGUES[source_id], game,
+                        datetime.fromtimestamp(now, timezone.utc))
+    name = item.get("name") or "Game"
+    nicknames = [(game.get(side) or {}).get("nickname") for side in ("away", "home")]
+    extra = {}
+    if source_id == roku_lane.NHL:
+        stream = item.get("espn_unlimited")
+        if stream is None:
+            return None
+        text = _nhl_text(game, stream)
+        extra = {"exclusive": stream["exclusive"],
+                 **({"blackout": sorted(set(stream["blackout"].values()))} if stream["blackout"] else {})}
+    elif source_id == roku_lane.MLB:
+        route = item.get("route") or {}
+        text = (f"On {route.get('channel')} from YouTube TV." if route.get("provider") == "youtube_tv"
+                else "On MLB.TV." if route.get("provider") == "mlb"
+                else "Nothing the Roku can reach carries it.")
+    elif source_id == roku_lane.THURSDAY_NIGHT_FOOTBALL:
+        text = "Thursday Night Football, on Prime Video."
+    else:
+        text = ("On NFL Sunday Ticket in YouTube TV. A game a local station carries is"
+                " blacked out there, and the Roku plays that station instead.")
+    text = f"{name}. {text}"
+    return {"start": int(start.timestamp()),
+            "duration": max(60, int((end - start).total_seconds())),
+            "title": " at ".join(nicknames) if all(nicknames) else name,
+            "episode_title": SPORTS_LABELS.get(source_id), "description": text, "live": True,
+            "source_id": source_id, "channel_id": str(item.get("id")),
+            "playable": bool(item.get("playable")) and source_id in roku_lane.SOURCES, **extra}
+
+
+def sports_guide_channels(floor, ceiling, now):
+    """Every game source's games as guide rows, on the Live Sports numbers.
+
+    ``{"games/61": channel}``, one row per number. A games block numbers each
+    day's games of all its sources together by start time, so a row holds
+    that place in every day's slate, whatever the sport. Games already over
+    are left out. A schedule that does not answer costs its own games only.
+    Returns ``(channels, summary)``.
+    """
+    if roku is None:
+        return {}, None
+    first = datetime.fromtimestamp(floor, _EASTERN).date()
+    last = datetime.fromtimestamp(ceiling or now + SPORTS_GUIDE_HOURS * 3600, _EASTERN).date()
+    days = [(first + timedelta(days=n)).isoformat() for n in range(max(0, (last - first).days) + 1)]
+    sources = (*roku_lane.GAME_SOURCES, *roku_lane.LISTED_SOURCES)
+    # A request per schedule and day; one at a time, a slow one would hold up the guide.
+    with ThreadPoolExecutor(max_workers=min(16, len(days) * len(sources))) as pool:
+        asked = {(day, source_id): pool.submit(roku.catalog, source_id, day)
+                 for day in days for source_id in sources}
+    channels, errors, counts = {}, [], {}
+    for day in days:
+        listings = {}
+        for source_id in sources:
+            try:
+                listings[source_id] = asked[(day, source_id)].result()
+            except Exception as error:  # noqa: BLE001 - one schedule never sinks the guide
+                errors.append({"source_id": source_id, "date": day, "message": str(error)})
+        for source_id, listing in numbered_roku_listings(listings).items():
+            for item in listing["items"]:
+                event = sports_event(source_id, item, now)
+                number = item.get("tv_number")
+                if event is None or not isinstance(number, int):
+                    continue
+                section = item.get("tv_section") or "Live Sports"
+                key = f"games/{number}"
+                channels.setdefault(key, {
+                    "key": key, "kind": "games", "tv_number": number, "tv_name": section,
+                    "tv_section": item.get("tv_section"), "name": section, "events": [],
+                })["events"].append(dict(event, date=day))
+                counts[source_id] = counts.get(source_id, 0) + 1
+    for channel in channels.values():
+        channel["events"].sort(key=lambda event: event["start"])
+    return channels, {"available": bool(counts) or not errors, "games": sum(counts.values()),
+                      "by_source": counts, "errors": errors}
+
+
 def yttv_guide_summary(guide, now):
     """How much YouTube TV guide there is, for the guide's meta line."""
     return {
@@ -3828,9 +3957,10 @@ def guide_payload(number=None, window_hours=None, now=None):
     and a full day of them across seventy channels is most of the response.
 
     The antenna's channels are keyed by their antenna number, as always;
-    YouTube TV's follow, keyed ``youtube-tv/NAME`` (see yttv_guide_channels).
-    ``available`` and the counts beside it describe the broadcast guide;
-    ``youtube_tv`` describes the other.
+    YouTube TV's follow, keyed ``youtube-tv/NAME`` (see yttv_guide_channels),
+    then the day's games on the Live Sports numbers, keyed ``games/NUMBER``
+    (see sports_guide_channels). ``available`` and the counts beside it
+    describe the broadcast guide; ``youtube_tv`` and ``sports`` the others.
     """
     guide = epg.load_guide()
     now = int(time.time()) if now is None else now
@@ -3861,6 +3991,13 @@ def guide_payload(number=None, window_hours=None, now=None):
             continue
         channels[key] = {**channel, "events": current(channel["events"])}
     youtube_tv = yttv_guide_summary(yttv_guide, now)
+    # One other row asked for (the Watch page asks per channel): no schedule is.
+    sports_channels, sports = ({}, None) if number and not str(number).startswith(
+        "games/") else sports_guide_channels(floor, ceiling, now)
+    for key, channel in sports_channels.items():
+        if number and key != number:
+            continue
+        channels[key] = {**channel, "events": current(channel["events"])}
 
     if not guide:
         return {
@@ -3871,6 +4008,7 @@ def guide_payload(number=None, window_hours=None, now=None):
             "refreshing": guide_refreshing,
             "last_error": guide_status["last_error"],
             "youtube_tv": youtube_tv,
+            "sports": sports,
         }
 
     return {
@@ -3895,6 +4033,7 @@ def guide_payload(number=None, window_hours=None, now=None):
         "refreshing": guide_refreshing,
         "last_error": guide_status["last_error"],
         "youtube_tv": youtube_tv,
+        "sports": sports,
         "channels": channels,
     }
 
@@ -4275,7 +4414,7 @@ def api_v1_lineup(requested_date=None):
     errors, day = [], None
     if roku is not None:
         listings = {}
-        for source_id in roku_lane.SOURCES:
+        for source_id in (*roku_lane.SOURCES, *roku_lane.LISTED_SOURCES):
             try:
                 listings[source_id] = roku.catalog(source_id, requested_date)
             except Exception as error:   # noqa: BLE001 - one catalog never sinks the lineup

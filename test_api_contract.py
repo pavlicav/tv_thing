@@ -200,7 +200,7 @@ def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypat
         ("NBC", 16, "WILX"), ("ESPN", 33, "ESPN")]
     code, tnf = request("/api/v1/sources/thursday-night-football?date=2026-10-01")
     assert [(i["id"], i["tv_number"], i["tv_section"]) for i in tnf["items"]] == [
-        ("401872964", 60, "Football")]
+        ("401872964", 60, "Live Sports")]
     code, sources = request("/api/v1/sources")
     assert [view["tv_number"] for view in sources["lineup"]["house"]] == [0, 70]
     assert {"first": 1, "last": 29, "name": "Local stations"} in sources["lineup"]["sections"]
@@ -209,8 +209,8 @@ def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypat
     assert code == 200 and card["errors"] == [] and card["lineup_error"] is None
     assert [(row["tv_number"], row["kind"], row.get("channel_id")) for row in card["channels"]] == [
         (0, "vizelvision", None), (4, "digital", "wrc_hd_4_1"), (16, "roku", "NBC"),
-        (33, "roku", "ESPN"), (60, "roku", "401872964"), (70, "vizelvision", None),
-        (80, "roku", "823254"), (109, "roku", "manual"), (300, "digital", "surprise_7_5")]
+        (33, "roku", "ESPN"), (60, "roku", "401872964"), (61, "roku", "823254"),
+        (70, "vizelvision", None), (109, "roku", "manual"), (300, "digital", "surprise_7_5")]
     assert card["channels"][4]["source_id"] == "thursday-night-football"
     assert card["channels"][4]["date"] == "2026-10-01"
     code, discovery = request("/api/v1")
