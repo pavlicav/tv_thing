@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VizelVision Sports Guide</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  /* Channel 60: today's games as a mid-90s character generator would page
+     through them. A fixed 1280x720 stage, scaled to the window. */
+  @font-face { font-family: "Guide Serif"; font-weight: 400; font-style: normal;
+    src: url("fonts/guide-serif-regular.woff2") format("woff2"); }
+  @font-face { font-family: "Guide Serif"; font-weight: 700; font-style: normal;
+    src: url("fonts/guide-serif-bold.woff2") format("woff2"); }
+  @font-face { font-family: "Guide Serif"; font-weight: 400; font-style: italic;
+    src: url("fonts/guide-serif-italic.woff2") format("woff2"); }
+  @font-face { font-family: "Guide Serif"; font-weight: 700; font-style: italic;
+    src: url("fonts/guide-serif-bolditalic.woff2") format("woff2"); }
+  @property --blind { syntax: "<length>"; inherits: false; initial-value: 0px; }
+
+  :root {
+    --cream: #fff3d9;
+    --gold: #f4d68f;
+    --gold-rule: rgba(244, 214, 143, .7);
+    --mint: #c3ead9;
+    --rose: #f5c1cf;
+    --coral: #ffa392;
+    --sky: #b4d3f4;
+    --drop: rgba(13, 15, 42, .8);
+    --serif: "Guide Serif", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #000; overflow: hidden; }
+  body { font-family: var(--serif); color: var(--cream); cursor: none; }
+
+  .stage {
+    position: absolute; left: 50%; top: 50%;
+    width: 1280px; height: 720px;
+    transform-origin: center; overflow: hidden; background: #232e5c;
+  }
+  /* Faint scan lines over everything, slides and transitions alike. */
+  .stage::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 9;
+    background: repeating-linear-gradient(180deg, transparent 0 2px, rgba(0, 0, 20, .07) 2px 3px);
+  }
+
+  /* Each page paints the whole backdrop, so a transition covers the one before:
+     a cool dusk, banded as an eight-bit gradient was. */
+  .slide { position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 70% 55% at 16% 4%, rgba(196, 214, 255, .26), transparent 70%),
+      radial-gradient(ellipse 60% 40% at 92% 100%, rgba(255, 196, 206, .22), transparent 75%),
+      repeating-linear-gradient(180deg, rgba(255,255,255,.028) 0 14px, rgba(0,0,0,.028) 14px 28px),
+      linear-gradient(180deg, #232e5c 0%, #33427a 28%, #535b95 58%, #7d71a3 84%, #9b7f9f 100%);
+  }
+  .shadowed { text-shadow: 3px 3px 0 var(--drop), 0 0 2px rgba(0, 0, 0, .45); }
+
+  /* ---- the header and footer every page carries ---- */
+  .masthead {
+    position: absolute; left: 64px; right: 64px; top: 34px; height: 62px;
+    display: flex; align-items: baseline; justify-content: space-between;
+  }
+  .wordmark { font-weight: 700; font-style: italic; font-size: 34px; letter-spacing: .01em; }
+  .wordmark .v1 { color: #f7a9c9; } .wordmark .v2 { color: #f7e294; }
+  .wordmark .v3 { color: #98dfd2; } .wordmark .v4 { color: #f9c09a; }
+  .wordmark .v5 { color: #a5d2f3; } .wordmark .v6 { color: var(--cream); }
+  .wordmark small { font-size: 21px; font-style: normal; letter-spacing: .32em;
+    text-transform: uppercase; color: var(--gold); margin-left: 14px; }
+  .dateline { font-style: italic; font-size: 27px; color: var(--sky); }
+  .rule {
+    position: absolute; left: 64px; right: 64px; top: 104px; height: 6px;
+    border-top: 2px solid var(--gold-rule); border-bottom: 1px solid var(--gold-rule);
+    box-shadow: 0 2px 0 rgba(13, 15, 42, .5);
+  }
+  .footer {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 58px;
+    padding: 0 64px; display: flex; align-items: center; justify-content: space-between;
+    font-size: 21px; color: rgba(255, 243, 217, .82);
+    background: linear-gradient(180deg, transparent, rgba(16, 18, 50, .55));
+    border-top: 1px solid rgba(244, 214, 143, .28);
+  }
+  .footer .fine { font-style: italic; letter-spacing: .02em; }
+  .footer .clock { font-weight: 700; font-variant-numeric: lining-nums tabular-nums; color: var(--gold); }
+  .caps { font-variant: small-caps; letter-spacing: .12em; text-transform: lowercase; }
+
+  /* ---- the title page ---- */
+  .title-page { display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 0; padding-bottom: 40px; text-align: center; }
+  .title-page .wordmark { font-size: 46px; }
+  .title-page .wordmark small { font-size: 25px; }
+  .headline {
+    font-weight: 700; font-style: italic; font-size: 128px; line-height: 1.12;
+    margin: 18px 0 6px; color: var(--cream);
+    text-shadow: 5px 5px 0 var(--drop), 0 0 3px rgba(0, 0, 0, .5);
+  }
+  .headline .dot { opacity: 0; animation: appear .01s linear forwards; }
+  .headline .dot:nth-child(1) { animation-delay: 1.3s; }
+  .headline .dot:nth-child(2) { animation-delay: 1.75s; }
+  .headline .dot:nth-child(3) { animation-delay: 2.2s; }
+  .title-date { font-style: italic; font-size: 42px; color: var(--sky); }
+  .title-rule { width: 560px; height: 7px; margin: 26px 0 22px;
+    border-top: 2px solid var(--gold-rule); border-bottom: 1px solid var(--gold-rule); }
+  .title-sports { font-size: 30px; color: var(--mint); max-width: 1100px; line-height: 1.5; }
+  .title-sports b { color: var(--gold); font-weight: 700; }
+  .title-sports .sep { color: var(--rose); margin: 0 14px; }
+  .title-note { margin-top: 18px; font-style: italic; font-size: 25px; color: var(--rose); }
+  .build { opacity: 0; animation: build .55s ease-out forwards; }
+
+  /* ---- a sport's page ---- */
+  .sport-head {
+    position: absolute; left: 64px; right: 64px; top: 120px; height: 84px;
+    display: flex; align-items: baseline; justify-content: space-between;
+  }
+  .sport-name { font-weight: 700; font-style: italic; font-size: 70px; line-height: 1; }
+  .sport-name em { font-weight: 400; font-size: 30px; color: var(--rose); margin-left: 18px; }
+  .page-of { font-size: 24px; color: var(--sky); }
+  .panel {
+    position: absolute; left: 52px; right: 52px; top: 212px; max-height: 432px;
+    padding: 12px 28px;
+    background: linear-gradient(180deg, rgba(18, 24, 66, .5), rgba(18, 24, 66, .32));
+    border: 2px solid rgba(244, 214, 143, .55); border-radius: 6px;
+    box-shadow: inset 0 2px 0 rgba(255, 255, 255, .13), inset 0 -2px 0 rgba(0, 0, 0, .18),
+                0 5px 0 rgba(10, 12, 36, .35);
+  }
+  .row {
+    display: flex; align-items: baseline; height: 56px; padding-top: 5px;
+    font-size: 34px; white-space: nowrap;
+  }
+  .row + .row { border-top: 1px solid rgba(255, 243, 217, .09); }
+  .time { flex: 0 0 150px; text-align: right; font-weight: 700; color: var(--gold);
+    font-variant-numeric: lining-nums tabular-nums; }
+  .time small { font-size: 24px; font-weight: 400; margin-left: 5px; color: rgba(244, 214, 143, .85); }
+  .time.now { color: var(--coral); font-style: italic; animation: flash 1.6s steps(1) infinite; }
+  .time.tba, .time.word { font-style: italic; color: rgba(244, 214, 143, .9); }
+  .time.tba { font-weight: 400; }
+  .tag { flex: 0 0 104px; margin-left: 26px; font-size: 25px; color: var(--sky); }
+  .no-tags .tag { display: none; }
+  .matchup { flex: 0 1 auto; min-width: 0; margin-left: 26px; overflow: hidden; text-overflow: ellipsis; }
+  .no-tags .matchup { margin-left: 30px; }
+  .matchup .at { font-style: italic; color: rgba(255, 243, 217, .78); }
+  .leader { flex: 1 1 30px; min-width: 30px; height: 6px; margin: 0 16px;
+    background: radial-gradient(circle, rgba(255, 243, 217, .55) 1.7px, transparent 2.1px) 0 0 / 13px 6px repeat-x;
+  }
+  .network { flex: 0 0 auto; font-weight: 700; color: var(--mint); }
+  .network.service { font-weight: 400; font-style: italic; color: var(--rose); }
+  .number { flex: 0 0 74px; text-align: right; font-weight: 700; font-size: 38px; color: var(--gold);
+    font-variant-numeric: lining-nums tabular-nums; }
+  .row.build { animation-duration: .45s; }
+
+  /* ---- transitions: the incoming page over the outgoing one ---- */
+  .in-wipe { animation: wipe .9s cubic-bezier(.5, 0, .3, 1) both; }
+  .in-iris { animation: iris 1s cubic-bezier(.4, 0, .3, 1) both; }
+  .in-dissolve { animation: dissolve .9s linear both; }
+  .in-barn { animation: barn .9s cubic-bezier(.5, 0, .3, 1) both; }
+  .in-blinds { animation: blinds 1s linear both;
+    -webkit-mask-image: repeating-linear-gradient(180deg, #000 0 var(--blind), transparent var(--blind) 48px);
+    mask-image: repeating-linear-gradient(180deg, #000 0 var(--blind), transparent var(--blind) 48px); }
+  @keyframes wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+  @keyframes iris { from { clip-path: circle(0% at 50% 50%); } to { clip-path: circle(75% at 50% 50%); } }
+  @keyframes dissolve { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes barn { from { clip-path: inset(0 50% 0 50%); } to { clip-path: inset(0 0 0 0); } }
+  @keyframes blinds { from { --blind: 0px; } to { --blind: 48px; } }
+  @keyframes build { from { opacity: 0; transform: translateX(-26px); } to { opacity: 1; transform: none; } }
+  @keyframes appear { to { opacity: 1; } }
+  @keyframes flash { 0%, 70% { opacity: 1; } 71%, 100% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) {
+    .slide, .build, .headline .dot { animation: none !important; opacity: 1; }
+    .time.now { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div class="stage" id="stage" role="img" aria-label="VizelVision Sports Guide"></div>
+<noscript>The Sports Guide pages through today's games with JavaScript.</noscript>
+<script>
+(() => {
+  "use strict";
+
+  const STAGE_W = 1280, STAGE_H = 720;
+  const ROWS_PER_PAGE = 7;
+  const TITLE_MS = 9000;
+  const REFRESH_MS = 120000;
+  const TRANSITIONS = ["wipe", "iris", "blinds", "dissolve", "barn"];
+  // ?hold=N keeps page N on screen (0 is the title page), for a still.
+  const params = new URLSearchParams(location.search);
+  const HOLD = params.has("hold") ? Number(params.get("hold")) || 0 : null;
+
+  const stage = document.getElementById("stage");
+  let data = null, fetchedAt = 0, failed = false;
+  let deck = [], index = -1, timer = null, turns = 0, channel = 60;
+
+  function fit() {
+    const scale = Math.min(innerWidth / STAGE_W, innerHeight / STAGE_H);
+    stage.style.transform = `translate(-50%, -50%) scale(${scale})`;
+  }
+
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+  async function load() {
+    try {
+      const response = await fetch("api/v1/sports-guide", { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      data = await response.json();
+      failed = false;
+      if (data.channel && Number.isInteger(data.channel.tv_number)) channel = data.channel.tv_number;
+    } catch (_) {
+      failed = true;     // keep the last listings; the title page says so if there are none
+    }
+    fetchedAt = Date.now();
+  }
+
+  // ---- words ----
+  function today() {
+    const day = data && /^\d{4}-\d{2}-\d{2}$/.test(data.date) ? new Date(`${data.date}T12:00:00`) : new Date();
+    return day.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  }
+  function clockText(date) {
+    const h = date.getHours(), m = String(date.getMinutes()).padStart(2, "0");
+    return `${h % 12 || 12}:${m}<small>${h < 12 ? "am" : "pm"}</small>`;
+  }
+  const wordmark = (extra) =>
+    `<span class="wordmark shadowed"><span class="v1">V</span><span class="v2">i</span>` +
+    `<span class="v3">z</span><span class="v4">e</span><span class="v5">l</span>` +
+    `<span class="v6">Vision</span><small>${extra}</small></span>`;
+  function matchup(game) {
+    const at = game.title.lastIndexOf(" at ");
+    return at < 0 ? esc(game.title)
+      : `${esc(game.title.slice(0, at))} <span class="at">at</span> ${esc(game.title.slice(at + 4))}`;
+  }
+  const NUMBER_WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"];
+
+  // ---- the deck: the title page, then each sport a page or a few ----
+  function buildDeck() {
+    const pages = [{ kind: "title" }];
+    for (const sport of (data && data.sports) || []) {
+      const games = sport.games || [];
+      if (!games.length) continue;
+      const count = Math.ceil(games.length / ROWS_PER_PAGE);
+      const per = Math.ceil(games.length / count);    // even pages: 8 games go 4 and 4
+      const tags = new Set(games.map(game => game.tag)).size > 1;
+      for (let page = 0; page < count; page++) {
+        pages.push({ kind: "sport", sport: sport.sport, tags, page, count,
+                     games: games.slice(page * per, (page + 1) * per) });
+      }
+    }
+    return pages;
+  }
+
+  function chrome() {
+    return `<div class="masthead">${wordmark("Sports Guide")}` +
+      `<span class="dateline shadowed">${esc(today())}</span></div><div class="rule"></div>` +
+      `<div class="footer"><span>Channel ${channel}</span>` +
+      `<span class="fine">Listings subject to change</span>` +
+      `<span class="clock" data-clock>${clockText(new Date())}</span></div>`;
+  }
+
+  function titlePage() {
+    const sports = (data && data.sports) || [];
+    let lines;
+    if (!data) {
+      lines = `<div class="title-note build" style="animation-delay:2.6s">` +
+        (failed ? "The sports desk is not answering. Listings will return shortly."
+                : "Gathering today’s listings…") + `</div>`;
+    } else if (!sports.length) {
+      lines = `<div class="title-sports build" style="animation-delay:2.6s">` +
+        `No more live games on the dial today.</div>`;
+    } else {
+      lines = `<div class="title-sports build" style="animation-delay:2.6s">` +
+        sports.map(sport => `${esc(sport.sport)} <b>${sport.games.length}</b>`)
+          .join('<span class="sep">&#9670;</span>') + `</div>`;
+    }
+    const partial = data && data.errors && data.errors.length;
+    return `<div class="slide title-page">` +
+      `<div class="build" style="animation-delay:.2s">${wordmark("Sports Guide")}</div>` +
+      `<div class="headline">Today’s Sports<span class="dot">.</span><span class="dot">.</span>` +
+      `<span class="dot">.</span></div>` +
+      `<div class="title-date shadowed build" style="animation-delay:.6s">${esc(today())}</div>` +
+      `<div class="title-rule build" style="animation-delay:2.4s"></div>${lines}` +
+      (partial ? `<div class="title-note build" style="animation-delay:3s">Some listings are not in yet.</div>` : "") +
+      `<div class="footer"><span>Channel ${channel}</span>` +
+      `<span class="fine">Listings subject to change</span>` +
+      `<span class="clock" data-clock>${clockText(new Date())}</span></div></div>`;
+  }
+
+  // A listing's start: Noon and Midnight by name, as the papers printed them.
+  function startText(game) {
+    if (game.time_tbd || !game.start) return "TBA";
+    const start = new Date(game.start * 1000);
+    if (start.getMinutes() === 0 && start.getHours() % 12 === 0) return start.getHours() ? "Noon" : "Midnight";
+    return clockText(start);
+  }
+
+  // A time is printed where it changes; the rows under it start then too.
+  function row(game, position, games) {
+    const text = startText(game);
+    const same = position > 0 && !game.live && !games[position - 1].live
+      && startText(games[position - 1]) === text;
+    const time = game.live ? `<span class="time now">Now</span>`
+      : same ? `<span class="time"></span>`
+      : text === "TBA" ? `<span class="time tba">TBA</span>`
+      : /^[A-Z]/.test(text) ? `<span class="time word">${text}</span>`
+      : `<span class="time">${text}</span>`;
+    const service = game.via && game.via !== "channel";
+    return `<div class="row build" style="animation-delay:${(0.9 + position * 0.28).toFixed(2)}s">` +
+      `${time}<span class="tag caps">${esc(game.tag)}</span>` +
+      `<span class="matchup shadowed">${matchup(game)}</span><span class="leader"></span>` +
+      `<span class="network shadowed${service ? " service" : ""}">${esc(game.network)}</span>` +
+      `<span class="number shadowed">${esc(game.tv_number)}</span></div>`;
+  }
+
+  function sportPage(slide) {
+    const more = slide.page > 0 ? "<em>continued</em>" : "";
+    const of = slide.count > 1 ? `<span class="page-of caps shadowed">Page ${slide.page + 1} of ${slide.count}</span>` : "";
+    return `<div class="slide">${chrome()}` +
+      `<div class="sport-head"><span class="sport-name shadowed build" style="animation-delay:.35s">` +
+      `${esc(slide.sport)}${more}</span>${of}</div>` +
+      `<div class="panel${slide.tags ? "" : " no-tags"}">${slide.games.map(row).join("")}</div></div>`;
+  }
+
+  function dwell(slide) {
+    return slide.kind === "title" ? TITLE_MS : Math.min(15000, 5200 + slide.games.length * 1150);
+  }
+
+  // ---- paging ----
+  function show(slide) {
+    const holder = document.createElement("div");
+    holder.innerHTML = slide.kind === "title" ? titlePage() : sportPage(slide);
+    const page = holder.firstElementChild;
+    const old = [...stage.querySelectorAll(".slide")];
+    if (old.length && HOLD === null) {
+      page.classList.add(`in-${TRANSITIONS[turns++ % TRANSITIONS.length]}`);
+      page.addEventListener("animationend", (event) => {
+        if (event.target === page) old.forEach(node => node.remove());
+      }, { once: true });
+      setTimeout(() => old.forEach(node => node.remove()), 1500);   // reduced motion: no animationend
+    } else {
+      old.forEach(node => node.remove());
+    }
+    stage.appendChild(page);
+  }
+
+  async function advance(step = 1) {
+    clearTimeout(timer);
+    // A new round starts on the title page, with the latest listings.
+    if (index + step >= deck.length || index + step < 0 || !deck.length) {
+      if (Date.now() - fetchedAt > REFRESH_MS / 2 || !data) await load();
+      deck = buildDeck();
+      index = step < 0 ? deck.length - 1 : 0;
+    } else {
+      index += step;
+    }
+    show(deck[index]);
+    if (HOLD === null) timer = setTimeout(advance, dwell(deck[index]));
+  }
+
+  function tick() {
+    const now = clockText(new Date());
+    stage.querySelectorAll("[data-clock]").forEach(node => { if (node.innerHTML !== now) node.innerHTML = now; });
+  }
+
+  addEventListener("resize", fit);
+  addEventListener("keydown", (event) => {
+    if (event.key === "ArrowRight" || event.key === " ") advance(1);
+    else if (event.key === "ArrowLeft") advance(-1);
+    else if (event.key === "f" || event.key === "F") {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+    }
+  });
+  fit();
+  setInterval(tick, 1000);
+  setInterval(() => { if (Date.now() - fetchedAt > REFRESH_MS) load(); }, 30000);
+
+  const faces = ["400 1em", "700 1em", "italic 400 1em", "italic 700 1em"]
+    .map(face => document.fonts ? document.fonts.load(`${face} "Guide Serif"`) : Promise.resolve());
+  Promise.all([load(), Promise.race([Promise.all(faces), new Promise(r => setTimeout(r, 2500))])])
+    .then(() => {
+      deck = buildDeck();
+      if (HOLD !== null) { index = Math.max(0, Math.min(deck.length - 1, HOLD)); show(deck[index]); return; }
+      index = 0;
+      show(deck[0]);
+      timer = setTimeout(advance, dwell(deck[0]));
+    });
+})();
+</script>
+</body>
+</html>

@@ -51,11 +51,28 @@ unchanged: tune and record by `channel_id` (or the antenna `number`) as before,
 never by `tv_number`. A day's games are numbered per date, so a game's number
 belongs to the date it was listed for.
 
-`GET /api/v1/sources` adds `lineup`: `{path, sections, house}`, where `house`
-lists VizelVision's numbers. `GET /api/v1/lineup[?date=YYYY-MM-DD]` returns
-the whole lineup in number order: VizelVision, every antenna channel and every
-Roku catalog item, each with `kind`, `source_id`, `channel_id` and (for games)
-`date`. A Roku catalog that could not be read is named in `errors` and left out.
+`GET /api/v1/sources` adds `lineup`: `{path, sections, house, slides}`, where
+`house` lists VizelVision's numbers and `slides` the station's slide channels:
+pages that play in a browser, not streams, each with `channel_id`, `page_path`
+(relative to the UI) and `data_path`. Channel 60 is the only one, the Sports
+Guide (`channel_id` `sports-guide`). `GET /api/v1/lineup[?date=YYYY-MM-DD]`
+returns the whole lineup in number order: VizelVision, the slide channels
+(`kind: "slides"`), every antenna channel and every Roku catalog item, each
+with `kind`, `source_id`, `channel_id` and (for games) `date`. A Roku catalog
+that could not be read is named in `errors` and left out.
+
+`GET /api/v1/sports-guide` is the Sports Guide's listings: today's games
+(Eastern) that can be watched here, as `sports: [{sport, games}]` in a fixed
+order (Football, Baseball, Basketball, Hockey, Soccer), each sport's games by
+start time. A game has `league`, `tag`, `start` (Unix seconds, null when the
+time is to be announced, with `time_tbd`), `live`, `title` ("Away at Home"),
+`away`, `home`, `network` and `tv_number`: the broadcaster's lineup channel
+when one carries it nationally (`via: "channel"`; a network's DC antenna
+station), else a game source's Live Sports number, with `network` naming the
+service and `via` the source id. Finished games are left out; before 06:00 the
+night's games still on stay in. `errors` names the schedules that did not
+answer (by `league` or `source_id`, and `date`); `available` is false when
+nothing could be read. The response is cached for a minute.
 
 ## Integration flow
 

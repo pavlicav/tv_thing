@@ -35,6 +35,7 @@ import epg
 import lineup
 import recorder
 import roku_lane
+import sports_guide
 import yttv_epg
 from roku_control.errors import (BaseballScheduleError, ChannelNotFoundError,
                                  ConfigError, ControlBusyError, EcpError,
@@ -3937,6 +3938,81 @@ def sports_guide_channels(floor, ceiling, now):
                       "by_source": counts, "errors": errors}
 
 
+# VizelVision's Sports Guide (channel 60): today's games by sport, each on the
+# channel that carries it. After midnight, the night's games still on stay in it.
+SPORTS_GUIDE_LATE_HOURS = 6
+# Every viewer of the slides asks; the scoreboards change by the minute at most.
+SPORTS_GUIDE_CACHE_SECONDS = 60
+_sports_guide_cache = {"day": None, "at": 0.0, "payload": None}
+# The pages that play the station's slide channels (lineup.SLIDES), and their data.
+SLIDE_PAGES = {"sports-guide": {"page_path": "sports-guide.html", "data_path": "/api/v1/sports-guide"}}
+
+
+def slide_views():
+    """The station's slide channels with the pages that play them."""
+    return [dict(view, **SLIDE_PAGES[view["channel_id"]]) for view in channel_lineup.slides()]
+
+
+def api_v1_sports_guide(now=None):
+    """Today's watchable games by sport, for the Sports Guide's slides.
+
+    See sports_guide.py for what is listed and how. A schedule that does not
+    answer costs its own games only and is named in ``errors``.
+    """
+    clock = int(time.time()) if now is None else now
+    eastern = datetime.fromtimestamp(clock, _EASTERN)
+    today = eastern.date().isoformat()
+    cache = _sports_guide_cache
+    if (now is None and cache["day"] == today
+            and time.monotonic() - cache["at"] < SPORTS_GUIDE_CACHE_SECONDS):
+        return cache["payload"]
+    payload = {"api_version": API_VERSION, "date": today, "generated_at": clock,
+               "channel": next(iter(slide_views()), None)}
+    if roku is None:
+        return {**payload, "available": False, "games": 0, "sports": [], "errors": [
+            {"message": "The Roku lane is not configured, so TV Thing has no schedules."}]}
+    days = [today]
+    if eastern.hour < SPORTS_GUIDE_LATE_HOURS:
+        days.append((eastern.date() - timedelta(days=1)).isoformat())
+    sources = (*roku_lane.GAME_SOURCES, *roku_lane.LISTED_SOURCES)
+
+    def scoreboard(league, day):
+        if league == "nfl":   # with Sunday Ticket's and Prime Video's targets
+            return roku.sports.games(league, day)["games"]
+        return roku.sports.scoreboard.games(league, day, power_five=False)
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        asked = {("league", league, day): pool.submit(scoreboard, league, day)
+                 for day in days for league in sports_guide.ESPN_LEAGUES}
+        asked.update({("source_id", source_id, day): pool.submit(roku.catalog, source_id, day)
+                      for day in days for source_id in sources})
+        youtube_tv = pool.submit(roku.catalog, roku_lane.YOUTUBE_TV)
+    errors, results = [], {}
+    for (kind, name, day), future in asked.items():
+        try:
+            results[(kind, name, day)] = future.result()
+        except Exception as error:  # noqa: BLE001 - one schedule never sinks the guide
+            errors.append({kind: name, "date": day, "message": str(error)})
+    try:
+        cable = numbered_roku_listings(
+            {roku_lane.YOUTUBE_TV: youtube_tv.result()})[roku_lane.YOUTUBE_TV]["items"]
+    except Exception as error:  # noqa: BLE001 - the antenna's networks still place games
+        cable = []
+        errors.append({"source_id": roku_lane.YOUTUBE_TV, "date": None, "message": str(error)})
+    channels = sports_guide.Channels(numbered_channels(load_channels()), cable)
+    rows = []
+    for day in days:
+        catalogs = numbered_roku_listings({source_id: results[("source_id", source_id, day)]
+                                           for source_id in sources if ("source_id", source_id, day) in results})
+        espn = {league: results.get(("league", league, day)) for league in sports_guide.ESPN_LEAGUES}
+        rows += sports_guide.day_games(espn, catalogs, channels, live_only=day != today)
+    payload = {**payload, "available": bool(rows) or not errors, "games": len(rows),
+               "sports": sports_guide.by_sport(rows), "errors": errors}
+    if now is None:
+        cache.update(day=today, at=time.monotonic(), payload=payload)
+    return payload
+
+
 def yttv_guide_summary(guide, now):
     """How much YouTube TV guide there is, for the guide's meta line."""
     return {
@@ -4391,7 +4467,7 @@ def api_v1_source_catalog():
         # catalog item carries its tv_number; the cable tab is the analog
         # tuner's RF plan and is not part of the lineup.
         "lineup": {"path": "/api/v1/lineup", "sections": channel_lineup.sections(),
-                   "house": channel_lineup.house()},
+                   "house": channel_lineup.house(), "slides": slide_views()},
         "status_path": "/api/v1/status",
         "tune_path": "/api/v1/tune",
     }
@@ -4412,6 +4488,8 @@ def api_v1_lineup(requested_date=None):
     rows = [dict(view, kind="vizelvision", name="VizelVision",
                  stream_path="/stream/vizelvision/index.m3u8")
             for view in channel_lineup.house()]
+    rows += [dict(view, kind="slides", name=lineup.SLIDES[view["channel_id"]])
+             for view in slide_views()]
     for channel in numbered_channels(load_channels()):
         rows.append({key: channel.get(key) for key in ("tv_number", "tv_name", "tv_section")}
                     | {"kind": "digital", "source_id": "digital", "channel_id": channel["id"],
@@ -4837,6 +4915,10 @@ class TVHandler(SimpleHTTPRequestHandler):
                         "query": {"date": "YYYY-MM-DD (games)"},
                         "note": "every channel with its TV Thing number",
                     },
+                    "sports_guide": {
+                        "method": "GET", "path": "/api/v1/sports-guide",
+                        "note": "today's watchable games by sport (channel 60's slides)",
+                    },
                     "digital_channels": {
                         "method": "GET",
                         "path": "/api/v1/sources/digital",
@@ -5080,6 +5162,10 @@ class TVHandler(SimpleHTTPRequestHandler):
                 parse_qs(parsed.query).get("date", [None])[0]))
             return
 
+        if path == "/api/v1/sports-guide":
+            self.send_json(api_v1_sports_guide())
+            return
+
         if path == "/api/v1/sources/digital":
             self.send_json(api_v1_digital_source())
             return
@@ -5271,6 +5357,7 @@ class TVHandler(SimpleHTTPRequestHandler):
                 ".css": "text/css",
                 ".svg": "image/svg+xml",
                 ".pdf": "application/pdf",
+                ".woff2": "font/woff2",
             }.get(filepath.suffix, "application/octet-stream")
             self.send_header("Content-Type", ct)
             self.end_headers()

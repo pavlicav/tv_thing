@@ -555,7 +555,7 @@ A test fails if a row is added to one and not the other.
 
 #### Live Sports
 
-The Live Sports numbers (60–99) are in the guide too, read from the leagues'
+The Live Sports games (61–99) are in the guide too, read from the leagues'
 schedules (ESPN's scoreboard, MLB's Stats API) each time the guide loads, two
 days ahead. A row is a number, not a channel: each day's games of every sport
 are numbered together by start time, so 61 can be a hockey game tonight and a
@@ -862,7 +862,8 @@ chips, alongside the S5H1409 demodulator.
 Watch opens with **All channels**: one searchable lineup, in TV Thing channel
 number order under lineup-card headings, containing ATSC antenna channels, the
 Roku’s YouTube TV channels and dated game feeds, Manual Roku, and
-**VizelVision** (channels 0 and 70). Each row names its source; matching station
+**VizelVision** (channels 0 and 70) with its Sports Guide (60, slides that play
+on the Watch stage). Each row names its source; matching station
 names on ATSC and Roku remain separate choices. Search accepts TV Thing and
 antenna channel numbers, station names, Roku aliases, and source names. The
 Antenna, Cable and Roku tabs remain available, including the Roku game date,
@@ -892,7 +893,8 @@ Every channel has a TV Thing number, laid out like an old cable lineup card in
 | 0, 70 | VizelVision (the house channel) |
 | 1–29 | Local stations: DC's network stations on their own dial positions (4, 5, 7, 9), NHK World on 1, the other DC and Baltimore stations, the Roku's Lansing locals (YouTube TV) on 16–21; 22–29 are held for a Lansing / Flint antenna receiver |
 | 30–59 | Cable from YouTube TV: the Weather Channel, TBS, TNT, the sports networks, then CNN, MS NOW, FOX News, CNBC, Discovery, HGTV, Food, TLC, USA, FX, Comedy Central |
-| 60–69, 71–99 | Live Sports: the day's games, football, baseball and hockey together by start time (NFL Sunday Ticket, Thursday Night Football, MLB, and the NHL on ESPN Unlimited); one block, split around VizelVision |
+| 60 | VizelVision's Sports Guide: today's games as slides (see [The Sports Guide](#the-sports-guide-channel-60)) |
+| 61–69, 71–99 | Live Sports: the day's games, football, baseball and hockey together by start time (NFL Sunday Ticket, Thursday Night Football, MLB, and the NHL on ESPN Unlimited); one block, split around VizelVision |
 | 100–109 | Roku (Manual Roku on 109) |
 | 110–299 | The digital tier, by genre, YouTube TV's other channels and the antenna's subchannels together: news and business, learning and lifestyle, kids, entertainment, music, classic TV, movies and westerns, crime and reality, game shows, Spanish, shopping, faith, repeaters |
 | 300–349 | New on the antenna |
@@ -913,6 +915,36 @@ The Guide shows TV Thing numbers too; its **Antenna numbers** option (kept
 per browser) lists the antenna's own numbers in antenna order instead. Tuning
 and recording always use the antenna channel itself, so either view tunes
 and tapes the same channel.
+
+### The Sports Guide (channel 60)
+
+Channel 60 heads Live Sports with **VizelVision's Sports Guide**: a page of
+slides in the manner of a mid-90s cable character generator. It opens on
+"Today's Sports...", then pages through the day's games by sport (football,
+baseball, basketball, hockey, soccer), each sport's by start time, and starts
+over with fresh listings. It plays in the browser
+([`static/sports-guide.html`](static/sports-guide.html)), on the Watch page's
+stage or full screen on its own; it takes no tuner, lock or encoder, and has
+no sound.
+
+A game is listed only when it can be watched here, and shows where:
+
+* **On a national broadcaster in the lineup**, by that channel's name and
+  number: TBS 31, ESPN 33. A network game is on its DC station over the
+  antenna (ABC 7, FOX 5, CBS 9, NBC 4, CW 8).
+* **On a Roku game source**, by its Live Sports number and the service:
+  Sunday Ticket for an out-of-market Sunday game (a Commanders or Ravens game
+  is on CBS 9 or FOX 5 instead), Prime Video for Thursday Night Football,
+  MLB.TV, and ESPN+ for the NHL on ESPN Unlimited.
+
+Streaming-only games (Peacock, Apple TV's MLS, Prime Video's NBA, ESPN+ outside
+hockey), regional sports networks, and finished games are left out. Before
+06:00 the night's games still being played stay in. The listings come from
+`GET /api/v1/sports-guide` ([`sports_guide.py`](sports_guide.py)): ESPN's
+scoreboards for every league but baseball (every FBS and Division I game, not
+only the ranked ones), and the Roku's own catalogs for baseball and the game
+sources, cached for a minute. Its serif is TeX Gyre Pagella, shipped in
+`static/fonts/` (see the README there), so the page needs no internet.
 
 The About page offers the lineup as a printable card,
 `static/lineup-card.pdf`, typeset in LaTeX from

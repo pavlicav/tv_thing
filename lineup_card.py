@@ -58,18 +58,24 @@ def card_blocks(payload):
     """The card's blocks, in number order, from an /api/v1/lineup response.
 
     Sections that share a name print as one block (the station on 0 and 70,
-    football split around it). A games section lists the sources it numbers
-    rather than the day's games; a section with no channels is left off.
+    football split around it), and side by side as one range (the Sports
+    Guide on 60 heads the games from 61). A games section lists the sources it
+    numbers rather than the day's games; a section with no channels is left off.
     """
-    blocks, by_name = [], {}
+    blocks, by_name, games_ranges = [], {}, []
     for section in sorted(payload.get("sections") or (), key=lambda s: s["first"]):
         block = by_name.get(section["name"])
         if block is None:
             block = by_name[section["name"]] = {
                 "name": section["name"], "ranges": [], "games": (), "rows": []}
             blocks.append(block)
-        block["ranges"].append((section["first"], section["last"]))
+        if block["ranges"] and block["ranges"][-1][1] + 1 == section["first"]:
+            block["ranges"][-1] = (block["ranges"][-1][0], section["last"])
+        else:
+            block["ranges"].append((section["first"], section["last"]))
         block["games"] = tuple(dict.fromkeys(block["games"] + tuple(section.get("games") or ())))
+        if section.get("games"):
+            games_ranges.append((section["first"], section["last"]))
 
     def block_of(number):
         return next((block for block in blocks
@@ -78,7 +84,7 @@ def card_blocks(payload):
     for channel in payload.get("channels") or ():
         number = channel.get("tv_number")
         block = None if number is None else block_of(number)
-        if block is None or block["games"]:
+        if block is None or any(first <= number <= last for first, last in games_ranges):
             continue
         name = channel.get("tv_name") or channel.get("name") or ""
         # A YouTube TV local goes by its call sign; the network goes beside it.
@@ -110,16 +116,16 @@ def channels_tex(payload, effective, cardstock=True):
     ]
     for block in card_blocks(payload):
         lines.append(f"\\block{{{tex_escape(block['name'])}}}{{{_numbers(block['ranges'])}}}")
-        if block["games"]:
-            lines.append(f"\\games{{{tex_escape(_games_note(block['games'], block['name']))}}}")
-            continue
         rows = block["rows"]
         for index, (number, name, note, antenna) in enumerate(rows):
             lines.append(f"\\chan{{{number}}}{{{tex_escape(name)}}}"
                          f"{{{tex_escape(note)}}}{{{tex_escape(antenna)}}}")
             # Keep a heading with two listings, and never strand the last one.
-            if index == 0 or index == len(rows) - 2:
+            if index == 0 or index == len(rows) - 2 or block["games"]:
                 lines.append("\\nobreak")
+        # A games block's fixed channels (the Sports Guide) come before its games.
+        if block["games"]:
+            lines.append(f"\\games{{{tex_escape(_games_note(block['games'], block['name']))}}}")
     lines.append("}")
     return "\n".join(lines) + "\n"
 

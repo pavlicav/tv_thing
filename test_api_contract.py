@@ -237,21 +237,32 @@ def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypat
         ("NBC", 16, "WILX"), ("ESPN", 33, "ESPN")]
     code, tnf = request("/api/v1/sources/thursday-night-football?date=2026-10-01")
     assert [(i["id"], i["tv_number"], i["tv_section"]) for i in tnf["items"]] == [
-        ("401872964", 60, "Live Sports")]
+        ("401872964", 61, "Live Sports")]
     code, sources = request("/api/v1/sources")
     assert [view["tv_number"] for view in sources["lineup"]["house"]] == [0, 70]
+    # 60 is the station's Sports Guide, a page of slides rather than a stream.
+    assert sources["lineup"]["slides"] == [{
+        "tv_number": 60, "tv_name": "VizelVision Sports Guide", "tv_section": "Live Sports",
+        "channel_id": "sports-guide", "page_path": "sports-guide.html",
+        "data_path": "/api/v1/sports-guide"}]
     assert {"first": 1, "last": 29, "name": "Local stations"} in sources["lineup"]["sections"]
 
     code, card = request("/api/v1/lineup?date=2026-10-01")
     assert code == 200 and card["errors"] == [] and card["lineup_error"] is None
     assert [(row["tv_number"], row["kind"], row.get("channel_id")) for row in card["channels"]] == [
         (0, "vizelvision", None), (4, "digital", "wrc_hd_4_1"), (16, "roku", "NBC"),
-        (33, "roku", "ESPN"), (60, "roku", "401872964"), (61, "roku", "823254"),
-        (70, "vizelvision", None), (109, "roku", "manual"), (300, "digital", "surprise_7_5")]
-    assert card["channels"][4]["source_id"] == "thursday-night-football"
-    assert card["channels"][4]["date"] == "2026-10-01"
+        (33, "roku", "ESPN"), (60, "slides", "sports-guide"), (61, "roku", "401872964"),
+        (62, "roku", "823254"), (70, "vizelvision", None), (109, "roku", "manual"),
+        (300, "digital", "surprise_7_5")]
+    assert card["channels"][4]["name"] == "VizelVision Sports Guide"
+    assert card["channels"][4]["page_path"] == "sports-guide.html"
+    assert card["channels"][5]["source_id"] == "thursday-night-football"
+    assert card["channels"][5]["date"] == "2026-10-01"
     code, discovery = request("/api/v1")
     assert discovery["endpoints"]["lineup"]["path"] == "/api/v1/lineup"
+    assert discovery["endpoints"]["sports_guide"]["path"] == "/api/v1/sports-guide"
+    code, spec = request("/api/v1/openapi.json")
+    assert "/sports-guide" in spec["paths"]
 
 
 def test_roku_remote_and_check_over_http(roku_api):

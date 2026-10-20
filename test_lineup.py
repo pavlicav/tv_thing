@@ -71,6 +71,29 @@ def test_the_station_holds_two_numbers():
     assert plan.fixed["youtube-tv/NBC"] == (15, "NBC Lansing")
 
 
+def test_the_station_can_hold_a_slide_channel():
+    plan = lineup.parse_plan(plan_document([
+        {"number": 1, "source": "vizelvision", "channel": "sports-guide"},
+        {"number": 2, "source": "vizelvision", "channel": "sports-guide", "name": "Scores"}]))
+    assert plan.house == ((0, "VizelVision"), (70, "VizelVision"))
+    assert plan.slides == ((1, "VizelVision Sports Guide", "sports-guide"), (2, "Scores", "sports-guide"))
+    assert plan.station_numbers() == {0, 1, 2, 70}
+    with pytest.raises(lineup.LineupError, match="no 'weather' channel"):
+        lineup.parse_plan(plan_document([{"number": 1, "source": "vizelvision", "channel": "weather"}]))
+    with pytest.raises(lineup.LineupError, match="numbers itself"):
+        lineup.parse_plan(plan_document([{"number": 51, "source": "vizelvision", "channel": "sports-guide"}]))
+
+
+def test_a_slide_channel_is_numbered_and_never_given_out(make):
+    numbering = make(plan_document([{"number": 49, "source": "vizelvision", "channel": "sports-guide"}]))
+    assert numbering.slides() == [{"tv_number": 49, "tv_name": "VizelVision Sports Guide",
+                                   "tv_section": "Cable", "channel_id": "sports-guide"}]
+    assert [view["tv_number"] for view in numbering.house()] == [0, 70]
+    # New YouTube TV rows fill Cable around TBS on 21 and the guide on 49, then overflow.
+    taken = numbers(numbering.number("youtube-tv", [(f"Row {n}", f"Row {n}") for n in range(28)]))
+    assert taken == [*range(22, 49), 300]
+
+
 def test_a_broken_lineup_numbers_nothing_and_writes_nothing(tmp_path):
     (tmp_path / "lineup.json").write_text("{not json")
     numbering = lineup.Lineup(tmp_path / "lineup.json", tmp_path / "state.json")
@@ -210,6 +233,7 @@ def test_the_card_reads_like_a_cable_lineup():
     plan = real_plan()
     by_number = {number: key for key, (number, _) in plan.fixed.items()}
     assert [number for number, _ in plan.house] == [0, 70]
+    assert plan.slides == ((60, "VizelVision Sports Guide", "sports-guide"),)
     # Locals through 29, NHK and Baltimore's CW among them, the Roku's Lansing
     # stations together, and 22-29 held for a Lansing / Flint receiver.
     assert plan.section_of(29).name == "Local stations" and plan.section_of(30).name == "Cable"
@@ -226,11 +250,12 @@ def test_the_card_reads_like_a_cable_lineup():
     assert all(key.startswith("youtube-tv/") for number, key in by_number.items() if 30 <= number <= 59)
     assert {"youtube-tv/CNN", "youtube-tv/MS NOW", "youtube-tv/Discovery Channel",
             "youtube-tv/HGTV"} <= {by_number[n] for n in range(30, 60)}
-    # Live Sports from 60 around VizelVision on 70: football, baseball and
-    # hockey in one block, numbered together.
+    # Live Sports: the Sports Guide on 60, then the games from 61 around
+    # VizelVision on 70, football, baseball and hockey in one block, numbered together.
+    assert plan.section_of(60).name == "Live Sports" and not plan.section_of(60).games
     for source in ("sunday-ticket", "thursday-night-football", "mlb", "nhl"):
         assert [(s.first, s.last, s.name) for s in plan.games_sections(source)] == [
-            (60, 69, "Live Sports"), (71, 99, "Live Sports")]
+            (61, 69, "Live Sports"), (71, 99, "Live Sports")]
     assert by_number[109] == "roku-manual/manual"
     assert plan.new_section("digital").first >= 300 and plan.new_section("youtube-tv").first >= 300
     assert all(number >= 110 for number, key in by_number.items()

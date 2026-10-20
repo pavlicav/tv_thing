@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "TV Thing core integration API",
-    "version": "1.3.0",
-    "description": "Core control contract. API.md defines ownership, retry, addressing, and trusted-LAN rules. Additional discovery and diagnostic endpoints are listed by GET /api/v1. 1.1.0 adds the roku lane: Roku sources, asynchronous Roku tunes (202 with an operation), the Roku remote, the still-playing check, and Roku recordings. 1.2.0 adds TV Thing channel numbers: tv_number, tv_name and tv_section on catalog items and guide channels, the lineup in GET /sources, and GET /lineup. 1.3.0 adds YouTube TV's listings to the guide: rows keyed youtube-tv/NAME with kind roku, every row's key and kind, the youtube_tv summary, and Roku guide recordings."
+    "version": "1.4.0",
+    "description": "Core control contract. API.md defines ownership, retry, addressing, and trusted-LAN rules. Additional discovery and diagnostic endpoints are listed by GET /api/v1. 1.1.0 adds the roku lane: Roku sources, asynchronous Roku tunes (202 with an operation), the Roku remote, the still-playing check, and Roku recordings. 1.2.0 adds TV Thing channel numbers: tv_number, tv_name and tv_section on catalog items and guide channels, the lineup in GET /sources, and GET /lineup. 1.3.0 adds YouTube TV's listings to the guide: rows keyed youtube-tv/NAME with kind roku, every row's key and kind, the youtube_tv summary, and Roku guide recordings. 1.4.0 adds the station's slide channels: lineup.slides in GET /sources, kind slides in GET /lineup, and GET /sports-guide, the Sports Guide's listings (channel 60)."
   },
   "servers": [
     {
@@ -127,6 +127,7 @@
                           "kind": {
                             "enum": [
                               "vizelvision",
+                              "slides",
                               "digital",
                               "roku"
                             ]
@@ -151,6 +152,142 @@
                         "string",
                         "null"
                       ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sports-guide": {
+      "get": {
+        "summary": "Today's watchable games by sport: the Sports Guide's listings (channel 60)",
+        "description": "A game is listed when a national broadcaster in the lineup carries it (by that channel's number; a network on its DC antenna station) or a Roku game source does (by its Live Sports number). Games already over are left out; before 06:00 Eastern, the night's games still being played stay in. Cached for a minute.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "date",
+                    "available",
+                    "sports",
+                    "errors"
+                  ],
+                  "properties": {
+                    "date": {
+                      "type": "string",
+                      "description": "today, Eastern (YYYY-MM-DD)"
+                    },
+                    "generated_at": {
+                      "type": "integer"
+                    },
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "games": {
+                      "type": "integer"
+                    },
+                    "channel": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "the Sports Guide's lineup entry"
+                    },
+                    "sports": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sport": {
+                            "type": "string"
+                          },
+                          "games": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "sport",
+                                "league",
+                                "tag",
+                                "start",
+                                "live",
+                                "title",
+                                "network",
+                                "tv_number",
+                                "via"
+                              ],
+                              "properties": {
+                                "sport": {
+                                  "type": "string"
+                                },
+                                "league": {
+                                  "type": "string",
+                                  "description": "nfl, ncaaf, mlb, nba, wnba, ncaam, ncaaw, nhl, epl, ucl, mls or nwsl"
+                                },
+                                "tag": {
+                                  "type": "string",
+                                  "description": "the league as the slides print it (NFL, NCAA)"
+                                },
+                                "start": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "description": "Unix seconds"
+                                },
+                                "start_time": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "time_tbd": {
+                                  "type": "boolean"
+                                },
+                                "live": {
+                                  "type": "boolean",
+                                  "description": "being played now"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "description": "Away at Home"
+                                },
+                                "away": {
+                                  "type": "string"
+                                },
+                                "home": {
+                                  "type": "string"
+                                },
+                                "network": {
+                                  "type": "string",
+                                  "description": "the broadcaster (TBS), or the service on a Live Sports number (Sunday Ticket)"
+                                },
+                                "tv_number": {
+                                  "type": "integer",
+                                  "description": "the TV Thing channel to watch it on"
+                                },
+                                "via": {
+                                  "type": "string",
+                                  "description": "channel when a lineup channel carries it, else the game source id"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      },
+                      "description": "the schedules that did not answer"
                     }
                   }
                 }

@@ -593,3 +593,32 @@ def test_guide_follows_the_lineup_unless_antenna_numbers_are_chosen():
     # Tuning and taping still name the antenna channel itself.
     assert "channel_number: channel.number" in GUIDE
     assert "channel_id: channel.id" in GUIDE
+
+
+# ---------------------------------------------------------------------------
+# VizelVision's Sports Guide (channel 60)
+# ---------------------------------------------------------------------------
+
+def test_the_sports_guide_pages_through_its_listings_from_the_lan_alone():
+    import re
+    page = (STATIC / "sports-guide.html").read_text()
+    # Behind the /tv/ proxy too, and with no internet: relative API, fonts beside it.
+    assert 'fetch("api/v1/sports-guide"' in page
+    assert not re.search(r"""(?:src|href)=["']?https?://|url\(["']?https?://""", page)
+    for style in ("regular", "bold", "italic", "bolditalic"):
+        assert f'url("fonts/guide-serif-{style}.woff2")' in page
+        assert (STATIC / "fonts" / f"guide-serif-{style}.woff2").read_bytes()[:4] == b"wOF2"
+    assert "Today’s Sports" in page
+    # Every listing is escaped, never interpolated raw.
+    assert "${esc(game.network)}" in page and "${esc(game.tv_number)}" in page
+    assert "esc(game.title" in page
+
+
+def test_watch_plays_a_slide_channel_in_a_frame_and_stops_it_on_leaving():
+    tunable = section(INDEX, "function renderTunableList()", "function renderAntennaList()")
+    assert 'entry.kind === "slides"' in tunable and "tuneSlides(entry)" in tunable
+    tune = section(INDEX, "function tuneSlides(entry)", "function renderFoot()")
+    assert "destroyHls()" in tune and 'state.playing = "slides"' in tune
+    assert "fetch(" not in tune     # no tune, no lock: the page plays on its own
+    render = section(INDEX, "function render()", "function matches")
+    assert 'els.slideStage.removeAttribute("src")' in render

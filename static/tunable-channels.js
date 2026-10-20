@@ -1,8 +1,9 @@
 /* Shared shape for the Watch page's tunable channel list: the TV Thing
    lineup, in channel-number order. The server numbers every channel
    (lineup.json; tv_number on each catalog item) and says which numbers are
-   the station's (/api/v1/sources lineup.house); this only puts them in
-   order. Anything the server did not number follows, by name. */
+   the station's (/api/v1/sources lineup.house) and which its slide channels
+   (lineup.slides, such as the Sports Guide); this only puts them in order.
+   Anything the server did not number follows, by name. */
 (function (root) {
   function numbered(entry, from) {
     const number = from && Number.isInteger(from.tv_number) ? from.tv_number : null;
@@ -20,6 +21,14 @@
       id: view && Number.isInteger(view.tv_number) ? `vizelvision:${view.tv_number}` : 'vizelvision',
       kind: 'vizelvision', name: 'VizelVision', sourceName: 'VizelVision', tag: 'LIVE',
       search: 'vizelvision vizel vision live station' }, view));
+    // The station's slide channels play a page of their own, not a stream.
+    for (const view of (lineup && Array.isArray(lineup.slides) ? lineup.slides : [])) {
+      if (!view || !view.page_path) continue;
+      items.push(numbered({ id: `slides:${view.channel_id}`, kind: 'slides', name: view.tv_name || 'Sports Guide',
+        sourceName: 'VizelVision', tag: 'GUIDE', page: view.page_path,
+        sub: 'Today’s games by sport, each with its channel',
+        search: 'vizelvision sports guide today games schedule listings' }, view));
+    }
     for (const channel of channels) {
       items.push(numbered({ id: `digital:${channel.id}`, kind: 'digital', name: channel.name,
         sourceName: 'ATSC', tag: channel.number, channel,

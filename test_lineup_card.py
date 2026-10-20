@@ -86,6 +86,25 @@ def test_channels_tex_escapes_names_and_dates_the_card():
     assert "\\games{The day's games, numbered each morning by start time.}" in tex
 
 
+def test_the_sports_guide_heads_its_games_block():
+    sections = [{"first": 60, "last": 60, "name": "Live Sports"},
+                {"first": 61, "last": 69, "name": "Live Sports", "games": ["sunday-ticket", "mlb"]},
+                {"first": 70, "last": 70, "name": "House channel"},
+                {"first": 71, "last": 99, "name": "Live Sports", "games": ["sunday-ticket", "mlb"]}]
+    channels = [{"tv_number": 60, "tv_name": "VizelVision Sports Guide", "kind": "slides",
+                 "name": "VizelVision Sports Guide", "channel_id": "sports-guide"},
+                {"tv_number": 61, "tv_name": "Bears at Lions", "kind": "roku", "source_id": "sunday-ticket"},
+                {"tv_number": 70, "tv_name": "VizelVision", "kind": "vizelvision", "name": "VizelVision"}]
+    payload = {"sections": sections, "channels": channels}
+    sports = lineup_card.card_blocks(payload)[0]
+    assert sports["ranges"] == [(60, 69), (71, 99)]
+    assert sports["rows"] == [(60, "VizelVision Sports Guide", "", "")]
+    tex = lineup_card.channels_tex(payload, datetime.date(2026, 10, 19))
+    assert r"\block{Live Sports}{60–69 · 71–99}" in tex
+    assert tex.index(r"\chan{60}{VizelVision Sports Guide}{}{}") < tex.index(r"\games{NFL Sunday Ticket")
+    assert "Bears at Lions" not in tex
+
+
 def test_the_print_version_is_on_white_paper():
     tex = lineup_card.channels_tex(PAYLOAD, datetime.date(2026, 10, 19), cardstock=False)
     assert tex.startswith("\\cardstockfalse\n")

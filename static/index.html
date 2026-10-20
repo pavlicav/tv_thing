@@ -95,6 +95,8 @@
     .live-controls label { display: flex; align-items: center; gap: 6px; color: #b3c2e8; }
     .live-controls input { width: 90px; accent-color: #ffd23f; }
     .live-controls :focus-visible { outline: 2px solid #ffd23f; outline-offset: 3px; }
+    /* Slides have no sound and no live edge: Fullscreen is all there is. */
+    .live-controls.slides > :not(#live-fullscreen) { visibility: hidden; }
     #live-message { flex: 1; color: #ffd23f; letter-spacing: .06em; }
     .hidden { display: none !important; }
 
@@ -119,6 +121,12 @@
       text-transform: uppercase;
     }
     .placeholder-sub { font-size: 12px; color: #4a5058; }
+
+    /* ---- The station's slide channels (the Sports Guide), a page of their own ---- */
+    .slide-stage {
+      position: absolute; inset: 0; width: 100%; height: 100%; border: 0;
+      background: #000; pointer-events: none;   /* the controls still wake on a hover */
+    }
 
     /* ---- Radio now-playing ---- */
     .radio-stage {
@@ -525,6 +533,9 @@
           <div class="placeholder-sub" id="placeholder-sub">Choose a channel to begin</div>
         </div>
 
+        <iframe class="slide-stage hidden" id="slide-stage" title="VizelVision Sports Guide"
+                tabindex="-1"></iframe>
+
         <div class="radio-stage hidden" id="radio-stage">
           <div class="freq-readout">
             <span class="freq-value num" id="radio-freq">88.5</span>
@@ -663,7 +674,7 @@
       rokuRemote: $("roku-remote"), rokuText: $("roku-text"),
       rokuTextForm: $("roku-text-form"), rokuApps: $("roku-apps"),
       statusDot: $("status-dot"), statusText: $("status-text"),
-      video: $("player"), placeholder: $("placeholder"),
+      video: $("player"), placeholder: $("placeholder"), slideStage: $("slide-stage"),
       phTitle: $("placeholder-title"), phSub: $("placeholder-sub"),
       radioStage: $("radio-stage"), radioFreq: $("radio-freq"),
       radioName: $("radio-name"), radioFormat: $("radio-format"),
@@ -686,10 +697,11 @@
     const state = {
       lock: null,        // live tuner lock, or null
       mode: "tv",        // all channels, or a source filter
-      playing: null,     // stage source: tv, cable, roku, vizelvision, fm or null
+      playing: null,     // stage source: tv, cable, roku, vizelvision, slides, fm or null
       channels: [],
       lineup: null,      // /api/v1/sources lineup: section names and the station's numbers
       houseNumber: null, // which of the station's numbers was chosen
+      slide: null,       // the slide channel on the stage: its tunable entry
       cableChannels: [],
       cableAvailable: false,
       cableTuner: null,
@@ -855,6 +867,12 @@
         body.innerHTML = '<div class="bn-row"><span class="bn-k">NOW</span>' +
           '<span class="bn-title">VizelVision</span></div>' +
           '<div class="bn-desc">The station’s live broadcast</div>';
+      } else if (state.playing === "slides") {
+        num.textContent = state.slide && state.slide.number !== null ? String(state.slide.number) : "SG";
+        num.title = "";
+        body.innerHTML = '<div class="bn-row"><span class="bn-k">NOW</span>' +
+          '<span class="bn-title">Today’s Sports</span></div>' +
+          '<div class="bn-desc">Today’s games by sport, each with the channel it is on</div>';
       } else if (state.playing === "cable") {
         num.textContent = state.currentCableChannel != null ? String(state.currentCableChannel) : "– –";
         num.title = "";
@@ -1235,7 +1253,7 @@
       els.tabRoku.setAttribute("aria-selected", String(rokuTab));
       els.tabRoku.hidden = !state.roku.available;
       // The Roku sends its own picture: there is no quality to choose.
-      els.qualityGroup.classList.toggle("hidden", radio || ["roku", "vizelvision"].includes(state.playing));
+      els.qualityGroup.classList.toggle("hidden", radio || ["roku", "vizelvision", "slides"].includes(state.playing));
       els.panelLabel.textContent = tv ? "Tunable channels" : antenna ? "Antenna Channels"
         : (cable ? "Analog Channels" : (rokuTab ? "Roku Feeds" : "Stations"));
       els.filter.placeholder = tv ? "Filter all channels…" : antenna ? "Filter antenna channels…"
@@ -1247,9 +1265,14 @@
       els.rokuRemote.hidden = !(state.playing === "roku" && manual && manual.manual);
 
       const onRadio = state.playing === "fm";
-      els.video.classList.toggle("hidden", onRadio);
+      const onSlides = state.playing === "slides";
+      els.video.classList.toggle("hidden", onRadio || onSlides);
       $("live-controls").classList.toggle("hidden", onRadio);
+      $("live-controls").classList.toggle("slides", onSlides);
       els.radioStage.classList.toggle("hidden", !onRadio);
+      els.slideStage.classList.toggle("hidden", !onSlides);
+      // Off the stage, the slides stop: an empty frame runs nothing.
+      if (!onSlides && els.slideStage.getAttribute("src")) els.slideStage.removeAttribute("src");
       els.placeholder.classList.toggle("hidden", state.playing !== null);
 
       if (state.playing === null) {
@@ -1420,6 +1443,11 @@
               && operation.target.channel_id === item.id) tag = "MOVING";
           button.disabled = source.available === false || item.playable === false;
           button.addEventListener("click", () => tuneRoku(source, item));
+        } else if (entry.kind === "slides") {
+          current = state.playing === "slides" && state.slide && state.slide.id === entry.id;
+          if (!numbered) key = "SG";
+          sub = entry.sub;
+          button.addEventListener("click", () => tuneSlides(entry));
         } else {
           current = state.playing === "vizelvision" && state.houseNumber === entry.number;
           if (!numbered) key = "VV";
@@ -1513,6 +1541,33 @@
         setStatus("VizelVision", "live");
         setNowPlaying("VizelVision", "Live broadcast");
       });
+    }
+
+    // A slide channel plays in the browser, from the station's page for it:
+    // no tuner, no stream, no lock.
+    function tuneSlides(entry) {
+      ++state.tuneSerial;
+      state.slide = entry;
+      state.tuning = false;
+      state.needsReconnect = false;
+      state.currentChannelId = null;
+      state.currentCableChannel = null;
+      state.currentFreq = null;
+      state.streamId = null;
+      stopSignalPolling();
+      els.radioAudio.pause();
+      els.radioAudio.removeAttribute("src");
+      destroyHls();
+      els.video.pause();
+      els.video.removeAttribute("src");
+      els.video.load();
+      state.playing = "slides";
+      if (els.slideStage.getAttribute("src") !== entry.page) els.slideStage.setAttribute("src", entry.page);
+      render();
+      syncRokuPolling();
+      showLock(null);
+      setStatus(entry.name, "live");
+      setNowPlaying(entry.name, entry.sub);
     }
 
     function renderFoot() {
@@ -1642,7 +1697,7 @@
         if (state.roku.lock && (!locks.roku || locks.roku.owner !== ROKU_OWNER)) {
           forgetRokuLock();  // Expired, released elsewhere, or overridden.
         }
-        showLock(state.playing === "vizelvision" ? null : state.mode === "roku" || state.playing === "roku"
+        showLock(["vizelvision", "slides"].includes(state.playing) ? null : state.mode === "roku" || state.playing === "roku"
           ? locks.roku || null : locks.digital || locks.analog || null);
         renderRokuTools();
       } catch (error) {
