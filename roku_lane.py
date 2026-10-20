@@ -242,20 +242,46 @@ class RokuLane:
             blackout = None if force else self._blackout(target)
             if blackout is not None:
                 return 409, {"error": blackout, "code": SundayTicketBlackoutError.code}
-            with self._lock:
-                if not force and self._fresh(target):
-                    return 200, {"reused": True, "selection": self.selection_view()}
-                if not force and self._running() and same_target(self.operation["target"], target):
-                    return 202, {"reused": False, "operation": self.operation_view()}
-            if not force and resume and self._resumable(target):
-                check = self.check()
-                if check["playing"]:
-                    return 200, {"reused": True, "resumed": True, "selection": self.selection_view()}
+            already = None if force else self._already(target, resume)
+            if already is not None:
+                return already
             if not navigate:
                 return 409, {"error": "The Roku is not showing that verified selection",
                              "code": "not_prepared"}
             self._stop_operation()
             return 202, {"reused": False, "operation": self._start(target, game)}
+
+    def watch(self, body):
+        """Serve target only if nothing has to move. Returns (status, payload), or None.
+
+        Anyone may watch a locked Roku: what it already shows, or is already
+        on its way to, is served like tune serves it. Never presses a key;
+        None means target would need a navigation.
+        """
+        target, _ = self.normalize(body)
+        with self._tune_lock:
+            if target["source_id"] == MANUAL:
+                with self._lock:
+                    manual = bool(self.selection and self.selection.get("manual") and not self._running())
+                return (200, {"reused": True, "selection": self.selection_view()}) if manual else None
+            return self._already(target, body.get("resume", True) is not False)
+
+    def _already(self, target, resume):
+        """tune's answer when target needs no navigation, or None (call with _tune_lock held).
+
+        The Roku shows target, freshly verified; is navigating to it; or still
+        plays it by the key-free check.
+        """
+        with self._lock:
+            if self._fresh(target):
+                return 200, {"reused": True, "selection": self.selection_view()}
+            if self._running() and same_target(self.operation["target"], target):
+                return 202, {"reused": False, "operation": self.operation_view()}
+        if resume and self._resumable(target):
+            check = self.check()
+            if check["playing"]:
+                return 200, {"reused": True, "resumed": True, "selection": self.selection_view()}
+        return None
 
     def _resumable(self, target):
         with self._lock:

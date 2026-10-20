@@ -1766,6 +1766,8 @@
           return;
         }
         const tuned = data.selection || data.channel || ch;
+        // A locked tuner is watched at the quality its holder chose.
+        if (data.quality) showQuality(data.quality);
         state.playing = "tv";
         state.streamId = (data.stream && data.stream.id) || data.stream_id;
         if (!state.streamId) throw new Error("Server returned no stream ID");
@@ -1848,6 +1850,7 @@
           frequency_hz: data.frequency_hz || channel.frequency_hz,
         };
         const displayMhz = Math.ceil(tuned.frequency_hz / 1e6);
+        if (data.quality) showQuality(data.quality);
         state.playing = "cable";
         state.streamId = (data.stream && data.stream.id) || data.stream_id;
         if (!state.streamId) throw new Error("Server returned no stream ID");
@@ -2411,11 +2414,15 @@
       renderList();
     });
 
+    function showQuality(quality) {
+      state.quality = quality;
+      els.qualityGroup.querySelectorAll("button").forEach(b =>
+        b.setAttribute("aria-selected", String(b.dataset.quality === quality)));
+    }
+
     els.qualityGroup.querySelectorAll("button").forEach(btn => {
       btn.addEventListener("click", () => {
-        state.quality = btn.dataset.quality;
-        els.qualityGroup.querySelectorAll("button").forEach(b =>
-          b.setAttribute("aria-selected", String(b === btn)));
+        showQuality(btn.dataset.quality);
         if (state.currentChannelId) tuneTv(state.currentChannelId);
         else if (state.currentCableChannel !== null) {
           tuneCable(state.currentCableChannel);
@@ -2476,10 +2483,7 @@
           return;
         }
 
-        state.quality = data.quality || "medium";
-        els.qualityGroup.querySelectorAll("button").forEach(b =>
-          b.setAttribute("aria-selected",
-            String(b.dataset.quality === state.quality)));
+        showQuality(data.quality || "medium");
 
         if ((sourceKind === "cable" || sourceKind === "analog") && stream.active && selection) {
           state.playing = "cable";

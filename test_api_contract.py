@@ -92,6 +92,25 @@ def test_acquire_tune_retry_renew_release_over_http(api):
     assert next_tune["stream"]["id"] != tune["stream"]["id"]
 
 
+def test_a_locked_tuner_can_be_watched_but_not_changed_over_http(api):
+    request, calls = api
+    code, claim = request("/api/v1/tuner/lock", {"lane": "digital", "owner": "recorder", "duration_seconds": 60})
+    token = claim["token"]
+    code, tune = request("/api/v1/tune", {"source": "digital", "channel_id": "one", "quality": "high",
+                                          "token": token})
+    assert code == 200
+    # The channel it plays is anyone's to watch, at the quality its holder chose.
+    code, watch = request("/api/v1/tune", {"source": "digital", "channel_id": "one", "quality": "low"})
+    assert code == 200 and watch["stream_reused"] is True
+    assert watch["stream"]["id"] == tune["stream"]["id"] and watch["quality"] == "high"
+    # Any other channel is still the holder's to allow.
+    code, refusal = request("/api/v1/tune", {"source": "digital", "channel_id": "two"})
+    assert code == 423 and refusal["lock"]["owner"] == "recorder"
+    assert calls == ["one"]
+    _, locks = request("/api/v1/tuner/lock")
+    assert locks["locks"]["digital"]["owner"] == "recorder"
+
+
 def test_contract_discovery_and_legacy_response(api):
     request, _ = api
     code, discovery = request("/api/v1")
@@ -183,6 +202,24 @@ def test_roku_lane_lock_tune_and_reuse_over_http(roku_api):
     assert code == 409 and absent["error"]["code"] == "not_prepared"
     code, bad = request("/api/v1/tune", {"source": "youtube-tv", "channel_id": "HBO", "token": token})
     assert code == 404 and bad["error"]["code"] == "unknown_channel"
+
+
+def test_a_locked_roku_can_be_watched_but_not_moved_over_http(roku_api):
+    request, lane = roku_api
+    code, claim = request("/api/v1/tuner/lock", {"lane": "roku", "owner": "VizelVision master", "duration_seconds": 90})
+    token = claim["token"]
+    code, _ = request("/api/v1/tune", {"source": "youtube-tv", "channel_id": "ESPN", "token": token})
+    assert code == 202
+    wait_for(request, lambda l: l["selection"] and l["selection"].get("channel_id") == "ESPN")
+
+    code, watch = request("/api/v1/tune", {"source": "youtube-tv", "channel_id": "espn"})
+    assert code == 200 and watch["reused"] is True and watch["stream"]["ready"]
+    for other in ({"source": "youtube-tv", "channel_id": "NBC"},
+                  {"source": "roku-manual", "channel_id": "manual"}):
+        code, refusal = request("/api/v1/tune", other)
+        assert code == 423 and refusal["lock"]["owner"] == "VizelVision master"
+    assert lane.controller.plays == ["ESPN"] and lane.controller.ecp.keys == []
+    assert lane.selection_view()["channel_id"] == "ESPN"
 
 
 def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypatch):

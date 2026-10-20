@@ -1988,11 +1988,17 @@ def perform_roku_tune(body):
     if roku is None:
         return roku_unavailable()
     refusal = roku_change_refusal(body, "tune")
-    if refusal:
-        return refusal
 
     def tune():
-        status, result = roku.tune(body)
+        if refusal:
+            # A locked Roku can still be watched: asking for what it already
+            # shows moves nothing. Anything else is the holder's to change.
+            watched = roku.watch(body)
+            if watched is None:
+                return refusal
+            status, result = watched
+        else:
+            status, result = roku.tune(body)
         if status == 409:
             return api_v1_error(result["error"], 409, result["code"])
         lane = lane_payload(LANE_ROKU)
@@ -4440,6 +4446,21 @@ def api_v1_lineup(requested_date=None):
     }
 
 
+def lane_plays(lane, key, value):
+    """Whether a lane is streaming the selection whose `key` is `value`, healthily.
+
+    This alone lets anyone watch a locked tuner: asking for the channel it
+    already plays changes nothing, so its stream is served as it is -- at the
+    holder's quality, feeding the holder's recording taps.
+    """
+    state = lanes[lane]
+    return (lane_is_running(lane)
+            and state["stream_id"] is not None
+            and not state.get("error")
+            and (state["selection"] or {}).get(key) == value
+            and (state["health"] or {}).get("ok", True))
+
+
 def perform_digital_tune(channel_id, quality="medium", token=None,
                          override=False):
     request_started = time.monotonic()
@@ -4447,7 +4468,7 @@ def perform_digital_tune(channel_id, quality="medium", token=None,
     # Checked before the refresh is preempted: a locked tuner should not have
     # its guide sweep cancelled for a tune that is about to be refused.
     held = lock_holder(LANE_DIGITAL, token, override)
-    if held:
+    if held and not lane_plays(LANE_DIGITAL, "id", channel_id):
         return lock_refusal(held, "tune")
     # A scheduled guide refresh holds the same front-end. Someone asking to
     # watch something outranks it, so take it back rather than refusing.
@@ -4460,23 +4481,21 @@ def perform_digital_tune(channel_id, quality="medium", token=None,
 
     with lock:
         held = lock_holder(LANE_DIGITAL, token, override)
-        if held:
+        watching = bool(held) and lane_plays(LANE_DIGITAL, "id", channel_id)
+        if held and not watching:
             return lock_refusal(held, "tune")
         busy = busy_reason()
         if busy:
             return {"error": busy}, 409
         if override:
             override_tuner_lock(LANE_DIGITAL)
-        reused = (lane_is_running(LANE_DIGITAL)
-                  and lanes[LANE_DIGITAL]["stream_id"] is not None
-                  and not lanes[LANE_DIGITAL].get("error")
-                  and (lanes[LANE_DIGITAL]["selection"] or {}).get("id") == channel_id
-                  and lanes[LANE_DIGITAL]["quality"] == quality
-                  and (lanes[LANE_DIGITAL]["health"] or {}).get("ok", True)
-                  # A recording that starts on the channel already playing
-                  # needs a source generation that feeds its tap.
-                  and lanes[LANE_DIGITAL].get("taps", [])
-                  == recording_tap_ports(channel))
+        reused = watching or (
+            lane_plays(LANE_DIGITAL, "id", channel_id)
+            and lanes[LANE_DIGITAL]["quality"] == quality
+            # A recording that starts on the channel already playing
+            # needs a source generation that feeds its tap.
+            and lanes[LANE_DIGITAL].get("taps", [])
+            == recording_tap_ports(channel))
         if reused:
             ok, error, stream_reused = True, None, True
         else:
@@ -4510,9 +4529,6 @@ def perform_cable_tune(channel, quality="medium", token=None,
                        override=False):
     request_started = time.monotonic()
     quality = normalize_quality(quality)
-    held = lock_holder(LANE_ANALOG, token, override)
-    if held:
-        return lock_refusal(held, "tune")
     try:
         channel = int(channel)
         frequency_hz = analog_tuner.cable_frequency_hz(channel)
@@ -4521,19 +4537,16 @@ def perform_cable_tune(channel, quality="medium", token=None,
 
     with lock:
         held = lock_holder(LANE_ANALOG, token, override)
-        if held:
+        watching = bool(held) and lane_plays(LANE_ANALOG, "channel", channel)
+        if held and not watching:
             return lock_refusal(held, "tune")
         busy = busy_reason()
         if busy:
             return {"error": busy}, 409
         if override:
             override_tuner_lock(LANE_ANALOG)
-        reused = (lane_is_running(LANE_ANALOG)
-                  and lanes[LANE_ANALOG]["stream_id"] is not None
-                  and not lanes[LANE_ANALOG].get("error")
-                  and (lanes[LANE_ANALOG]["selection"] or {}).get("channel") == channel
-                  and lanes[LANE_ANALOG]["quality"] == quality
-                  and (lanes[LANE_ANALOG]["health"] or {}).get("ok", True))
+        reused = watching or (lane_plays(LANE_ANALOG, "channel", channel)
+                              and lanes[LANE_ANALOG]["quality"] == quality)
         if reused:
             ok, error, tuner = True, None, lanes[LANE_ANALOG]["tuner"]
         else:

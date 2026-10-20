@@ -1394,6 +1394,36 @@ def test_a_lock_refuses_tunes_scans_and_stops(clean_locks, monkeypatch):
     assert server.lock_holder("digital", override=True) is None
 
 
+def test_a_locked_cable_tuner_can_be_watched_on_its_channel_only(clean_locks, monkeypatch):
+    monkeypatch.setattr(server, "busy_reason", lambda: None)
+    monkeypatch.setattr(server, "lane_is_running", lambda lane: lane == "analog")
+    monkeypatch.setitem(server.lanes, "analog", dict(
+        server.new_lane_state(), selection={"channel": 5}, quality="high",
+        stream_id="same", health={"ok": True}))
+    monkeypatch.setattr(server, "start_analog", lambda *a: pytest.fail("retuned"))
+    _claim(clean_locks, lane="analog", duration_seconds=600)
+
+    payload, status = server.perform_cable_tune("5", "low")
+    assert status == 200 and payload["stream_reused"] is True
+    assert payload["stream_id"] == "same"
+    payload, status = server.perform_cable_tune(6)
+    assert status == 423 and "locked by recorder" in payload["error"]
+    assert server.active_lock("analog")["owner"] == "recorder"
+
+
+def test_a_locked_tuner_with_a_broken_stream_is_not_watched(clean_locks, monkeypatch):
+    # Serving it would need a restart, and that is the holder's to make.
+    monkeypatch.setattr(server, "load_channels", lambda: [{"id": "x"}])
+    monkeypatch.setattr(server, "lane_is_running", lambda lane: lane == "digital")
+    monkeypatch.setitem(server.lanes, "digital", dict(
+        server.new_lane_state(), selection={"id": "x"}, stream_id="same",
+        health={"ok": False}))
+    monkeypatch.setattr(server, "start_digital", lambda *a: pytest.fail("retuned"))
+    _claim(clean_locks, duration_seconds=600)
+    _, status = server.perform_digital_tune("x")
+    assert status == 423
+
+
 def test_a_lock_on_one_lane_leaves_the_other_alone(clean_locks):
     _claim(clean_locks, lane="digital", duration_seconds=600)
     assert server.lock_holder("digital") is not None
