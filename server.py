@@ -35,6 +35,7 @@ import epg
 import lineup
 import recorder
 import roku_lane
+import slide_stream
 import sports_guide
 import yttv_epg
 from roku_control.errors import (BaseballScheduleError, ChannelNotFoundError,
@@ -3944,8 +3945,86 @@ SPORTS_GUIDE_LATE_HOURS = 6
 # Every viewer of the slides asks; the scoreboards change by the minute at most.
 SPORTS_GUIDE_CACHE_SECONDS = 60
 _sports_guide_cache = {"day": None, "at": 0.0, "payload": None}
-# The pages that play the station's slide channels (lineup.SLIDES), and their data.
-SLIDE_PAGES = {"sports-guide": {"page_path": "sports-guide.html", "data_path": "/api/v1/sports-guide"}}
+# The pages that play the station's slide channels (lineup.SLIDES), their data,
+# and the video a Roku plays instead (see SLIDE_STREAMS).
+SLIDE_PAGES = {"sports-guide": {"page_path": "sports-guide.html", "data_path": "/api/v1/sports-guide",
+                                "stream_path": "/stream/sports-guide/index.m3u8"}}
+# The Sports Guide as video (slide_stream.py): sports_guide_video.py draws the
+# slides at 30 fps 1280x720 into one libx264 on two threads, 2 s segments with
+# a key frame each. It runs only while someone watches, from the first request
+# for its playlist until SLIDES_IDLE_SECONDS after the last. Measured on
+# viviserv (2026-10-19): about 11% of a core to draw, 33% to encode, 0.6 Mbit/s.
+HTTP_PORT = int(os.environ.get("PORT", 8080))
+SLIDES_IDLE_SECONDS = float(os.environ.get("TV_THING_SLIDES_IDLE_SECONDS", "60"))
+SLIDES_START_TIMEOUT = float(os.environ.get("TV_THING_SLIDES_START_TIMEOUT", "8"))
+SLIDE_FPS = 30
+SLIDE_SEGMENT_SECONDS = 2
+SLIDE_THREADS = "2"
+
+
+def build_sports_guide_command(generation, directory):
+    """The Sports Guide's encoder: raw frames on stdin to HLS in ``directory``."""
+    directory = Path(directory)
+    return [
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "warning",
+        "-filter_threads", "1",
+        "-f", "rawvideo", "-pix_fmt", "rgb24", "-video_size", "1280x720",
+        # Eight queued frames: each is 2.7 MB, and the renderer runs ahead.
+        "-framerate", str(SLIDE_FPS), "-thread_queue_size", "8", "-i", "pipe:0",
+        # Silence, as raw zeros: some players refuse a stream with no sound
+        # track. (lavfi's anullsrc ran a filter graph of 28 threads.)
+        "-f", "s16le", "-ar", "48000", "-ac", "2", "-thread_queue_size", "8", "-i", "/dev/zero",
+        "-map", "0:v:0", "-map", "1:a:0", "-shortest",
+        # HD is BT.709; say so, or a player may assume it of untagged 601.
+        "-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
+        "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+        "-color_range", "tv",
+        # zerolatency drops the lookahead: 125 MB rather than 205 for veryfast's.
+        "-c:v", "libx264", "-preset", "superfast", "-tune", "stillimage,zerolatency",
+        "-profile:v", "high", "-level:v", "4.0", "-threads", SLIDE_THREADS,
+        # Still pages cost almost nothing; a transition is capped.
+        "-crf", "23", "-maxrate", "2000k", "-bufsize", "4000k",
+        "-g", str(SLIDE_FPS * SLIDE_SEGMENT_SECONDS),
+        "-keyint_min", str(SLIDE_FPS * SLIDE_SEGMENT_SECONDS), "-sc_threshold", "0",
+        "-force_key_frames", f"expr:gte(t,n_forced*{SLIDE_SEGMENT_SECONDS})",
+        "-c:a", "aac", "-b:a", "48k", "-ac", "2",
+        "-max_interleave_delta", "500000", "-flush_packets", "1",
+        "-f", "hls", "-hls_time", str(SLIDE_SEGMENT_SECONDS), "-hls_list_size", "8",
+        "-hls_allow_cache", "0",
+        "-hls_flags", "delete_segments+omit_endlist+independent_segments+temp_file",
+        "-hls_segment_filename", str(directory / f"sportsguide_{generation}_%05d.ts"),
+        str(directory / slide_stream.PLAYLIST),
+    ]
+
+
+def sports_guide_renderer_command():
+    return [sys.executable, str(BASE_DIR / "sports_guide_video.py"),
+            "--url", f"http://127.0.0.1:{HTTP_PORT}/api/v1/sports-guide",
+            "--fps", str(SLIDE_FPS)]
+
+
+SLIDE_STREAMS = {
+    "sports-guide": slide_stream.SlideStream(
+        "sports-guide", STREAMS_DIR / "sports-guide",
+        sports_guide_renderer_command, build_sports_guide_command,
+        idle_seconds=SLIDES_IDLE_SECONDS,
+        # One thread each for numpy's libraries (see sports_guide_video.py),
+        # and frame-sized buffers handed back when freed: glibc otherwise raises
+        # its mmap threshold after the first and keeps ~50 MB it no longer uses.
+        env={**os.environ, "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
+             "OPENBLAS_NUM_THREADS": "1", "MALLOC_MMAP_THRESHOLD_": "131072"}),
+}
+
+
+def slides_worker():
+    """Stop slide video nobody watches; restart video that died or stalled."""
+    while True:
+        time.sleep(1)
+        for stream in SLIDE_STREAMS.values():
+            try:
+                stream.check()
+            except Exception as error:  # noqa: BLE001 - the worker must not die
+                print(f"[{stream.name}] supervisor error: {error!r}")
 
 
 def slide_views():
@@ -4378,6 +4457,8 @@ def _api_v1_status_payload():
         "busy_reason": busy_reason(),
         "scanning": {"channels": scanning},
         "recording": recording_summary(),
+        # The station's slide channels as video, made only while watched.
+        "slides": {name: stream.status() for name, stream in SLIDE_STREAMS.items()},
         # --- compatibility view: the primary video lane, flat ---
         "source": {
             "id": primary,
@@ -5260,6 +5341,10 @@ class TVHandler(SimpleHTTPRequestHandler):
             self.send_vizelvision_media(parsed)
             return
 
+        if path.count("/") == 3 and path.split("/")[2] in SLIDE_STREAMS:
+            self.send_slide_media(path.split("/")[2], path.split("/")[3])
+            return
+
         if path.startswith("/stream/"):
             filename = path[len("/stream/"):]
             # /stream/live.m3u8 is an alias kept for clients that predate
@@ -5837,6 +5922,42 @@ class TVHandler(SimpleHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
+    def send_slide_media(self, name, filename):
+        """A slide channel's video. The playlist starts it and waits for its
+        first segments; a segment keeps it running."""
+        stream = SLIDE_STREAMS[name]
+        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:m3u8|ts)", filename):
+            self.send_json({"error": "Invalid slide media path"}, status=400)
+            return
+        if filename.endswith(".m3u8"):
+            if not stream.demand(wait=SLIDES_START_TIMEOUT):
+                self.send_response(503)
+                self.send_header("Retry-After", "2")
+                self.send_header("Content-Type", "application/json")
+                body = json.dumps({"error": f"The {name} video is starting"}).encode()
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+        else:
+            stream.touch()
+        try:
+            content = (stream.directory / filename).read_bytes()
+        except OSError:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/vnd.apple.mpegurl"
+                         if filename.endswith(".m3u8") else "video/mp2t")
+        self.send_header("Content-Length", str(len(content)))
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        try:
+            self.wfile.write(content)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def send_vizelvision_media(self, parsed):
         """Relay the existing station HLS, without taking any tuner or encoder.
 
@@ -5945,6 +6066,10 @@ def reap_orphaned_children():
     both cases only processes owned by this user.
     """
     script = str(BASE_DIR / "dvb_source.py")
+    # The Sports Guide's renderer exits once its parent is gone, within a
+    # second; this covers one that has not yet. Its encoder writes into the
+    # streams directory, so the rule below already covers it.
+    renderer = str(BASE_DIR / "sports_guide_video.py")
     streams = str(STREAMS_DIR)
     # The Roku verifier reads the lane's tap and writes to a pipe, so it
     # names neither the source script nor the streams directory. An orphan
@@ -5982,7 +6107,7 @@ def reap_orphaned_children():
         )
         if parent != "1":
             continue
-        owns_tuner = script in parts
+        owns_tuner = script in parts or renderer in parts
         writes_streams = any(part.startswith(streams) for part in parts[1:])
         # An orphaned recorder is ffmpeg writing a .part into the library.
         records = any(part.startswith(recordings)
@@ -6212,6 +6337,8 @@ def main():
     for lane_files in LANE_FILES.values():
         clear_streams(lane_files)
     clear_streams((LEGACY_PLAYLIST.split(".")[0],))
+    for stream in SLIDE_STREAMS.values():
+        stream.clear()
 
     class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
         daemon_threads = True
@@ -6252,6 +6379,7 @@ def main():
     threading.Thread(target=guide_worker, daemon=True).start()
     threading.Thread(target=yttv_guide_worker, daemon=True).start()
     threading.Thread(target=recording_worker, daemon=True).start()
+    threading.Thread(target=slides_worker, daemon=True).start()
     if ALWAYS_ON:
         always_on_wakeup.set()
 
@@ -6276,6 +6404,8 @@ def main():
         roku_shutting_down.set()
         shutdown_recording()
         stop_all()
+        for stream in SLIDE_STREAMS.values():
+            stream.stop("server shutting down")
         if roku is not None:
             roku.feedback.close()
         for server in list(servers):

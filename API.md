@@ -52,10 +52,23 @@ never by `tv_number`. A day's games are numbered per date, so a game's number
 belongs to the date it was listed for.
 
 `GET /api/v1/sources` adds `lineup`: `{path, sections, house, slides}`, where
-`house` lists VizelVision's numbers and `slides` the station's slide channels:
-pages that play in a browser, not streams, each with `channel_id`, `page_path`
-(relative to the UI) and `data_path`. Channel 60 is the only one, the Sports
-Guide (`channel_id` `sports-guide`). `GET /api/v1/lineup[?date=YYYY-MM-DD]`
+`house` lists VizelVision's numbers and `slides` the station's slide channels,
+each with `channel_id`, `page_path` (the page that plays it in a browser,
+relative to the UI), `data_path`, and `stream_path`: the same slides as live
+HLS for players that only take streams, such as a Roku. Channel 60 is the only
+one, the Sports Guide (`channel_id` `sports-guide`).
+
+`GET /stream/sports-guide/index.m3u8` starts its video if it is not running
+and answers once the first two segments are written (about 2 s), or **503**
+with `Retry-After: 2` if they are not within 8 s. It takes no tuner and no
+lock: everyone shares one stream. 1280x720 at 30 fps, H.264 High@4.0
+(BT.709) with a silent AAC track, 2 s segments, about 0.6 Mbit/s. It stops
+60 s after the last request for its playlist or a segment.
+`GET /api/v1/status` reports it under `slides["sports-guide"]`: `running`,
+`ready`, `generation` (the segment names' id), `playlist_path`,
+`idle_seconds`, `seconds_since_demand`, `starts`, `resting` (it died three
+times in a minute and waits one before trying again), `last_stop` and
+`last_error`. `GET /api/v1/lineup[?date=YYYY-MM-DD]`
 returns the whole lineup in number order: VizelVision, the slide channels
 (`kind: "slides"`), every antenna channel and every Roku catalog item, each
 with `kind`, `source_id`, `channel_id` and (for games) `date`. A Roku catalog

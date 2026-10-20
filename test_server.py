@@ -1231,6 +1231,7 @@ def test_the_lineup_and_sources_carry_the_sports_guide(monkeypatch):
     assert guide == {"tv_number": 60, "tv_name": "VizelVision Sports Guide", "tv_section": "Live Sports",
                      "channel_id": "sports-guide", "page_path": "sports-guide.html",
                      "data_path": "/api/v1/sports-guide", "kind": "slides",
+                     "stream_path": "/stream/sports-guide/index.m3u8",
                      "name": "VizelVision Sports Guide"}
     assert [row["tv_number"] for row in rows if row["kind"] == "vizelvision"] == [0, 70]
 
@@ -2018,3 +2019,91 @@ def test_a_stopping_server_never_restarts_the_roku_capture(monkeypatch):
     # The keeper returns instead of looping on.
     server.roku_wakeup.set()
     server.roku_keeper()
+
+
+# ---------------------------------------------------------------------------
+# The Sports Guide as video (slide_stream.py, sports_guide_video.py)
+# ---------------------------------------------------------------------------
+
+def test_the_sports_guide_encoder_is_one_bounded_libx264_writing_hls_in_its_folder(tmp_path):
+    cmd = server.build_sports_guide_command("gen1", tmp_path)
+    joined = " ".join(cmd)
+    assert cmd[0] == "ffmpeg" and "-nostdin" in cmd
+    # Raw frames from the renderer, silence from /dev/zero (no lavfi filter graph).
+    assert "-f rawvideo -pix_fmt rgb24 -video_size 1280x720 -framerate 30" in joined
+    assert "pipe:0" in cmd and "/dev/zero" in cmd and "lavfi" not in cmd and "-shortest" in cmd
+    assert cmd[cmd.index("-c:v") + 1] == "libx264" and cmd[cmd.index("-threads") + 1] == "2"
+    assert cmd[cmd.index("-filter_threads") + 1] == "1"
+    assert "zerolatency" in cmd[cmd.index("-tune") + 1]
+    assert cmd[cmd.index("-colorspace") + 1] == "bt709"
+    assert cmd[cmd.index("-hls_time") + 1] == "2" and cmd[cmd.index("-g") + 1] == "60"
+    assert "delete_segments" in cmd[cmd.index("-hls_flags") + 1]
+    assert cmd[cmd.index("-hls_segment_filename") + 1] == str(tmp_path / "sportsguide_gen1_%05d.ts")
+    assert cmd[-1] == str(tmp_path / "index.m3u8")
+    renderer = server.sports_guide_renderer_command()
+    assert renderer[1].endswith("sports_guide_video.py")
+    assert renderer[renderer.index("--url") + 1] == f"http://127.0.0.1:{server.HTTP_PORT}/api/v1/sports-guide"
+    env = server.SLIDE_STREAMS["sports-guide"].env
+    assert env["OMP_NUM_THREADS"] == env["MKL_NUM_THREADS"] == "1"
+
+
+class _FakeSlides:
+    def __init__(self, directory, ready=True):
+        self.directory, self.ready, self.demanded, self.touched = directory, ready, [], 0
+
+    def demand(self, wait=0.0):
+        self.demanded.append(wait)
+        return self.ready
+
+    def touch(self):
+        self.touched += 1
+
+    def status(self):
+        return {"running": self.ready}
+
+
+def _get(path):
+    handler = server.TVHandler.__new__(server.TVHandler)
+    handler.path = path
+    handler.headers = {}
+    handler.wfile = BytesIO()
+    sent = {"headers": {}}
+    handler.send_response = lambda code, *args: sent.setdefault("code", code)
+    handler.send_header = lambda name, value: sent["headers"].__setitem__(name, value)
+    handler.end_headers = lambda: None
+    handler.send_error = lambda code, *args: sent.setdefault("code", code)
+    handler.log_message = lambda *args: None
+    handler.do_GET()
+    return sent.get("code"), sent["headers"], handler.wfile.getvalue()
+
+
+def test_the_sports_guide_playlist_starts_the_video_and_waits_for_it(monkeypatch, tmp_path):
+    fake = _FakeSlides(tmp_path)
+    (tmp_path / "index.m3u8").write_text("#EXTM3U\n#EXTINF:2.0,\nsportsguide_g_00000.ts\n")
+    (tmp_path / "sportsguide_g_00000.ts").write_bytes(b"\x47" * 188)
+    monkeypatch.setitem(server.SLIDE_STREAMS, "sports-guide", fake)
+    code, headers, body = _get("/stream/sports-guide/index.m3u8")
+    assert code == 200 and body.startswith(b"#EXTM3U")
+    assert headers["Content-Type"] == "application/vnd.apple.mpegurl"
+    assert fake.demanded == [server.SLIDES_START_TIMEOUT]
+    # A segment keeps it running without starting anything.
+    code, headers, body = _get("/stream/sports-guide/sportsguide_g_00000.ts")
+    assert (code, headers["Content-Type"], len(body), fake.touched) == (200, "video/mp2t", 188, 1)
+    assert len(fake.demanded) == 1
+    assert _get("/stream/sports-guide/gone.ts")[0] == 404
+    assert _get("/stream/sports-guide/..%2Fserver.py")[0] == 400
+    assert _get("/stream/sports-guide/index.html")[0] == 400
+
+
+def test_a_sports_guide_still_starting_answers_503_to_retry(monkeypatch, tmp_path):
+    monkeypatch.setitem(server.SLIDE_STREAMS, "sports-guide", _FakeSlides(tmp_path, ready=False))
+    code, headers, body = _get("/stream/sports-guide/index.m3u8")
+    assert code == 503 and headers["Retry-After"] == "2" and b"starting" in body
+
+
+def test_status_and_the_lineup_name_the_sports_guide_video(monkeypatch):
+    status = server._api_v1_status_payload()
+    assert status["slides"]["sports-guide"]["playlist_path"] == "/stream/sports-guide/index.m3u8"
+    assert status["slides"]["sports-guide"]["running"] is False
+    view = server.slide_views()[0]
+    assert view["stream_path"] == "/stream/sports-guide/index.m3u8"

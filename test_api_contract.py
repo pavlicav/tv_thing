@@ -244,7 +244,7 @@ def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypat
     assert sources["lineup"]["slides"] == [{
         "tv_number": 60, "tv_name": "VizelVision Sports Guide", "tv_section": "Live Sports",
         "channel_id": "sports-guide", "page_path": "sports-guide.html",
-        "data_path": "/api/v1/sports-guide"}]
+        "data_path": "/api/v1/sports-guide", "stream_path": "/stream/sports-guide/index.m3u8"}]
     assert {"first": 1, "last": 29, "name": "Local stations"} in sources["lineup"]["sections"]
 
     code, card = request("/api/v1/lineup?date=2026-10-01")

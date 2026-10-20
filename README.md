@@ -946,6 +946,24 @@ only the ranked ones), and the Roku's own catalogs for baseball and the game
 sources, cached for a minute. Its serif is TeX Gyre Pagella, shipped in
 `static/fonts/` (see the README there), so the page needs no internet.
 
+**As video, for a Roku.** The same slides are a live stream at
+`/stream/sports-guide/index.m3u8` (the lineup's `stream_path`), made only while
+someone watches. The first request for the playlist starts
+[`sports_guide_video.py`](sports_guide_video.py), which draws each frame with
+PIL and numpy (no browser) and pipes raw 1280x720 frames at 30 fps into one
+`ffmpeg`: libx264 `superfast` with `stillimage,zerolatency` on two threads,
+BT.709, silence from `/dev/zero` for the sound track some players insist on,
+2 s HLS segments in `streams/sports-guide/`. The playlist answers once two
+segments exist, about 2 s after the request. [`slide_stream.py`](slide_stream.py)
+supervises the pair: it stops both 60 s after the last request
+(`TV_THING_SLIDES_IDLE_SECONDS`), restarts a pair that dies or stalls while
+watched (three times a minute at most, then it rests a minute), and empties the
+folder. The renderer leaves when its parent does, and a startup reaps any
+orphan. Measured on viviserv: about 10% of a core to draw and 35% to encode,
+about 110 MiB each, 0.4-0.6 Mbit/s. It is core stream stack: gate it with
+`stream_sanity_check.py --slides sports-guide`, which starts it cold three
+times, checks every segment, and requires it to stop once nobody watches.
+
 The About page offers the lineup as a printable card,
 `static/lineup-card.pdf`, typeset in LaTeX from
 [`lineup_card.tex`](lineup_card.tex), and a print version on white paper,
