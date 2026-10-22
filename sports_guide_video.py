@@ -369,7 +369,7 @@ class Page:
         line.draw.rectangle((0, 0, 559, 1), fill=(*GOLD, 179))
         line.draw.rectangle((0, 7, 559, 7), fill=(*GOLD, 179))
         self.items.append(Item(line, 360, 444, delay=2.4))
-        layer = Layer(W, 60)
+        layer, lines = Layer(W, 104), 1
         if not self.payload:
             message = "Gathering today’s listings…" if self.payload is None else \
                 "The sports desk is not answering. Listings will return shortly."
@@ -380,36 +380,48 @@ class Page:
             face = font(30)
             layer.text(640 - width(message, face) / 2, 40, message, face, MINT, shadow=0)
         else:
-            self.summary(layer, sports)
+            lines = self.summary(layer, sports)
         self.items.append(Item(layer, 0, 462, delay=2.6))
         if self.payload and self.payload.get("errors"):
             layer = Layer(W, 50)
             note = "Some listings are not in yet."
             face = font(25, italic=True)
             layer.text(640 - width(note, face) / 2, 34, note, face, ROSE, shadow=0)
-            self.items.append(Item(layer, 0, 516, delay=3.0))
+            self.items.append(Item(layer, 0, 516 + 44 * (lines - 1), delay=3.0))
         self.footer(canvas)
 
     @staticmethod
     def summary(layer, sports):
+        """Each sport and its count, diamonds between; on two lines when one would run
+        wider than the page's 1100 px (as the page's own text wraps). Returns the lines."""
         name, number = font(30), font(30, bold=True)
-        parts = []
-        for index, sport in enumerate(sports):
-            if index:
-                parts.append(("sep", None, 14 + 22 + 14))
-            label = f"{sport.get('sport', '')} "
-            count = str(len(sport.get("games") or []))
-            parts.append((label, name, width(label, name)))
-            parts.append((count, number, width(count, number)))
-        x = 640 - sum(part[2] for part in parts) / 2
-        for text, face, advance in parts:
-            if text == "sep":
-                cx, cy = x + 14 + 11, 30
-                layer.draw.polygon([(cx, cy - 10), (cx + 10, cy), (cx, cy + 10), (cx - 10, cy)],
-                                   fill=(*ROSE, 255))
-            else:
-                layer.text(x, 40, text, face, GOLD if face is number else MINT, shadow=0)
-            x += advance
+
+        def parts_of(group):
+            parts = []
+            for index, sport in enumerate(group):
+                if index:
+                    parts.append(("sep", None, 14 + 22 + 14))
+                label = f"{sport.get('sport', '')} "
+                count = str(len(sport.get("games") or []))
+                parts.append((label, name, width(label, name)))
+                parts.append((count, number, width(count, number)))
+            return parts
+
+        rows = [parts_of(sports)]
+        if sum(part[2] for part in rows[0]) > 1100 and len(sports) > 1:
+            half = math.ceil(len(sports) / 2)
+            rows = [parts_of(sports[:half]), parts_of(sports[half:])]
+        for line, parts in enumerate(rows):
+            x, base = 640 - sum(part[2] for part in parts) / 2, 40 + 44 * line
+            for text, face, advance in parts:
+                if text == "sep":
+                    cx, cy = x + 14 + 11, base - 10
+                    layer.draw.polygon([(cx, cy - 10), (cx + 10, cy), (cx, cy + 10), (cx - 10, cy)],
+                                       fill=(*ROSE, 255))
+                else:
+                    layer.text(x, base, text, face, GOLD if face is number else MINT, shadow=0)
+                x += advance
+        return len(rows)
 
     # -- a sport's page -------------------------------------------------------
     def sport(self, canvas):
@@ -630,26 +642,55 @@ def channel_of(payload, default=60):
     return view.get("tv_number") if isinstance(view.get("tv_number"), int) else default
 
 
-def frames(listings, fps=FPS):
-    """Every frame, forever: rounds of the deck, each page building in over the last."""
+def tune_in(slides, now, fps=FPS):
+    """Where a channel that never stopped would be at ``now`` (epoch seconds), with
+    its rounds laid end to end since the epoch: ``(page index, frames into it)``."""
+    lengths = [int(round(dwell(slide) * fps)) for slide in slides]
+    at = int(now * fps) % sum(lengths)
+    for index, length in enumerate(lengths):
+        if at < length:
+            return index, at
+        at -= length
+    return 0, 0
+
+
+def frames(listings, fps=FPS, clock=time.time):
+    """Every frame, forever: rounds of the deck, each page building in over the last.
+
+    Tuning in lands mid-round, as on cable: the first round with listings starts
+    where the wall clock says (tune_in), part-way through a page if need be. Until
+    the listings are in, the title page waits for them, and they cut in at once."""
     background = backdrop()
-    turns, last = 0, None
+    turns, last, tuned = 0, None, False
     while True:
         payload = listings.latest()
         slides = deck(payload or None)
-        for slide in slides:
+        first, skip = 0, 0
+        if payload and not tuned:
+            (first, skip), tuned = tune_in(slides, clock(), fps), True
+        for index in range(first, len(slides)):
+            slide = slides[index]
             page = Page(slide, payload, channel_of(payload), background)
             kind = TRANSITIONS[turns % len(TRANSITIONS)] if last is not None else None
             turns += last is not None
             span, curve = TRANSITION_TIMING.get(kind, (0, None))
             ease = bezier(curve)
-            for n in range(int(round(dwell(slide) * fps))):
-                t = n / fps
+            start = skip if index == first else 0
+            shown = last
+            for n in range(start, int(round(dwell(slide) * fps))):
+                if not tuned and listings.latest():
+                    break           # the listings are in: tune in from here
+                t, into = n / fps, (n - start) / fps
                 frame = page.frame(t)
-                if kind and t < span:
-                    frame = transition(kind, ease(t / span), last, frame)
+                if kind and into < span:
+                    frame = transition(kind, ease(into / span), last, frame)
                 yield frame
-            last = page.frame(dwell(slide))
+                shown = frame
+            else:
+                last = page.frame(dwell(slide))
+                continue
+            last = shown
+            break
 
 
 def main(argv=None):

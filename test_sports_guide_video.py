@@ -102,6 +102,69 @@ def test_the_title_page_says_what_is_on_or_why_not():
         assert page.frame(5.0).shape == (video.H, video.W, 3)
 
 
+def test_tuning_in_lands_where_a_channel_that_never_stopped_would_be():
+    pages = video.deck(PAYLOAD)
+    fps = 10
+    lengths = [int(round(video.dwell(page) * fps)) for page in pages]     # 90, 98, 98, 64 frames
+    assert video.tune_in(pages, 0, fps) == (0, 0)
+    assert video.tune_in(pages, 9.5, fps) == (1, 5)                       # half a second into page 1
+    round_seconds = sum(lengths) / fps
+    assert video.tune_in(pages, round_seconds * 1000 + 9.5, fps) == (1, 5)   # every round the same
+    assert video.tune_in(pages, (sum(lengths) - 1) / fps, fps) == (3, lengths[3] - 1)
+
+
+class _Listings:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def latest(self):
+        return self.payload
+
+
+def _first(generator, count):
+    return [next(generator) for _ in range(count)]
+
+
+def test_the_first_frames_are_mid_round_and_a_round_later_it_starts_over():
+    fps = 10
+    clock = lambda: 9.5   # noqa: E731 - half a second into page 1 (see above)
+    tuned = _first(video.frames(_Listings(PAYLOAD), fps, clock=clock), 3)
+    background = video.backdrop()
+    page = video.Page(video.deck(PAYLOAD)[1], PAYLOAD, 60, background)
+    assert np.array_equal(tuned[0], page.frame(0.5))       # no transition into the first frame
+    # From the very start of a round, the title page as before.
+    title = _first(video.frames(_Listings(PAYLOAD), fps, clock=lambda: 0), 1)[0]
+    assert np.array_equal(title, video.Page({"kind": "title"}, PAYLOAD, 60, background).frame(0))
+
+
+def test_until_the_listings_come_the_title_page_waits_then_they_cut_in():
+    listings = _Listings(None)
+    frames = video.frames(listings, 10, clock=lambda: 9.5)
+    waiting = _first(frames, 4)
+    background = video.backdrop()
+    gathering = video.Page({"kind": "title"}, None, 60, background)
+    assert np.array_equal(waiting[0], gathering.frame(0))
+    listings.payload = PAYLOAD
+    after = _first(frames, 15)
+    # The page the clock says wipes in over the waiting one, from half a second in.
+    tuned = video.Page(video.deck(PAYLOAD)[1], PAYLOAD, 60, background)
+    assert np.array_equal(after[0], waiting[-1])
+    assert np.array_equal(after[-1], tuned.frame(0.5 + 1.4))
+
+
+def test_the_title_pages_summary_takes_two_lines_when_one_would_not_fit():
+    background = video.backdrop()
+    many = {"date": "2026-10-24", "channel": {"tv_number": 60}, "errors": [], "sports": [
+        {"sport": name, "games": [game("A at B", at(12))] * 12} for name in
+        ("NFL Football", "College Football", "Baseball", "Basketball", "Hockey", "Soccer")]}
+    one, two = video.Layer(video.W, 104), video.Layer(video.W, 104)
+    assert video.Page.summary(one, PAYLOAD["sports"]) == 1
+    assert video.Page.summary(two, many["sports"]) == 2
+    box = two.image.getbbox()
+    assert box[0] >= 80 and box[2] <= video.W - 80 and box[3] > 60   # within the page, a second line
+    assert video.Page({"kind": "title"}, many, 60, background).frame(8.0).shape == (video.H, video.W, 3)
+
+
 def test_it_writes_whole_frames_to_stdout(tmp_path):
     listings = tmp_path / "sports-guide.json"
     listings.write_text(json.dumps(PAYLOAD))

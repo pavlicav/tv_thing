@@ -22,8 +22,10 @@ from roku_control.config import normalize_channel_name
 from roku_control.sports import NETWORK_ALIASES, nhl_on_espn_unlimited
 
 # Each sport and its leagues, as (league, tag), in the order the guide shows them.
+# The pros and the colleges each get their own pages, as the papers listed them.
 SPORTS = (
-    ("Football", (("nfl", "NFL"), ("ncaaf", "NCAA"))),
+    ("NFL Football", (("nfl", "NFL"),)),
+    ("College Football", (("ncaaf", "NCAA"),)),
     ("Baseball", (("mlb", "MLB"),)),
     ("Basketball", (("nba", "NBA"), ("wnba", "WNBA"), ("ncaam", "NCAA"), ("ncaaw", "NCAAW"))),
     ("Hockey", (("nhl", "NHL"),)),

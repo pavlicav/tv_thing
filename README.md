@@ -919,13 +919,30 @@ and tapes the same channel.
 ### The Sports Guide (channel 60)
 
 Channel 60 heads Live Sports with **VizelVision's Sports Guide**: a page of
-slides in the manner of a mid-90s cable character generator. It opens on
-"Today's Sports...", then pages through the day's games by sport (football,
-baseball, basketball, hockey, soccer), each sport's by start time, and starts
-over with fresh listings. It plays in the browser
+slides in the manner of a mid-90s cable character generator. A round opens on
+"Today's Sports...", then pages through the day's games by sport (NFL football,
+college football, baseball, basketball, hockey, soccer), each sport's by start
+time, and starts over with fresh listings. It plays in the browser
 ([`static/sports-guide.html`](static/sports-guide.html)), on the Watch page's
-stage or full screen on its own; it takes no tuner, lock or encoder, and has
-no sound.
+stage or full screen on its own; it takes no tuner, lock or encoder.
+
+**Tuning in lands mid-round, as on cable.** The rounds are laid end to end from
+the epoch, so the page (and the video below) starts wherever the wall clock
+says a channel that never stopped would be, part-way through a page if need be:
+two viewers who tune in together see the same page. Until the listings come in,
+the title page waits for them, and they cut in at once.
+
+**Its music** is smooth jazz, as a listings channel had under its pages in the
+nineties: three tunes, about five and a half minutes, synthesized by
+[`sports_guide_music.py`](sports_guide_music.py) (numpy and scipy: an FM
+electric piano, fretless bass, a soft drum machine, strings, and a soprano sax,
+vibraphone or flute on top; the station's open logo on the vibraphone in the
+first tune's intro, the closed logo at its end), levelled to -20 LUFS, in
+`static/sports-guide-music.m4a` with its length beside it in the `.json`. It
+too plays from the wall clock's place in it. The page starts it as it loads
+(the Watch page's frame may autoplay); where a browser refuses, the first key
+or click starts it. `?mute` keeps it quiet. Rebuild it with
+`python3 sports_guide_music.py` (the same file each time: it is seeded).
 
 A game is listed only when it can be watched here, and shows where:
 
@@ -952,14 +969,16 @@ someone watches. The first request for the playlist starts
 [`sports_guide_video.py`](sports_guide_video.py), which draws each frame with
 PIL and numpy (no browser) and pipes raw 1280x720 frames at 30 fps into one
 `ffmpeg`: libx264 `superfast` with `stillimage,zerolatency` on two threads,
-BT.709, silence from `/dev/zero` for the sound track some players insist on,
-2 s HLS segments in `streams/sports-guide/`. The playlist answers once two
+BT.709, the music looped from the wall clock's place in it as AAC at 96 kbit/s
+(silence from `/dev/zero` if the file is missing: some players insist on a
+sound track), 2 s HLS segments in `streams/sports-guide/`. The playlist answers once two
 segments exist, about 2 s after the request. [`slide_stream.py`](slide_stream.py)
 supervises the pair: it stops both 60 s after the last request
 (`TV_THING_SLIDES_IDLE_SECONDS`), restarts a pair that dies or stalls while
 watched (three times a minute at most, then it rests a minute), and empties the
 folder. The renderer leaves when its parent does, and a startup reaps any
-orphan. Measured on viviserv: about 10% of a core to draw and 35% to encode,
+orphan. Measured on viviserv: about 10% of a core to draw and 35% to encode
+(45% with the music, measured outside the server on 2026-10-21),
 about 110 MiB each, 0.4-0.6 Mbit/s. It is core stream stack: gate it with
 `stream_sanity_check.py --slides sports-guide`, which starts it cold three
 times, checks every segment, and requires it to stop once nobody watches.

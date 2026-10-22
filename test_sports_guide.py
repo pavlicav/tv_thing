@@ -56,8 +56,8 @@ def test_a_national_game_is_listed_on_its_broadcasters_channel():
     rows = sports_guide.day_games(espn, {}, CHANNELS)
     assert [(row["sport"], row["tag"], row["title"], row["network"], row["tv_number"], row["via"], row["live"])
             for row in rows] == [
-        ("Football", "NFL", "Commanders at 49ers", "ESPN", 33, "channel", True),
-        ("Football", "NCAA", "LSU at Auburn", "ABC", 7, "channel", False),
+        ("NFL Football", "NFL", "Commanders at 49ers", "ESPN", 33, "channel", True),
+        ("College Football", "NCAA", "LSU at Auburn", "ABC", 7, "channel", False),
         ("Basketball", "WNBA", "Dream at Valkyries", "USA", 57, "channel", False)]
     assert rows[0]["start"] == 1792455300 and rows[0]["start_time"] == "2026-10-20T00:15Z"
 
@@ -121,10 +121,12 @@ def test_the_guide_goes_by_sport_then_time():
                      suggested_target={"source_id": "youtube-tv"})],
     }, {}, CHANNELS)
     guide = sports_guide.by_sport(rows)
-    assert [sport["sport"] for sport in guide] == ["Football", "Basketball", "Hockey"]
-    assert [row["title"] for row in guide[0]["games"]] == [
-        "Indiana at Michigan", "Pitt at Miami", "Iowa at Minnesota", "Saints at Steelers", "Late at Kick"]
-    assert guide[0]["games"][-1]["time_tbd"] is True and guide[0]["games"][-1]["start"] is None
+    # The pros and the colleges each have their own pages, the NFL first.
+    assert [sport["sport"] for sport in guide] == ["NFL Football", "College Football", "Basketball", "Hockey"]
+    assert [row["title"] for row in guide[0]["games"]] == ["Saints at Steelers"]
+    assert [row["title"] for row in guide[1]["games"]] == [
+        "Indiana at Michigan", "Pitt at Miami", "Iowa at Minnesota", "Late at Kick"]
+    assert guide[1]["games"][-1]["time_tbd"] is True and guide[1]["games"][-1]["start"] is None
     assert sports_guide.by_sport([]) == []
 
 

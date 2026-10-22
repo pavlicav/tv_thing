@@ -1173,7 +1173,7 @@ def test_the_sports_guide_lists_todays_games_by_sport_on_their_channels(monkeypa
     listed = [(sport["sport"], game["title"], game["network"], game["tv_number"])
               for sport in payload["sports"] for game in sport["games"]]
     # The NBA game is on Prime Video alone: not on any channel here.
-    assert listed == [("Football", "Commanders at 49ers", "ESPN", 33),
+    assert listed == [("NFL Football", "Commanders at 49ers", "ESPN", 33),
                       ("Baseball", "Guardians at Rays", "TBS", 31),
                       ("Hockey", "Flyers at Kings", "ESPN+", 61)]
 
@@ -2025,7 +2025,8 @@ def test_a_stopping_server_never_restarts_the_roku_capture(monkeypatch):
 # The Sports Guide as video (slide_stream.py, sports_guide_video.py)
 # ---------------------------------------------------------------------------
 
-def test_the_sports_guide_encoder_is_one_bounded_libx264_writing_hls_in_its_folder(tmp_path):
+def test_the_sports_guide_encoder_is_one_bounded_libx264_writing_hls_in_its_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "SPORTS_GUIDE_MUSIC", tmp_path / "no-music.m4a")
     cmd = server.build_sports_guide_command("gen1", tmp_path)
     joined = " ".join(cmd)
     assert cmd[0] == "ffmpeg" and "-nostdin" in cmd
@@ -2045,6 +2046,27 @@ def test_the_sports_guide_encoder_is_one_bounded_libx264_writing_hls_in_its_fold
     assert renderer[renderer.index("--url") + 1] == f"http://127.0.0.1:{server.HTTP_PORT}/api/v1/sports-guide"
     env = server.SLIDE_STREAMS["sports-guide"].env
     assert env["OMP_NUM_THREADS"] == env["MKL_NUM_THREADS"] == "1"
+
+
+def test_the_sports_guide_plays_its_music_from_the_wall_clocks_place_in_it(tmp_path, monkeypatch):
+    music = tmp_path / "sports-guide-music.m4a"
+    monkeypatch.setattr(server, "SPORTS_GUIDE_MUSIC", music)
+    # No file, or no length beside it: silence, as before.
+    assert server.sports_guide_music() is None
+    music.write_bytes(b"aac")
+    assert server.sports_guide_music() is None
+    music.with_suffix(".json").write_text('{"seconds": 300.0}')
+    assert server.sports_guide_music(now=1_000_000_123.5) == (music, 1_000_000_123.5 % 300)
+    cmd = server.build_sports_guide_command("gen1", tmp_path, now=1_000_000_123.5)
+    joined = " ".join(cmd)
+    # Looped, sought to where a channel that never stopped would be; no /dev/zero.
+    assert f"-stream_loop -1 -ss {(1_000_000_123.5 % 300):.3f} -thread_queue_size 8 -i {music}" in joined
+    assert "/dev/zero" not in cmd and "-shortest" in cmd and "lavfi" not in cmd
+    assert cmd[cmd.index("-map") + 1] == "0:v:0" and "1:a:0" in cmd
+    assert cmd[cmd.index("-b:a") + 1] == "96k"
+    # The music that ships with it.
+    shipped = server.BASE_DIR / "static" / "sports-guide-music.m4a"
+    assert shipped.is_file() and float(json.loads(shipped.with_suffix(".json").read_text())["seconds"]) > 200
 
 
 class _FakeSlides:

@@ -3953,27 +3953,52 @@ SLIDE_PAGES = {"sports-guide": {"page_path": "sports-guide.html", "data_path": "
 # slides at 30 fps 1280x720 into one libx264 on two threads, 2 s segments with
 # a key frame each. It runs only while someone watches, from the first request
 # for its playlist until SLIDES_IDLE_SECONDS after the last. Measured on
-# viviserv (2026-10-19): about 11% of a core to draw, 33% to encode, 0.6 Mbit/s.
+# viviserv (2026-10-19): about 11% of a core to draw, 33% to encode, 0.6 Mbit/s;
+# with the music (2026-10-21, outside the server) 12% and 45%.
 HTTP_PORT = int(os.environ.get("PORT", 8080))
 SLIDES_IDLE_SECONDS = float(os.environ.get("TV_THING_SLIDES_IDLE_SECONDS", "60"))
 SLIDES_START_TIMEOUT = float(os.environ.get("TV_THING_SLIDES_START_TIMEOUT", "8"))
 SLIDE_FPS = 30
 SLIDE_SEGMENT_SECONDS = 2
 SLIDE_THREADS = "2"
+# The Sports Guide's music (sports_guide_music.py makes it): smooth jazz, as a
+# listings channel had. Its length is in the .json beside it. Without it, silence.
+SPORTS_GUIDE_MUSIC = BASE_DIR / "static" / "sports-guide-music.m4a"
 
 
-def build_sports_guide_command(generation, directory):
+def sports_guide_music(now=None):
+    """``(path, seconds in)`` for the guide's music, or None when it is missing.
+
+    It plays from wherever the wall clock says a channel that never stopped would
+    be, so tuning in lands mid-tune, as on cable (the page does the same)."""
+    try:
+        seconds = float(json.loads(SPORTS_GUIDE_MUSIC.with_suffix(".json").read_text())["seconds"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if seconds <= 0 or not SPORTS_GUIDE_MUSIC.is_file():
+        return None
+    return SPORTS_GUIDE_MUSIC, (time.time() if now is None else now) % seconds
+
+
+def build_sports_guide_command(generation, directory, now=None):
     """The Sports Guide's encoder: raw frames on stdin to HLS in ``directory``."""
     directory = Path(directory)
+    music = sports_guide_music(now)
+    if music:
+        # The music, looped, from the wall clock's place in it.
+        sound = ["-stream_loop", "-1", "-ss", f"{music[1]:.3f}", "-thread_queue_size", "8",
+                 "-i", str(music[0])]
+    else:
+        # Silence, as raw zeros: some players refuse a stream with no sound
+        # track. (lavfi's anullsrc ran a filter graph of 28 threads.)
+        sound = ["-f", "s16le", "-ar", "48000", "-ac", "2", "-thread_queue_size", "8", "-i", "/dev/zero"]
     return [
         "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "warning",
         "-filter_threads", "1",
         "-f", "rawvideo", "-pix_fmt", "rgb24", "-video_size", "1280x720",
         # Eight queued frames: each is 2.7 MB, and the renderer runs ahead.
         "-framerate", str(SLIDE_FPS), "-thread_queue_size", "8", "-i", "pipe:0",
-        # Silence, as raw zeros: some players refuse a stream with no sound
-        # track. (lavfi's anullsrc ran a filter graph of 28 threads.)
-        "-f", "s16le", "-ar", "48000", "-ac", "2", "-thread_queue_size", "8", "-i", "/dev/zero",
+        *sound,
         "-map", "0:v:0", "-map", "1:a:0", "-shortest",
         # HD is BT.709; say so, or a player may assume it of untagged 601.
         "-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
@@ -3987,7 +4012,7 @@ def build_sports_guide_command(generation, directory):
         "-g", str(SLIDE_FPS * SLIDE_SEGMENT_SECONDS),
         "-keyint_min", str(SLIDE_FPS * SLIDE_SEGMENT_SECONDS), "-sc_threshold", "0",
         "-force_key_frames", f"expr:gte(t,n_forced*{SLIDE_SEGMENT_SECONDS})",
-        "-c:a", "aac", "-b:a", "48k", "-ac", "2",
+        "-c:a", "aac", "-b:a", "96k" if music else "48k", "-ac", "2", "-ar", "48000",
         "-max_interleave_delta", "500000", "-flush_packets", "1",
         "-f", "hls", "-hls_time", str(SLIDE_SEGMENT_SECONDS), "-hls_list_size", "8",
         "-hls_allow_cache", "0",

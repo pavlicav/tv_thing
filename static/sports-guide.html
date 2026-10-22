@@ -103,6 +103,7 @@
   .title-sports { font-size: 30px; color: var(--mint); max-width: 1100px; line-height: 1.5; }
   .title-sports b { color: var(--gold); font-weight: 700; }
   .title-sports .sep { color: var(--rose); margin: 0 14px; }
+  .title-sports .one { white-space: nowrap; }   /* a sport and its count never part */
   .title-note { margin-top: 18px; font-style: italic; font-size: 25px; color: var(--rose); }
   .build { opacity: 0; animation: build .55s ease-out forwards; }
 
@@ -171,6 +172,7 @@
 </head>
 <body>
 <div class="stage" id="stage" role="img" aria-label="VizelVision Sports Guide"></div>
+<audio id="music" src="sports-guide-music.m4a" loop preload="auto"></audio>
 <noscript>The Sports Guide pages through today's games with JavaScript.</noscript>
 <script>
 (() => {
@@ -181,11 +183,13 @@
   const TITLE_MS = 9000;
   const REFRESH_MS = 120000;
   const TRANSITIONS = ["wipe", "iris", "blinds", "dissolve", "barn"];
-  // ?hold=N keeps page N on screen (0 is the title page), for a still.
+  // ?hold=N keeps page N on screen (0 is the title page), for a still; ?mute, no music.
   const params = new URLSearchParams(location.search);
   const HOLD = params.has("hold") ? Number(params.get("hold")) || 0 : null;
+  const MUTE = params.has("mute") || HOLD !== null;
 
   const stage = document.getElementById("stage");
+  const music = document.getElementById("music");
   let data = null, fetchedAt = 0, failed = false;
   let deck = [], index = -1, timer = null, turns = 0, channel = 60;
 
@@ -267,7 +271,7 @@
         `No more live games on the dial today.</div>`;
     } else {
       lines = `<div class="title-sports build" style="animation-delay:2.6s">` +
-        sports.map(sport => `${esc(sport.sport)} <b>${sport.games.length}</b>`)
+        sports.map(sport => `<span class="one">${esc(sport.sport)} <b>${sport.games.length}</b></span>`)
           .join('<span class="sep">&#9670;</span>') + `</div>`;
     }
     const partial = data && data.errors && data.errors.length;
@@ -322,12 +326,53 @@
     return slide.kind === "title" ? TITLE_MS : Math.min(15000, 5200 + slide.games.length * 1150);
   }
 
+  // ---- tuning in: where a channel that never stopped would be ----
+  // Rounds laid end to end since the epoch, as sports_guide_video.py's tune_in:
+  // [page index, ms into it]. Tuning in lands mid-round, as on cable.
+  function tuneIn(slides, now) {
+    const lengths = slides.map(dwell);
+    let at = now % lengths.reduce((a, b) => a + b, 0);
+    for (let index = 0; index < lengths.length; index++) {
+      if (at < lengths[index]) return [index, at];
+      at -= lengths[index];
+    }
+    return [0, 0];
+  }
+
+  // The music (sports_guide_music.py) plays from the wall clock's place in it too.
+  // Where autoplay is refused, the first key or click starts it.
+  function startMusic() {
+    if (MUTE || !music) return;
+    const play = () => {
+      if (!isFinite(music.duration) || !music.duration) return;
+      music.currentTime = (Date.now() / 1000) % music.duration;
+      return music.play();
+    };
+    const armed = () => {
+      removeEventListener("keydown", armed); removeEventListener("pointerdown", armed);
+      const started = play();
+      if (started) started.catch(() => {});
+    };
+    const go = () => {
+      const started = play();
+      if (started) started.catch(() => { addEventListener("keydown", armed); addEventListener("pointerdown", armed); });
+    };
+    if (music.readyState >= 1) go(); else music.addEventListener("loadedmetadata", go, { once: true });
+  }
+
   // ---- paging ----
-  function show(slide) {
+  function show(slide, into = 0) {
     const holder = document.createElement("div");
     holder.innerHTML = slide.kind === "title" ? titlePage() : sportPage(slide);
     const page = holder.firstElementChild;
     const old = [...stage.querySelectorAll(".slide")];
+    if (into > 0) {
+      // Tuned in part-way: the page as it stands that far in, no transition.
+      old.forEach(node => node.remove());
+      stage.appendChild(page);
+      if (page.getAnimations) page.getAnimations({ subtree: true }).forEach(a => { a.currentTime = into; });
+      return;
+    }
     if (old.length && HOLD === null) {
       page.classList.add(`in-${TRANSITIONS[turns++ % TRANSITIONS.length]}`);
       page.addEventListener("animationend", (event) => {
@@ -378,9 +423,12 @@
     .then(() => {
       deck = buildDeck();
       if (HOLD !== null) { index = Math.max(0, Math.min(deck.length - 1, HOLD)); show(deck[index]); return; }
-      index = 0;
-      show(deck[0]);
-      timer = setTimeout(advance, dwell(deck[0]));
+      startMusic();
+      // With listings, tune in where the wall clock says; without, start the round.
+      const [page, into] = data ? tuneIn(deck, Date.now()) : [0, 0];
+      index = page;
+      show(deck[index], into);
+      timer = setTimeout(advance, dwell(deck[index]) - into);
     });
 })();
 </script>
