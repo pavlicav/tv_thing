@@ -34,6 +34,12 @@ class SundayTicketBlackoutError(NavigationError):
     code = "sunday_ticket_blackout"
 
 
+class ProgramBlockedError(NavigationError):
+    """YouTube TV blocks the program in the Roku's area (an ESPN Unlimited blackout)."""
+
+    code = "program_blocked"
+
+
 class ControlBusyError(RokuStreamError):
     code = "control_busy"
 

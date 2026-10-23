@@ -782,13 +782,15 @@ class VisualFeedback:
         return {"matched": difference <= self.config.template_difference_threshold,
                 "difference": round(difference, 3)}
 
-    def sunday_ticket_blackout(self, frame: PpmFrame) -> dict[str, object] | None:
+    def blackout_card(self, frame: PpmFrame) -> dict[str, object] | None:
         """Read YouTube TV's blackout card, or None when `frame` is not one.
 
         Sunday Ticket blacks out a game that airs on a local station: both team
         logos and "This game is airing on your local station." stand in for the
         picture while the Roku's media player still reports play (2026-10-18).
         A whole-frame OCR pass reads only "This game", so the line is cropped.
+        An ESPN Unlimited game blacked out in the Roku's market shows "This
+        program's blocked in your area." in the same place (2026-10-22).
         """
         if self.ocr is None:
             return None
@@ -800,7 +802,9 @@ class VisualFeedback:
             return None
         compact = normalize_channel_name(text)
         if "localstation" in compact and ("airing" in compact or "thisgame" in compact):
-            return {"text": text}
+            return {"text": text, "kind": "local_station"}
+        if "blocked" in compact and "yourarea" in compact:
+            return {"text": text, "kind": "blocked_in_area"}
         return None
 
     @staticmethod
@@ -1640,11 +1644,12 @@ class VisualFeedback:
         if player_state not in ("", "none", "close", "stop", "stopped"):
             # The player keeps playing behind a blackout card, so only the
             # card itself shows that no game is on screen.
-            blackout = self.sunday_ticket_blackout(frame)
+            blackout = self.blackout_card(frame)
             if blackout is not None:
+                local = blackout["kind"] == "local_station"
                 return {
-                    "state": AppState.SUNDAY_TICKET_BLACKOUT,
-                    "evidence": "ocr_local_station_blackout",
+                    "state": AppState.SUNDAY_TICKET_BLACKOUT if local else AppState.PROGRAM_BLOCKED,
+                    "evidence": "ocr_local_station_blackout" if local else "ocr_blocked_in_area",
                     "player_state": player_state,
                     "ocr": blackout,
                 }

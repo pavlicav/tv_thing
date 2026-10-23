@@ -54,10 +54,23 @@ def controller(page):
                            _focus_network_tile=lambda events: {'focused': 'network_tile'})
 
 
-def open_game(frames, **kwargs):
+def open_game(frames, game=GAME, **kwargs):
     page, events = Page(frames), []
-    result = espn_unlimited.open_game(controller(page), GAME, events, **kwargs)
+    result = espn_unlimited.open_game(controller(page), game, events, **kwargs)
     return result, page.keys, events
+
+
+def team(name, nickname, abbreviation):
+    return {'name': name, 'nickname': nickname, 'abbreviation': abbreviation}
+
+
+# 2026-10-22: Live in rows by sport. Red Wings at Canucks was blacked out in
+# the Roku's (Lansing) market; Mammoth at Kraken, an exclusive, was not.
+UTAH_SEATTLE = {'league': 'nhl', 'game_id': 401892562, 'title': 'Utah Mammoth at Seattle Kraken',
+                'away': team('Utah Mammoth', 'Mammoth', 'UTA'), 'home': team('Seattle Kraken', 'Kraken', 'SEA')}
+DETROIT_VANCOUVER = {'league': 'nhl', 'game_id': 401892563, 'title': 'Detroit Red Wings at Vancouver Canucks',
+                     'away': team('Detroit Red Wings', 'Red Wings', 'DET'),
+                     'home': team('Vancouver Canucks', 'Canucks', 'VAN')}
 
 
 class EspnPageTests(unittest.TestCase):
@@ -98,13 +111,54 @@ class EspnPageTests(unittest.TestCase):
         self.assertEqual((result['stream'], result['streams']), (None, 1))
 
     def test_the_end_of_the_row_without_the_game_fails(self):
-        with self.assertRaisesRegex(NavigationError, 'not on the ESPN page'):
+        with self.assertRaisesRegex(NavigationError, 'not among the ESPN page'):
             open_game(['menu-live', 'on-now-first-card', 'on-now-countdown', 'on-now-countdown',
                        'on-now-countdown'])
 
     def test_a_page_that_never_shows_its_menu_is_not_browsed(self):
         with self.assertRaisesRegex(NavigationError, 'Live section'):
             open_game(['page-opened', 'page-opened'])
+
+
+class SportRowTests(unittest.TestCase):
+    """The ESPN page as it was on 2026-10-22."""
+
+    def test_row_labels_and_blocked_cards(self):
+        ocr = SimpleNamespace(ocr=LocalOcr())
+        self.assertEqual(espn_unlimited.read_row_label(ocr, frame('nhl-mammoth-kraken')), 'NHL')
+        self.assertEqual(espn_unlimited.read_row_label(ocr, frame('row-ncaaw-soccer')), 'NCAAW Soccer')
+        self.assertEqual(espn_unlimited.read_row_label(ocr, frame('on-now-first-card')), 'On Now')
+        for name, blocked in (('nhl-red-wings-blocked', True), ('nhl-red-wings-blocked-home', True),
+                              ('nhl-mammoth-kraken', False), ('nhl-hurricanes-oilers', False),
+                              ('row-ncaaw-soccer', False), ('on-now-avalanche-flyers', False)):
+            with self.subTest(name=name):
+                self.assertIs(espn_unlimited.card_blocked(frame(name)), blocked)
+
+    def test_other_sports_rows_are_passed_over_down_to_nhl(self):
+        result, keys, events = open_game(['menu-live', 'row-ncaaw-soccer', 'nhl-red-wings-blocked',
+                                          'nhl-red-wings-blocked-home', 'nhl-mammoth-kraken',
+                                          'nhl-hurricanes-oilers', 'nhl-mammoth-kraken'], game=UTAH_SEATTLE)
+        self.assertEqual(keys, ['Select', 'Down', 'Right', 'Down', 'Right', 'Right', 'Right', 'Left'])
+        self.assertEqual([e['label'] for e in events if e['event'] == 'espn_row'], ['NCAAW Soccer', 'NHL'])
+        self.assertEqual((result['stream'], result['streams'], result['position']), (None, 1, 2))
+
+    def test_a_game_blacked_out_on_both_streams_is_never_selected(self):
+        with self.assertRaises(NavigationError) as error:
+            open_game(['menu-live', 'nhl-red-wings-blocked', 'nhl-red-wings-blocked-home'],
+                      game=DETROIT_VANCOUVER)
+        self.assertEqual(error.exception.details['code'], 'espn_game_blacked_out')
+
+    def test_no_nhl_row_fails_without_walking_other_sports(self):
+        with self.assertRaises(NavigationError) as error:
+            open_game(['menu-live', 'row-ncaaw-soccer', 'row-ncaaw-soccer'], game=UTAH_SEATTLE)
+        self.assertEqual(error.exception.details['code'], 'espn_game_not_listed')
+
+    def test_the_blocked_in_your_area_card_is_a_blackout(self):
+        from roku_control.config import FeedbackConfig
+        from roku_control.feedback import VisualFeedback
+        feedback = VisualFeedback(FeedbackConfig())
+        self.assertEqual(feedback.blackout_card(frame('program-blocked'))['kind'], 'blocked_in_area')
+        self.assertIsNone(feedback.blackout_card(frame('playing-away-stream')))
 
 
 if __name__ == '__main__':

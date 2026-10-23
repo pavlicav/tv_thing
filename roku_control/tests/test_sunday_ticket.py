@@ -156,6 +156,12 @@ class BlackoutCardTests(unittest.TestCase):
         self.assertEqual(observation['state'], AppState.SUNDAY_TICKET_BLACKOUT)
         self.assertIn('airing on your local station', observation['ocr']['text'])
 
+    def test_a_program_blocked_in_the_area_is_not_a_playing_game(self):
+        """2026-10-22: a blacked-out ESPN Unlimited game, Red Wings at Canucks."""
+        observation = self.detect(fixture('espn-program-blocked'))
+        self.assertEqual(observation['state'], AppState.PROGRAM_BLOCKED)
+        self.assertIn('blocked in your area', observation['ocr']['text'])
+
     def test_a_playing_program_is_still_a_full_program(self):
         self.assertEqual(self.detect(fixture('mlb-playing-video'))['state'], AppState.FULL_PROGRAM)
 

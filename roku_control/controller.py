@@ -12,7 +12,7 @@ from .baseball import team_ocr_names
 from .config import AppConfig, ChannelConfig, normalize_channel_name
 from .ecp import EcpClient, RokuApp, discover_roku
 from .errors import (ChannelNotFoundError, ControlBusyError, CueCancelledError, EcpError, NavigationError,
-                     RokuNotReadyError, SundayTicketBlackoutError)
+                     ProgramBlockedError, RokuNotReadyError, SundayTicketBlackoutError)
 from .feedback import PpmFrame, VisualFeedback
 from .states import AppState
 from .operations import EventLog, OperationStore
@@ -218,6 +218,7 @@ class RokuStreamController:
             AppState.LIVE_GUIDE: "Live guide detected",
             AppState.FULL_PROGRAM: "Fullscreen program detected; returning to the guide",
             AppState.SUNDAY_TICKET_BLACKOUT: "Sunday Ticket blackout card detected; returning to the guide",
+            AppState.PROGRAM_BLOCKED: "Blacked-out program detected; returning to the guide",
             AppState.CHANNEL_DESCRIPTION: "Channel description detected; returning to the guide",
             AppState.JOIN_LIVE_OR_START_FROM_BEGINNING: "Join live chooser detected",
             AppState.MLB_HOME: "MLB Home detected",
@@ -585,7 +586,8 @@ class RokuStreamController:
                 unknown_attempts = 0
                 continue
 
-            if state in (AppState.FULL_PROGRAM, AppState.SUNDAY_TICKET_BLACKOUT, AppState.CHANNEL_DESCRIPTION):
+            if state in (AppState.FULL_PROGRAM, AppState.SUNDAY_TICKET_BLACKOUT, AppState.PROGRAM_BLOCKED,
+                         AppState.CHANNEL_DESCRIPTION):
                 if (
                     state == AppState.CHANNEL_DESCRIPTION
                     and repeated_state < 2
@@ -709,6 +711,13 @@ class RokuStreamController:
                     # The Roku player still reports play behind this card.
                     raise SundayTicketBlackoutError(
                         "YouTube TV shows its blackout card: this game is airing on your local station",
+                        details={"observation": last_observation},
+                    )
+                if state == AppState.PROGRAM_BLOCKED:
+                    # 2026-10-22: a blacked-out ESPN Unlimited stream played this
+                    # card, and two "playing" frames passed it as the game.
+                    raise ProgramBlockedError(
+                        "YouTube TV blocks this program where the Roku is (a blackout)",
                         details={"observation": last_observation},
                     )
                 playing_now = (
