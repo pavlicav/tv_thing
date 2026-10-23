@@ -32,6 +32,7 @@ from zoneinfo import ZoneInfo
 import analog_tuner
 import atsc_scan
 import epg
+import internet_streams
 import lineup
 import recorder
 import roku_lane
@@ -52,6 +53,7 @@ CHANNELS_FILE = BASE_DIR / "channels.json"
 # The TV Thing channel lineup, and the numbers it has given channels it does
 # not list (a rescan's surprises); see lineup.py.
 LINEUP_FILE = BASE_DIR / "lineup.json"
+INTERNET_STREAMS_FILE = BASE_DIR / "internet_streams.json"
 LINEUP_STATE_FILE = BASE_DIR / "lineup_state.json"
 WSCAN_OUTPUT = BASE_DIR / "w_scan_output.txt"
 
@@ -713,6 +715,7 @@ def load_channels():
 
 
 channel_lineup = lineup.Lineup(LINEUP_FILE, LINEUP_STATE_FILE)
+web_streams = internet_streams.InternetStreams(INTERNET_STREAMS_FILE)
 
 
 def numbered_channels(channels):
@@ -722,6 +725,21 @@ def numbered_channels(channels):
     views = channel_lineup.number(lineup.ANTENNA, list(zip(
         lineup.antenna_keys(channels), (channel.get("name") for channel in channels))))
     return [dict(channel, **(view or {})) for channel, view in zip(channels, views)]
+
+
+def internet_views():
+    """The internet streams with their TV Thing numbers and the playlist
+    each plays from; [] when internet_streams.json is unusable."""
+    try:
+        streams = list(web_streams.streams().values())
+    except internet_streams.StreamConfigError as error:
+        print(f"[Internet] {error}", flush=True)
+        return []
+    views = channel_lineup.number(internet_streams.SOURCE,
+                                  [(stream.id, stream.name) for stream in streams])
+    return [dict(view or {}, channel_id=stream.id, name=stream.name, note=stream.note,
+                 stream_path=f"/stream/internet/{stream.id}/index.m3u8")
+            for stream, view in zip(streams, views)]
 
 
 def numbered_roku_listings(listings):
@@ -4581,7 +4599,8 @@ def api_v1_source_catalog():
         # catalog item carries its tv_number; the cable tab is the analog
         # tuner's RF plan and is not part of the lineup.
         "lineup": {"path": "/api/v1/lineup", "sections": channel_lineup.sections(),
-                   "house": channel_lineup.house(), "slides": slide_views()},
+                   "house": channel_lineup.house(), "slides": slide_views(),
+                   "internet": internet_views()},
         "status_path": "/api/v1/status",
         "tune_path": "/api/v1/tune",
     }
@@ -4604,6 +4623,7 @@ def api_v1_lineup(requested_date=None):
             for view in channel_lineup.house()]
     rows += [dict(view, kind="slides", name=lineup.SLIDES[view["channel_id"]])
              for view in slide_views()]
+    rows += [dict(view, kind="internet", source_id=internet_streams.SOURCE) for view in internet_views()]
     for channel in numbered_channels(load_channels()):
         rows.append({key: channel.get(key) for key in ("tv_number", "tv_name", "tv_section")}
                     | {"kind": "digital", "source_id": "digital", "channel_id": channel["id"],
@@ -5375,6 +5395,10 @@ class TVHandler(SimpleHTTPRequestHandler):
             self.send_vizelvision_media(parsed)
             return
 
+        if path.startswith("/stream/internet/"):
+            self.send_internet_stream(parsed)
+            return
+
         if path.count("/") == 3 and path.split("/")[2] in SLIDE_STREAMS:
             self.send_slide_media(path.split("/")[2], path.split("/")[3])
             return
@@ -6035,6 +6059,63 @@ class TVHandler(SimpleHTTPRequestHandler):
             self.wfile.write(content)
         except (BrokenPipeError, ConnectionResetError):
             pass
+
+    def send_internet_stream(self, parsed):
+        """Relay an internet stream (internet_streams.py): its playlists, and
+        its segments as they stream in. No tuner, lock or encoder."""
+        parts = parsed.path.removeprefix("/stream/internet/").split("/", 2)
+        if len(parts) < 2 or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", parts[0]):
+            self.send_json({"error": "Invalid internet stream path"}, status=400)
+            return
+        try:
+            if len(parts) == 2:
+                content = web_streams.playlist(*parts).encode()
+                response = None
+            else:
+                response = web_streams.segment(parts[0], parts[1], parts[2], parsed.query)
+        except internet_streams.StreamConfigError as error:
+            self.send_json({"error": str(error)}, status=500)
+            return
+        except internet_streams.StreamUnavailable as error:
+            self.send_json({"error": str(error)}, status=error.status)
+            return
+        if response is None:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.apple.mpegurl")
+            self.send_header("Content-Length", str(len(content)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            try:
+                self.wfile.write(content)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
+        with response:
+            length = response.headers.get("Content-Length")
+            if length and int(length) > internet_streams.MAX_SEGMENT_BYTES:
+                self.send_json({"error": "Segment too large"}, status=502)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", response.headers.get("Content-Type")
+                             or "application/octet-stream")
+            if length:
+                self.send_header("Content-Length", length)
+            else:
+                self.close_connection = True
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            sent = 0
+            try:
+                while sent <= internet_streams.MAX_SEGMENT_BYTES:
+                    chunk = response.read(64 * 1024)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    sent += len(chunk)
+            except (BrokenPipeError, ConnectionResetError, OSError, TimeoutError):
+                self.close_connection = True
 
     def send_roku_preview(self):
         """What the Roku verifier sees, as an MJPEG stream (engineering)."""

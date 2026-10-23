@@ -19,7 +19,7 @@ are placed by rule:
 
 A channel is keyed by its source and its id there: ``digital/22.4`` (the
 antenna's virtual channel number, which survives a rescan; the id embeds the
-PSIP name, which need not), ``youtube-tv/NBC``. The station is
+PSIP name, which need not), ``youtube-tv/NBC``, ``internet/pentulive`` (internet_streams.py). The station is
 ``vizelvision`` and may hold several numbers. With a ``channel`` it is one of
 the station's own slide channels instead (``SLIDES``), such as the Sports
 Guide, which plays in the browser rather than relaying the station.

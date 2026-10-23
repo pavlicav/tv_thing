@@ -56,7 +56,9 @@ belongs to the date it was listed for.
 each with `channel_id`, `page_path` (the page that plays it in a browser,
 relative to the UI), `data_path`, and `stream_path`: the same slides as live
 HLS for players that only take streams, such as a Roku. Channel 60 is the only
-one, the Sports Guide (`channel_id` `sports-guide`).
+one, the Sports Guide (`channel_id` `sports-guide`). `internet` lists the
+internet streams (see below), each with `channel_id`, `name`, `note` and
+`stream_path`.
 
 `GET /stream/sports-guide/index.m3u8` starts its video if it is not running
 and answers once the first two segments are written (about 2 s), or **503**
@@ -70,7 +72,8 @@ lock: everyone shares one stream. 1280x720 at 30 fps, H.264 High@4.0
 times in a minute and waits one before trying again), `last_stop` and
 `last_error`. `GET /api/v1/lineup[?date=YYYY-MM-DD]`
 returns the whole lineup in number order: VizelVision, the slide channels
-(`kind: "slides"`), every antenna channel and every Roku catalog item, each
+(`kind: "slides"`), the internet streams (`kind: "internet"`, `source_id`
+`internet`, with `stream_path`), every antenna channel and every Roku catalog item, each
 with `kind`, `source_id`, `channel_id` and (for games) `date`. A Roku catalog
 that could not be read is named in `errors` and left out.
 
@@ -86,6 +89,21 @@ service and `via` the source id. Finished games are left out; before 06:00 the
 night's games still on stay in. `errors` names the schedules that did not
 answer (by `league` or `source_id`, and `date`); `available` is false when
 nothing could be read. The response is cached for a minute.
+
+### Internet streams
+
+`internet_streams.json` lists live streams from the web; each is a channel
+keyed `internet/<id>` in `lineup.json`. Channel 29 is Pentulive, Yle Areena's
+puppy cam (`pentulive`). `GET /stream/internet/{id}/index.m3u8` relays the
+stream: its renditions as `{n}.m3u8` and their segments as `{n}/{path}`, all in
+that namespace, so the URL stays the same while the upstream one (and its CDN
+token) changes underneath. A live media playlist is cut to its last 120 s. The
+segments are relayed too: Yle's CDN ties a segment token to the headers that
+fetched its playlist, so a client cannot fetch them itself. It takes no tuner,
+no lock and no encoder, and any number of players (VizelVision included) may
+use it. Errors are JSON: **404** for an unknown stream or rendition, **503** when
+the programme is not live, **502** when upstream fails, **403** when Yle
+refuses to play it here.
 
 ## Integration flow
 

@@ -8,7 +8,8 @@
     "VizelVision on 70. 60 heads Live Sports with VizelVision's Sports Guide, today's games as slides",
     "(source vizelvision with a channel: one of the station's slide channels). A channel not listed here takes the",
     "first free number in the section whose 'new' names its source ('*' = any other), and keeps it in",
-    "lineup_state.json; list it here to move it. 22-29 are held for a Lansing / Flint antenna receiver."
+    "lineup_state.json; list it here to move it. 22-28 are held for a Lansing / Flint antenna receiver;",
+    "29 is Pentulive, an internet stream (internet_streams.json)."
   ],
   "sections": [
     {"first": 0, "last": 0, "name": "House channel"},
@@ -34,6 +35,7 @@
     {"first": 290, "last": 299, "name": "Repeaters & other markets"},
     {"first": 300, "last": 349, "name": "New on the antenna", "new": ["digital"]},
     {"first": 350, "last": 369, "name": "New on YouTube TV", "new": ["youtube-tv"]},
+    {"first": 370, "last": 379, "name": "New internet streams", "new": ["internet"]},
     {"first": 400, "last": 999, "name": "More channels", "overflow": true}
   ],
   "channels": [
@@ -59,6 +61,7 @@
     {"number": 19, "source": "youtube-tv", "channel": "CBS", "name": "WLNS", "note": "CBS Lansing, WLNS 6"},
     {"number": 20, "source": "youtube-tv", "channel": "PBS", "name": "WKAR", "note": "PBS Lansing"},
     {"number": 21, "source": "youtube-tv", "channel": "The CW", "name": "WLAJ-DT2", "note": "CW Lansing, CW 5 (WLAJ's second channel)"},
+    {"number": 29, "source": "internet", "channel": "pentulive", "note": "Yle Areena's puppy cam"},
     {"number": 30, "source": "youtube-tv", "channel": "The Weather Channel"},
     {"number": 31, "source": "youtube-tv", "channel": "TBS"},
     {"number": 32, "source": "youtube-tv", "channel": "TNT"},

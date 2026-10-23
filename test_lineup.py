@@ -235,14 +235,16 @@ def test_the_card_reads_like_a_cable_lineup():
     assert [number for number, _ in plan.house] == [0, 70]
     assert plan.slides == ((60, "VizelVision Sports Guide", "sports-guide"),)
     # Locals through 29, NHK and Baltimore's CW among them, the Roku's Lansing
-    # stations together, and 22-29 held for a Lansing / Flint receiver.
+    # stations together, 22-28 held for a Lansing / Flint receiver, and
+    # Pentulive, an internet stream, on 29.
     assert plan.section_of(29).name == "Local stations" and plan.section_of(30).name == "Cable"
     locals_ = [by_number[n] for n in range(1, 30) if n in by_number]
     assert "digital/22.4" in locals_ and "digital/54.1" in locals_
     assert [by_number[n] for n in range(16, 22)] == [
         "youtube-tv/NBC", "youtube-tv/FOX", "youtube-tv/ABC", "youtube-tv/CBS",
         "youtube-tv/PBS", "youtube-tv/The CW"]
-    assert not any(n in by_number for n in range(22, 30))
+    assert not any(n in by_number for n in range(22, 29))
+    assert by_number[29] == "internet/pentulive"
     # DC's network stations keep their own dial positions.
     assert [by_number[n] for n in (4, 5, 7, 9)] == [
         "digital/4.1", "digital/5.1", "digital/7.1", "digital/9.1"]

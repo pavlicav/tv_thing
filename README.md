@@ -893,6 +893,21 @@ Playlist query strings, initialization segments and byte ranges are preserved.
 Only GETs for HLS assets are relayed, with a 5-second upstream timeout and a
 16 MiB response limit.
 
+### Internet streams
+
+Live streams from the web are channels too, listed in
+[`internet_streams.json`](internet_streams.json) and played by
+`internet_streams.py`. A stream has an `id`, a `name`, an optional `note` (shown
+in the Watch list) and a resolver: `url` with a fixed HLS `url`, or
+`yle-areena` with an Areena `program` id (the `1-…` in its areena.yle.fi
+address). Areena's playlist URLs carry a CDN token good for about a day, so the
+resolver asks Yle's player API again every 30 minutes and whenever the CDN
+refuses one. TV Thing relays the playlists and segments at
+`stream/internet/<id>/index.m3u8` (see `API.md`, "Internet streams"); no tuner,
+lock or encoder is involved, and the Watch page plays them as it plays
+VizelVision. Give a new stream a number in `lineup.json`, or it takes the first
+free one in 370–379.
+
 ### TV Thing channel numbers
 
 Every channel has a TV Thing number, laid out like an old cable lineup card in
@@ -901,7 +916,7 @@ Every channel has a TV Thing number, laid out like an old cable lineup card in
 | Numbers | Section |
 |---|---|
 | 0, 70 | VizelVision (the house channel) |
-| 1–29 | Local stations: DC's network stations on their own dial positions (4, 5, 7, 9), NHK World on 1, the other DC and Baltimore stations, the Roku's Lansing locals (YouTube TV) on 16–21; 22–29 are held for a Lansing / Flint antenna receiver |
+| 1–29 | Local stations: DC's network stations on their own dial positions (4, 5, 7, 9), NHK World on 1, the other DC and Baltimore stations, the Roku's Lansing locals (YouTube TV) on 16–21; 22–28 are held for a Lansing / Flint antenna receiver; Pentulive, Yle's puppy cam (an internet stream), on 29 |
 | 30–59 | Cable from YouTube TV: the Weather Channel, TBS, TNT, the sports networks, then CNN, MS NOW, FOX News, CNBC, Discovery, HGTV, Food, TLC, USA, FX, Comedy Central |
 | 60 | VizelVision's Sports Guide: today's games as slides (see [The Sports Guide](#the-sports-guide-channel-60)) |
 | 61–69, 71–99 | Live Sports: the day's games, football, baseball and hockey together by start time (NFL Sunday Ticket, Thursday Night Football, MLB, and the NHL on ESPN Unlimited); one block, split around VizelVision |
@@ -909,6 +924,7 @@ Every channel has a TV Thing number, laid out like an old cable lineup card in
 | 110–299 | The digital tier, by genre, YouTube TV's other channels and the antenna's subchannels together: news and business, learning and lifestyle, kids, entertainment, music, classic TV, movies and westerns, crime and reality, game shows, Spanish, shopping, faith, repeaters |
 | 300–349 | New on the antenna |
 | 350–369 | New on YouTube TV |
+| 370–379 | New internet streams |
 | 400 up | Overflow |
 
 Games are numbered afresh each day from the start of their section, so a

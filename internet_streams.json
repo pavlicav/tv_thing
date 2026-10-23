@@ -1,0 +1,13 @@
+{
+  "_comment": [
+    "Live streams from the web, played as TV Thing channels (internet_streams.py reads it).",
+    "A stream is its id (its lineup key: internet <id>), a name, and a resolver that finds its HLS:",
+    "'url' with a fixed 'url', or 'yle-areena' with the Areena 'program' id (areena.yle.fi/<program>).",
+    "Give it a number in lineup.json; otherwise it takes the first free one in New internet streams.",
+    "'note' shows under its name in the Watch list."
+  ],
+  "streams": [
+    {"id": "pentulive", "name": "Pentulive", "resolver": "yle-areena", "program": "1-78104441",
+     "note": "Yle's puppy cam, 24/7 through early December 2026"}
+  ]
+}

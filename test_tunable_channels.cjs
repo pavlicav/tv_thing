@@ -75,3 +75,21 @@ test('the Sports Guide is a slide channel in its place, playing its page', () =>
   // An older server sends no slides: nothing to list.
   assert.equal(catalog([], [], {}, null, { house: lineup.house }).length, 2);
 });
+
+test('an internet stream is listed in its place, playing the server relay', () => {
+  const lineup = {
+    house: [{ tv_number: 0, tv_section: 'House channel' }],
+    internet: [{ tv_number: 29, tv_name: 'Pentulive', tv_section: 'Local stations', channel_id: 'pentulive',
+                 name: 'Pentulive', note: 'Yle’s puppy cam', stream_path: '/stream/internet/pentulive/index.m3u8' }] };
+  const channels = [{ id: 'wrc', number: '4.1', name: 'WRC-HD', tv_number: 4, tv_section: 'Local stations' }];
+  const list = catalog(channels, [], {}, null, lineup);
+  assert.deepEqual(list.map(row => row.number), [0, 4, 29]);
+  const pups = list[2];
+  assert.equal(pups.kind, 'internet');
+  assert.equal(pups.id, 'internet:pentulive');
+  assert.equal(pups.streamPath, '/stream/internet/pentulive/index.m3u8');
+  assert.equal(pups.sub, 'Yle’s puppy cam');
+  assert.ok(pups.search.startsWith('29 ch 29 ') && /\bpuppy\b/.test(pups.search));
+  // An older server sends no internet streams: nothing to list.
+  assert.equal(catalog([], [], {}, null, { house: lineup.house }).length, 1);
+});

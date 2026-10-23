@@ -595,6 +595,16 @@ def test_watch_lists_the_lineup_by_number_with_the_antenna_a_tab_away():
     assert "tuneTv(channel.id)" in antenna
 
 
+def test_an_internet_stream_plays_its_relay_without_a_tuner_or_lock():
+    tunable = section(INDEX, "function renderTunableList()", "function renderAntennaList()")
+    assert 'entry.kind === "internet"' in tunable and "tuneInternet(entry)" in tunable
+    play = section(INDEX, "function tuneInternet(entry)", "function watchRelay(")
+    assert 'watchRelay("internet", entry.streamPath' in play
+    relay = section(INDEX, "function watchRelay(", "// A slide channel plays in the browser")
+    assert "showLock(null)" in relay and "fetch(" not in relay
+    assert '["roku", "vizelvision", "slides", "internet"].includes(state.playing)' in INDEX
+
+
 def test_guide_follows_the_lineup_unless_antenna_numbers_are_chosen():
     assert 'id="opt-antenna"' in GUIDE
     assert "tv-thing.guide.antenna-numbers" in GUIDE

@@ -700,10 +700,11 @@
     const state = {
       lock: null,        // live tuner lock, or null
       mode: "tv",        // all channels, or a source filter
-      playing: null,     // stage source: tv, cable, roku, vizelvision, slides, fm or null
+      playing: null,     // stage source: tv, cable, roku, vizelvision, slides, internet, fm or null
       channels: [],
       lineup: null,      // /api/v1/sources lineup: section names and the station's numbers
       houseNumber: null, // which of the station's numbers was chosen
+      internet: null,    // the internet stream playing (a Watch list entry)
       slide: null,       // the slide channel on the stage: its tunable entry
       cableChannels: [],
       cableAvailable: false,
@@ -870,6 +871,13 @@
         body.innerHTML = '<div class="bn-row"><span class="bn-k">NOW</span>' +
           '<span class="bn-title">VizelVision</span></div>' +
           '<div class="bn-desc">The station’s live broadcast</div>';
+      } else if (state.playing === "internet") {
+        const entry = state.internet || {};
+        num.textContent = entry.number !== null && entry.number !== undefined ? String(entry.number) : "WEB";
+        num.title = "";
+        body.innerHTML = '<div class="bn-row"><span class="bn-k">NOW</span>' +
+          `<span class="bn-title">${escapeHtml(entry.name || "Internet stream")}</span></div>` +
+          `<div class="bn-desc">${escapeHtml(entry.sub || "Internet stream")}</div>`;
       } else if (state.playing === "slides") {
         num.textContent = state.slide && state.slide.number !== null ? String(state.slide.number) : "SG";
         num.title = "";
@@ -1258,7 +1266,7 @@
       els.tabRoku.setAttribute("aria-selected", String(rokuTab));
       els.tabRoku.hidden = !state.roku.available;
       // The Roku sends its own picture: there is no quality to choose.
-      els.qualityGroup.classList.toggle("hidden", radio || ["roku", "vizelvision", "slides"].includes(state.playing));
+      els.qualityGroup.classList.toggle("hidden", radio || ["roku", "vizelvision", "slides", "internet"].includes(state.playing));
       els.panelLabel.textContent = tv ? "Tunable channels" : antenna ? "Antenna Channels"
         : (cable ? "Analog Channels" : (rokuTab ? "Roku Feeds" : "Stations"));
       els.filter.placeholder = tv ? "Filter all channels…" : antenna ? "Filter antenna channels…"
@@ -1449,6 +1457,11 @@
           button.disabled = source.available === false || item.playable === false;
           if (item.playable === false && item.note) button.title = item.note;
           button.addEventListener("click", () => tuneRoku(source, item));
+        } else if (entry.kind === "internet") {
+          current = state.playing === "internet" && state.internet && state.internet.id === entry.id;
+          if (!numbered) key = "WEB";
+          sub = entry.sub;
+          button.addEventListener("click", () => tuneInternet(entry));
         } else if (entry.kind === "slides") {
           current = state.playing === "slides" && state.slide && state.slide.id === entry.id;
           if (!numbered) key = "SG";
@@ -1517,8 +1530,21 @@
     }
 
     function tuneVizelVision(number) {
-      const serial = ++state.tuneSerial;
       state.houseNumber = Number.isInteger(number) ? number : null;
+      watchRelay("vizelvision", "stream/vizelvision/index.m3u8", "VizelVision",
+                 "Connecting to the live broadcast…", "Live broadcast");
+    }
+
+    // An internet stream plays the server's relay of it, like VizelVision.
+    function tuneInternet(entry) {
+      state.internet = entry;
+      watchRelay("internet", entry.streamPath.replace(/^\//, ""), entry.name,
+                 "Connecting to the stream…", entry.sub || "Internet stream");
+    }
+
+    // A watch-only stream the server relays: no tuner, no lock, no encoder.
+    function watchRelay(playing, path, title, connecting, live) {
+      const serial = ++state.tuneSerial;
       state.tuning = false;
       state.needsReconnect = false;
       state.currentChannelId = null;
@@ -1532,20 +1558,20 @@
       els.video.pause();
       els.video.removeAttribute("src");
       els.video.load();
-      state.playing = "vizelvision";
+      state.playing = playing;
       render();
       syncRokuPolling();
       showLock(null);
-      setStatus("VizelVision", "busy");
-      setNowPlaying("VizelVision", "Connecting to the live broadcast…");
-      attachStream("stream/vizelvision/index.m3u8", els.video, () => {
+      setStatus(title, "busy");
+      setNowPlaying(title, connecting);
+      attachStream(path, els.video, () => {
         if (serial !== state.tuneSerial) return;
-        setStatus("VizelVision unavailable", "error");
-        setNowPlaying("VizelVision", "Stream unavailable · choose the channel to retry");
+        setStatus(`${title} unavailable`, "error");
+        setNowPlaying(title, "Stream unavailable · choose the channel to retry");
       }, () => {
         if (serial !== state.tuneSerial) return;
-        setStatus("VizelVision", "live");
-        setNowPlaying("VizelVision", "Live broadcast");
+        setStatus(title, "live");
+        setNowPlaying(title, live);
       });
     }
 
@@ -1586,7 +1612,7 @@
       }
       if (state.mode === "tv") {
         els.footLeft.textContent = `${tunableChannels().length} channels`;
-        els.footRight.textContent = "ATSC · Roku · VizelVision";
+        els.footRight.textContent = "ATSC · Roku · VizelVision · Internet";
       } else if (state.mode === "antenna") {
         els.footLeft.textContent = `${state.channels.length} channels`;
         els.footRight.textContent = "ATSC · antenna numbers";
@@ -1703,7 +1729,7 @@
         if (state.roku.lock && (!locks.roku || locks.roku.owner !== ROKU_OWNER)) {
           forgetRokuLock();  // Expired, released elsewhere, or overridden.
         }
-        showLock(["vizelvision", "slides"].includes(state.playing) ? null : state.mode === "roku" || state.playing === "roku"
+        showLock(["vizelvision", "slides", "internet"].includes(state.playing) ? null : state.mode === "roku" || state.playing === "roku"
           ? locks.roku || null : locks.digital || locks.analog || null);
         renderRokuTools();
       } catch (error) {

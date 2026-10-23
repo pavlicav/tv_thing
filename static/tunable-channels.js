@@ -2,7 +2,8 @@
    lineup, in channel-number order. The server numbers every channel
    (lineup.json; tv_number on each catalog item) and says which numbers are
    the station's (/api/v1/sources lineup.house) and which its slide channels
-   (lineup.slides, such as the Sports Guide); this only puts them in order.
+   (lineup.slides, such as the Sports Guide) and which its internet streams
+   (lineup.internet); this only puts them in order.
    Anything the server did not number follows, by name. */
 (function (root) {
   function numbered(entry, from) {
@@ -28,6 +29,13 @@
         sourceName: 'VizelVision', tag: 'GUIDE', page: view.page_path,
         sub: 'Today’s games by sport, each with its channel',
         search: 'vizelvision sports guide today games schedule listings' }, view));
+    }
+    // An internet stream plays the server's relay of it: no tuner, no lock.
+    for (const view of (lineup && Array.isArray(lineup.internet) ? lineup.internet : [])) {
+      if (!view || !view.stream_path) continue;
+      items.push(numbered({ id: `internet:${view.channel_id}`, kind: 'internet', name: view.name,
+        sourceName: 'Internet', tag: 'WEB', streamPath: view.stream_path, sub: view.note || 'Internet stream',
+        search: `internet web stream ${view.channel_id} ${view.name} ${view.note || ''}` }, view));
     }
     for (const channel of channels) {
       items.push(numbered({ id: `digital:${channel.id}`, kind: 'digital', name: channel.name,
