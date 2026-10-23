@@ -35,6 +35,8 @@ import epg
 import lineup
 import recorder
 import roku_lane
+import slide_stream
+import sports_guide
 import yttv_epg
 from roku_control.errors import (BaseballScheduleError, ChannelNotFoundError,
                                  ConfigError, ControlBusyError, EcpError,
@@ -1988,11 +1990,17 @@ def perform_roku_tune(body):
     if roku is None:
         return roku_unavailable()
     refusal = roku_change_refusal(body, "tune")
-    if refusal:
-        return refusal
 
     def tune():
-        status, result = roku.tune(body)
+        if refusal:
+            # A locked Roku can still be watched: asking for what it already
+            # shows moves nothing. Anything else is the holder's to change.
+            watched = roku.watch(body)
+            if watched is None:
+                return refusal
+            status, result = watched
+        else:
+            status, result = roku.tune(body)
         if status == 409:
             return api_v1_error(result["error"], 409, result["code"])
         lane = lane_payload(LANE_ROKU)
@@ -3936,6 +3944,184 @@ def sports_guide_channels(floor, ceiling, now):
                       "by_source": counts, "errors": errors}
 
 
+# VizelVision's Sports Guide (channel 60): today's games by sport, each on the
+# channel that carries it. After midnight, the night's games still on stay in it.
+SPORTS_GUIDE_LATE_HOURS = 6
+# Every viewer of the slides asks; the scoreboards change by the minute at most.
+SPORTS_GUIDE_CACHE_SECONDS = 60
+_sports_guide_cache = {"day": None, "at": 0.0, "payload": None}
+# The pages that play the station's slide channels (lineup.SLIDES), their data,
+# and the video a Roku plays instead (see SLIDE_STREAMS).
+SLIDE_PAGES = {"sports-guide": {"page_path": "sports-guide.html", "data_path": "/api/v1/sports-guide",
+                                "stream_path": "/stream/sports-guide/index.m3u8"}}
+# The Sports Guide as video (slide_stream.py): sports_guide_video.py draws the
+# slides at 30 fps 1280x720 into one libx264 on two threads, 2 s segments with
+# a key frame each. It runs only while someone watches, from the first request
+# for its playlist until SLIDES_IDLE_SECONDS after the last. Measured on
+# viviserv (2026-10-19): about 11% of a core to draw, 33% to encode, 0.6 Mbit/s;
+# with the music (2026-10-21, outside the server) 12% and 45%.
+HTTP_PORT = int(os.environ.get("PORT", 8080))
+SLIDES_IDLE_SECONDS = float(os.environ.get("TV_THING_SLIDES_IDLE_SECONDS", "60"))
+SLIDES_START_TIMEOUT = float(os.environ.get("TV_THING_SLIDES_START_TIMEOUT", "8"))
+SLIDE_FPS = 30
+SLIDE_SEGMENT_SECONDS = 2
+SLIDE_THREADS = "2"
+# The Sports Guide's music (sports_guide_music.py makes it): smooth jazz, as a
+# listings channel had. Its length is in the .json beside it. Without it, silence.
+SPORTS_GUIDE_MUSIC = BASE_DIR / "static" / "sports-guide-music.m4a"
+
+
+def sports_guide_music(now=None):
+    """``(path, seconds in)`` for the guide's music, or None when it is missing.
+
+    It plays from wherever the wall clock says a channel that never stopped would
+    be, so tuning in lands mid-tune, as on cable (the page does the same)."""
+    try:
+        seconds = float(json.loads(SPORTS_GUIDE_MUSIC.with_suffix(".json").read_text())["seconds"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if seconds <= 0 or not SPORTS_GUIDE_MUSIC.is_file():
+        return None
+    return SPORTS_GUIDE_MUSIC, (time.time() if now is None else now) % seconds
+
+
+def build_sports_guide_command(generation, directory, now=None):
+    """The Sports Guide's encoder: raw frames on stdin to HLS in ``directory``."""
+    directory = Path(directory)
+    music = sports_guide_music(now)
+    if music:
+        # The music, looped, from the wall clock's place in it.
+        sound = ["-stream_loop", "-1", "-ss", f"{music[1]:.3f}", "-thread_queue_size", "8",
+                 "-i", str(music[0])]
+    else:
+        # Silence, as raw zeros: some players refuse a stream with no sound
+        # track. (lavfi's anullsrc ran a filter graph of 28 threads.)
+        sound = ["-f", "s16le", "-ar", "48000", "-ac", "2", "-thread_queue_size", "8", "-i", "/dev/zero"]
+    return [
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "warning",
+        "-filter_threads", "1",
+        "-f", "rawvideo", "-pix_fmt", "rgb24", "-video_size", "1280x720",
+        # Eight queued frames: each is 2.7 MB, and the renderer runs ahead.
+        "-framerate", str(SLIDE_FPS), "-thread_queue_size", "8", "-i", "pipe:0",
+        *sound,
+        "-map", "0:v:0", "-map", "1:a:0", "-shortest",
+        # HD is BT.709; say so, or a player may assume it of untagged 601.
+        "-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
+        "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+        "-color_range", "tv",
+        # zerolatency drops the lookahead: 125 MB rather than 205 for veryfast's.
+        "-c:v", "libx264", "-preset", "superfast", "-tune", "stillimage,zerolatency",
+        "-profile:v", "high", "-level:v", "4.0", "-threads", SLIDE_THREADS,
+        # Still pages cost almost nothing; a transition is capped.
+        "-crf", "23", "-maxrate", "2000k", "-bufsize", "4000k",
+        "-g", str(SLIDE_FPS * SLIDE_SEGMENT_SECONDS),
+        "-keyint_min", str(SLIDE_FPS * SLIDE_SEGMENT_SECONDS), "-sc_threshold", "0",
+        "-force_key_frames", f"expr:gte(t,n_forced*{SLIDE_SEGMENT_SECONDS})",
+        "-c:a", "aac", "-b:a", "96k" if music else "48k", "-ac", "2", "-ar", "48000",
+        "-max_interleave_delta", "500000", "-flush_packets", "1",
+        "-f", "hls", "-hls_time", str(SLIDE_SEGMENT_SECONDS), "-hls_list_size", "8",
+        "-hls_allow_cache", "0",
+        "-hls_flags", "delete_segments+omit_endlist+independent_segments+temp_file",
+        "-hls_segment_filename", str(directory / f"sportsguide_{generation}_%05d.ts"),
+        str(directory / slide_stream.PLAYLIST),
+    ]
+
+
+def sports_guide_renderer_command():
+    return [sys.executable, str(BASE_DIR / "sports_guide_video.py"),
+            "--url", f"http://127.0.0.1:{HTTP_PORT}/api/v1/sports-guide",
+            "--fps", str(SLIDE_FPS)]
+
+
+SLIDE_STREAMS = {
+    "sports-guide": slide_stream.SlideStream(
+        "sports-guide", STREAMS_DIR / "sports-guide",
+        sports_guide_renderer_command, build_sports_guide_command,
+        idle_seconds=SLIDES_IDLE_SECONDS,
+        # One thread each for numpy's libraries (see sports_guide_video.py),
+        # and frame-sized buffers handed back when freed: glibc otherwise raises
+        # its mmap threshold after the first and keeps ~50 MB it no longer uses.
+        env={**os.environ, "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
+             "OPENBLAS_NUM_THREADS": "1", "MALLOC_MMAP_THRESHOLD_": "131072"}),
+}
+
+
+def slides_worker():
+    """Stop slide video nobody watches; restart video that died or stalled."""
+    while True:
+        time.sleep(1)
+        for stream in SLIDE_STREAMS.values():
+            try:
+                stream.check()
+            except Exception as error:  # noqa: BLE001 - the worker must not die
+                print(f"[{stream.name}] supervisor error: {error!r}")
+
+
+def slide_views():
+    """The station's slide channels with the pages that play them."""
+    return [dict(view, **SLIDE_PAGES[view["channel_id"]]) for view in channel_lineup.slides()]
+
+
+def api_v1_sports_guide(now=None):
+    """Today's watchable games by sport, for the Sports Guide's slides.
+
+    See sports_guide.py for what is listed and how. A schedule that does not
+    answer costs its own games only and is named in ``errors``.
+    """
+    clock = int(time.time()) if now is None else now
+    eastern = datetime.fromtimestamp(clock, _EASTERN)
+    today = eastern.date().isoformat()
+    cache = _sports_guide_cache
+    if (now is None and cache["day"] == today
+            and time.monotonic() - cache["at"] < SPORTS_GUIDE_CACHE_SECONDS):
+        return cache["payload"]
+    payload = {"api_version": API_VERSION, "date": today, "generated_at": clock,
+               "channel": next(iter(slide_views()), None)}
+    if roku is None:
+        return {**payload, "available": False, "games": 0, "sports": [], "errors": [
+            {"message": "The Roku lane is not configured, so TV Thing has no schedules."}]}
+    days = [today]
+    if eastern.hour < SPORTS_GUIDE_LATE_HOURS:
+        days.append((eastern.date() - timedelta(days=1)).isoformat())
+    sources = (*roku_lane.GAME_SOURCES, *roku_lane.LISTED_SOURCES)
+
+    def scoreboard(league, day):
+        if league == "nfl":   # with Sunday Ticket's and Prime Video's targets
+            return roku.sports.games(league, day)["games"]
+        return roku.sports.scoreboard.games(league, day, power_five=False)
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        asked = {("league", league, day): pool.submit(scoreboard, league, day)
+                 for day in days for league in sports_guide.ESPN_LEAGUES}
+        asked.update({("source_id", source_id, day): pool.submit(roku.catalog, source_id, day)
+                      for day in days for source_id in sources})
+        youtube_tv = pool.submit(roku.catalog, roku_lane.YOUTUBE_TV)
+    errors, results = [], {}
+    for (kind, name, day), future in asked.items():
+        try:
+            results[(kind, name, day)] = future.result()
+        except Exception as error:  # noqa: BLE001 - one schedule never sinks the guide
+            errors.append({kind: name, "date": day, "message": str(error)})
+    try:
+        cable = numbered_roku_listings(
+            {roku_lane.YOUTUBE_TV: youtube_tv.result()})[roku_lane.YOUTUBE_TV]["items"]
+    except Exception as error:  # noqa: BLE001 - the antenna's networks still place games
+        cable = []
+        errors.append({"source_id": roku_lane.YOUTUBE_TV, "date": None, "message": str(error)})
+    channels = sports_guide.Channels(numbered_channels(load_channels()), cable)
+    rows = []
+    for day in days:
+        catalogs = numbered_roku_listings({source_id: results[("source_id", source_id, day)]
+                                           for source_id in sources if ("source_id", source_id, day) in results})
+        espn = {league: results.get(("league", league, day)) for league in sports_guide.ESPN_LEAGUES}
+        rows += sports_guide.day_games(espn, catalogs, channels, live_only=day != today)
+    payload = {**payload, "available": bool(rows) or not errors, "games": len(rows),
+               "sports": sports_guide.by_sport(rows), "errors": errors}
+    if now is None:
+        cache.update(day=today, at=time.monotonic(), payload=payload)
+    return payload
+
+
 def yttv_guide_summary(guide, now):
     """How much YouTube TV guide there is, for the guide's meta line."""
     return {
@@ -4301,6 +4487,8 @@ def _api_v1_status_payload():
         "busy_reason": busy_reason(),
         "scanning": {"channels": scanning},
         "recording": recording_summary(),
+        # The station's slide channels as video, made only while watched.
+        "slides": {name: stream.status() for name, stream in SLIDE_STREAMS.items()},
         # --- compatibility view: the primary video lane, flat ---
         "source": {
             "id": primary,
@@ -4393,7 +4581,7 @@ def api_v1_source_catalog():
         # catalog item carries its tv_number; the cable tab is the analog
         # tuner's RF plan and is not part of the lineup.
         "lineup": {"path": "/api/v1/lineup", "sections": channel_lineup.sections(),
-                   "house": channel_lineup.house()},
+                   "house": channel_lineup.house(), "slides": slide_views()},
         "status_path": "/api/v1/status",
         "tune_path": "/api/v1/tune",
     }
@@ -4414,6 +4602,8 @@ def api_v1_lineup(requested_date=None):
     rows = [dict(view, kind="vizelvision", name="VizelVision",
                  stream_path="/stream/vizelvision/index.m3u8")
             for view in channel_lineup.house()]
+    rows += [dict(view, kind="slides", name=lineup.SLIDES[view["channel_id"]])
+             for view in slide_views()]
     for channel in numbered_channels(load_channels()):
         rows.append({key: channel.get(key) for key in ("tv_number", "tv_name", "tv_section")}
                     | {"kind": "digital", "source_id": "digital", "channel_id": channel["id"],
@@ -4448,6 +4638,21 @@ def api_v1_lineup(requested_date=None):
     }
 
 
+def lane_plays(lane, key, value):
+    """Whether a lane is streaming the selection whose `key` is `value`, healthily.
+
+    This alone lets anyone watch a locked tuner: asking for the channel it
+    already plays changes nothing, so its stream is served as it is -- at the
+    holder's quality, feeding the holder's recording taps.
+    """
+    state = lanes[lane]
+    return (lane_is_running(lane)
+            and state["stream_id"] is not None
+            and not state.get("error")
+            and (state["selection"] or {}).get(key) == value
+            and (state["health"] or {}).get("ok", True))
+
+
 def perform_digital_tune(channel_id, quality="medium", token=None,
                          override=False):
     request_started = time.monotonic()
@@ -4455,7 +4660,7 @@ def perform_digital_tune(channel_id, quality="medium", token=None,
     # Checked before the refresh is preempted: a locked tuner should not have
     # its guide sweep cancelled for a tune that is about to be refused.
     held = lock_holder(LANE_DIGITAL, token, override)
-    if held:
+    if held and not lane_plays(LANE_DIGITAL, "id", channel_id):
         return lock_refusal(held, "tune")
     # A scheduled guide refresh holds the same front-end. Someone asking to
     # watch something outranks it, so take it back rather than refusing.
@@ -4468,23 +4673,21 @@ def perform_digital_tune(channel_id, quality="medium", token=None,
 
     with lock:
         held = lock_holder(LANE_DIGITAL, token, override)
-        if held:
+        watching = bool(held) and lane_plays(LANE_DIGITAL, "id", channel_id)
+        if held and not watching:
             return lock_refusal(held, "tune")
         busy = busy_reason()
         if busy:
             return {"error": busy}, 409
         if override:
             override_tuner_lock(LANE_DIGITAL)
-        reused = (lane_is_running(LANE_DIGITAL)
-                  and lanes[LANE_DIGITAL]["stream_id"] is not None
-                  and not lanes[LANE_DIGITAL].get("error")
-                  and (lanes[LANE_DIGITAL]["selection"] or {}).get("id") == channel_id
-                  and lanes[LANE_DIGITAL]["quality"] == quality
-                  and (lanes[LANE_DIGITAL]["health"] or {}).get("ok", True)
-                  # A recording that starts on the channel already playing
-                  # needs a source generation that feeds its tap.
-                  and lanes[LANE_DIGITAL].get("taps", [])
-                  == recording_tap_ports(channel))
+        reused = watching or (
+            lane_plays(LANE_DIGITAL, "id", channel_id)
+            and lanes[LANE_DIGITAL]["quality"] == quality
+            # A recording that starts on the channel already playing
+            # needs a source generation that feeds its tap.
+            and lanes[LANE_DIGITAL].get("taps", [])
+            == recording_tap_ports(channel))
         if reused:
             ok, error, stream_reused = True, None, True
         else:
@@ -4518,9 +4721,6 @@ def perform_cable_tune(channel, quality="medium", token=None,
                        override=False):
     request_started = time.monotonic()
     quality = normalize_quality(quality)
-    held = lock_holder(LANE_ANALOG, token, override)
-    if held:
-        return lock_refusal(held, "tune")
     try:
         channel = int(channel)
         frequency_hz = analog_tuner.cable_frequency_hz(channel)
@@ -4529,19 +4729,16 @@ def perform_cable_tune(channel, quality="medium", token=None,
 
     with lock:
         held = lock_holder(LANE_ANALOG, token, override)
-        if held:
+        watching = bool(held) and lane_plays(LANE_ANALOG, "channel", channel)
+        if held and not watching:
             return lock_refusal(held, "tune")
         busy = busy_reason()
         if busy:
             return {"error": busy}, 409
         if override:
             override_tuner_lock(LANE_ANALOG)
-        reused = (lane_is_running(LANE_ANALOG)
-                  and lanes[LANE_ANALOG]["stream_id"] is not None
-                  and not lanes[LANE_ANALOG].get("error")
-                  and (lanes[LANE_ANALOG]["selection"] or {}).get("channel") == channel
-                  and lanes[LANE_ANALOG]["quality"] == quality
-                  and (lanes[LANE_ANALOG]["health"] or {}).get("ok", True))
+        reused = watching or (lane_plays(LANE_ANALOG, "channel", channel)
+                              and lanes[LANE_ANALOG]["quality"] == quality)
         if reused:
             ok, error, tuner = True, None, lanes[LANE_ANALOG]["tuner"]
         else:
@@ -4832,6 +5029,10 @@ class TVHandler(SimpleHTTPRequestHandler):
                         "query": {"date": "YYYY-MM-DD (games)"},
                         "note": "every channel with its TV Thing number",
                     },
+                    "sports_guide": {
+                        "method": "GET", "path": "/api/v1/sports-guide",
+                        "note": "today's watchable games by sport (channel 60's slides)",
+                    },
                     "digital_channels": {
                         "method": "GET",
                         "path": "/api/v1/sources/digital",
@@ -5075,6 +5276,10 @@ class TVHandler(SimpleHTTPRequestHandler):
                 parse_qs(parsed.query).get("date", [None])[0]))
             return
 
+        if path == "/api/v1/sports-guide":
+            self.send_json(api_v1_sports_guide())
+            return
+
         if path == "/api/v1/sources/digital":
             self.send_json(api_v1_digital_source())
             return
@@ -5168,6 +5373,10 @@ class TVHandler(SimpleHTTPRequestHandler):
 
         if path.startswith("/stream/vizelvision/"):
             self.send_vizelvision_media(parsed)
+            return
+
+        if path.count("/") == 3 and path.split("/")[2] in SLIDE_STREAMS:
+            self.send_slide_media(path.split("/")[2], path.split("/")[3])
             return
 
         if path.startswith("/stream/"):
@@ -5267,6 +5476,7 @@ class TVHandler(SimpleHTTPRequestHandler):
                 ".css": "text/css",
                 ".svg": "image/svg+xml",
                 ".pdf": "application/pdf",
+                ".woff2": "font/woff2",
             }.get(filepath.suffix, "application/octet-stream")
             self.send_header("Content-Type", ct)
             self.end_headers()
@@ -5746,6 +5956,42 @@ class TVHandler(SimpleHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
+    def send_slide_media(self, name, filename):
+        """A slide channel's video. The playlist starts it and waits for its
+        first segments; a segment keeps it running."""
+        stream = SLIDE_STREAMS[name]
+        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:m3u8|ts)", filename):
+            self.send_json({"error": "Invalid slide media path"}, status=400)
+            return
+        if filename.endswith(".m3u8"):
+            if not stream.demand(wait=SLIDES_START_TIMEOUT):
+                self.send_response(503)
+                self.send_header("Retry-After", "2")
+                self.send_header("Content-Type", "application/json")
+                body = json.dumps({"error": f"The {name} video is starting"}).encode()
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+        else:
+            stream.touch()
+        try:
+            content = (stream.directory / filename).read_bytes()
+        except OSError:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/vnd.apple.mpegurl"
+                         if filename.endswith(".m3u8") else "video/mp2t")
+        self.send_header("Content-Length", str(len(content)))
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        try:
+            self.wfile.write(content)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def send_vizelvision_media(self, parsed):
         """Relay the existing station HLS, without taking any tuner or encoder.
 
@@ -5854,6 +6100,10 @@ def reap_orphaned_children():
     both cases only processes owned by this user.
     """
     script = str(BASE_DIR / "dvb_source.py")
+    # The Sports Guide's renderer exits once its parent is gone, within a
+    # second; this covers one that has not yet. Its encoder writes into the
+    # streams directory, so the rule below already covers it.
+    renderer = str(BASE_DIR / "sports_guide_video.py")
     streams = str(STREAMS_DIR)
     # The Roku verifier reads the lane's tap and writes to a pipe, so it
     # names neither the source script nor the streams directory. An orphan
@@ -5891,7 +6141,7 @@ def reap_orphaned_children():
         )
         if parent != "1":
             continue
-        owns_tuner = script in parts
+        owns_tuner = script in parts or renderer in parts
         writes_streams = any(part.startswith(streams) for part in parts[1:])
         # An orphaned recorder is ffmpeg writing a .part into the library.
         records = any(part.startswith(recordings)
@@ -6121,6 +6371,8 @@ def main():
     for lane_files in LANE_FILES.values():
         clear_streams(lane_files)
     clear_streams((LEGACY_PLAYLIST.split(".")[0],))
+    for stream in SLIDE_STREAMS.values():
+        stream.clear()
 
     class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
         daemon_threads = True
@@ -6161,6 +6413,7 @@ def main():
     threading.Thread(target=guide_worker, daemon=True).start()
     threading.Thread(target=yttv_guide_worker, daemon=True).start()
     threading.Thread(target=recording_worker, daemon=True).start()
+    threading.Thread(target=slides_worker, daemon=True).start()
     if ALWAYS_ON:
         always_on_wakeup.set()
 
@@ -6185,6 +6438,8 @@ def main():
         roku_shutting_down.set()
         shutdown_recording()
         stop_all()
+        for stream in SLIDE_STREAMS.values():
+            stream.stop("server shutting down")
         if roku is not None:
             roku.feedback.close()
         for server in list(servers):

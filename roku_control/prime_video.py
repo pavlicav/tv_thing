@@ -141,16 +141,77 @@ class PrimeVideoCatalog:
         return matches[0]
 
 
+def live_badge(frame):
+    """The player overlay's red LIVE badge, before "Main Broadcast"."""
+    w, h = frame.width, frame.height
+    points = [(round(w*x/1280), round(h*y/720)) for x in range(80, 116, 4) for y in range(106, 124, 4)]
+    red = 0
+    for x, y in points:
+        r, g, b = frame.rgb[(y*w + x)*3:(y*w + x)*3 + 3]
+        red += r > 150 and g < 90 and b < 90
+    return red*2 >= len(points)
+
+
 def observe(feedback, frame, game, profile_name):
     if feedback.ocr is None:
         raise NavigationError('Local OCR is required to verify Prime Video')
     w, h = frame.width, frame.height
+    # Prime's launch splash is black but for a small logo. There is nothing to
+    # read, and OCR's contrast stretch turns its noise into a screen of "text"
+    # that kept Tesseract past its timeout (2026-10-15 and 10-22).
+    lumas = sorted(frame.luma(x*w//96 + w//192, y*h//54 + h//108) for y in range(54) for x in range(96))
+    if lumas[len(lumas)*99//100] < 32:
+        return {'state': 'loading', 'matched': False}
     header = feedback.ocr.read(frame, crop=(int(w*.045), int(h*.04), int(w*.70), int(h*.21)), psm=11).text
     # The playback title and LIVE Main Broadcast are in a fixed top-left overlay.
-    matched = teams_match(header, game) and bool(re.search(r'\blive\b', header, re.I)) \
-        and 'main broadcast' in header.lower()
+    # On 2026-10-22 OCR read its red LIVE badge as "LWE"; the badge's colour
+    # in its fixed place counts as LIVE too.
+    matched = teams_match(header, game) and 'main broadcast' in header.lower() \
+        and (bool(re.search(r'\blive\b', header, re.I)) or live_badge(frame))
     if matched:
         return {'state': 'game_overlay', 'matched': True, 'text': header}
+    # Observed Prime Roku profile chooser: the focused first avatar is enlarged
+    # with a bright ring and the profile's name beside it. Since the Kids
+    # profile went (by 2026-10-15) the ring and the name are all it shows;
+    # "New" is too dim to read. Never Select a remembered position on an
+    # unrecognized screen.
+    ring = sum(frame.luma(round(w*(169 + 51*math.cos(a))/1280),
+                          round(h*(101 + 51*math.sin(a))/720)) > 145
+               for a in (i*math.tau/24 for i in range(24)))
+    if ring >= 12 and profile_name:
+        first = feedback.ocr.read(frame, crop=(int(w*.175), int(h*.085), int(w*.55), int(h*.20)), psm=11).text
+        if re.search(r'\b' + re.escape(profile_name) + r'\b', first, re.I):
+            return {'state': 'profile', 'matched': False, 'focused_profile': True}
+    # The event's page, where the deep link stopped on 2026-10-15: the live
+    # game's title, a focused (white) Watch and "Included with Prime". Only
+    # that Watch may be selected, never a trial or rental button. A longer
+    # description pushes the buttons down (one line on 10-15, two on 10-22).
+    white = [y for y in range(int(h*.38), int(h*.62))
+             if sum(frame.luma(int(w*x/1000), y) > 200 for x in range(92, 168, 6)) >= 11]
+    if white and int(h*.03) <= white[-1] - white[0] <= int(h*.065):
+        top, bottom = white[0], white[-1]
+        # Crops inside the button and the line: ones with margins read "Watch"
+        # as nothing and "Included with Prime" as "inctuded with Pome", even on
+        # the same screen recompressed. The LIVE badge reads poorly too; the
+        # catalog already required a live event, and playback still must show
+        # LIVE Main Broadcast.
+        title = feedback.ocr.read(frame, crop=(int(w*.05), int(h*.20), int(w*.55), top), psm=11).text
+        watch = feedback.ocr.read(frame, crop=(int(w*.10), top + 4, int(w*.165), bottom - 4), psm=7).text
+        included = feedback.ocr.read(frame, crop=(int(w*.10), bottom + 14, int(w*.30), bottom + 40), psm=6).text
+        if teams_match(title, game) and re.fullmatch(r'\W*watch\W*', watch, re.I) \
+                and 'included with prime' in included.lower():
+            return {'state': 'event_page', 'matched': False, 'text': title}
+    # The menu Watch opened on 2026-10-22 (Prime 16.0.383): the game's title
+    # over a focused (white) "Watch Live / Main Broadcast", then Resume, Rapid
+    # Recap and Watch from beginning. Only Watch Live may be selected.
+    menu = [y for y in range(int(h*.30), int(h*.80))
+            if sum(frame.luma(int(w*x/1000), y) > 200 for x in range(650, 930, 10)) >= 24]
+    if menu and int(h*.05) <= menu[-1] - menu[0] <= int(h*.11):
+        top, bottom = menu[0], menu[-1]
+        item = feedback.ocr.read(frame, crop=(int(w*.66), top + 3, int(w*.92), bottom - 3), psm=11).text.lower()
+        title = feedback.ocr.read(frame, crop=(int(w*.64), int(h*.06), int(w*.99), top), psm=11).text
+        if teams_match(title, game) and 'watch live' in item and 'main broadcast' in item:
+            return {'state': 'watch_menu', 'matched': False, 'text': title}
     # Crop the profile pane: full-frame contrast normalization loses the small
     # text against this mostly empty dark-blue screen.
     pane = feedback.ocr.read(frame, crop=(int(w*.06), int(h*.04), int(w*.55), int(h*.49)), psm=11).text
@@ -162,16 +223,10 @@ def observe(feedback, frame, game, profile_name):
                                     'subscription required', 'not available in your location')):
         return {'state': 'subscription', 'matched': False}
     if re.search(r'\bkids?\b', normalized) and re.search(r'\bnew\b', normalized):
-        # Observed Prime Roku profile chooser: the focused first avatar is
-        # enlarged with a bright ring. Verify its name and ring, never Select
-        # a remembered position on an unrecognized screen.
-        first = feedback.ocr.read(frame, crop=(int(w*.175), int(h*.085), int(w*.55), int(h*.20)), psm=11).text
-        ring = sum(frame.luma(round(w*(169 + 51*math.cos(a))/1280),
-                              round(h*(101 + 51*math.sin(a))/720)) > 145
-                   for a in (i*math.tau/24 for i in range(24)))
-        name_matches = bool(profile_name and re.search(r'\b' + re.escape(profile_name) + r'\b', first, re.I))
-        return {'state': 'profile', 'matched': False, 'focused_profile': name_matches and ring >= 12}
-    return {'state': 'unknown', 'matched': False}
+        # A chooser with another profile focused first.
+        return {'state': 'profile', 'matched': False, 'focused_profile': False}
+    # The overlay header's text says why playback went unverified.
+    return {'state': 'unknown', 'matched': False, 'text': header}
 
 
 def start_game(controller, game, event, events):
@@ -194,7 +249,8 @@ def start_game(controller, game, event, events):
                             interval=config.roku.poll_interval_seconds)
     controller._sleep(3)
     selected_profile = False
-    overlay_requests = 0
+    selects = {}  # state -> (Selects, attempt of the last one)
+    overlay_requests, revealed_at = 0, None
     verified = []
     # Bounded observations; all sleeps retain the controller's cancellation path.
     for attempt in range(24):
@@ -224,6 +280,17 @@ def start_game(controller, game, event, events):
             selected_profile = True
             controller._sleep(2)
             continue
+        if state in ('event_page', 'watch_menu'):
+            verified.clear()
+            # Select Watch, then Watch Live; once more only if the screen is
+            # still there several observations later (a Select during page
+            # load can be dropped).
+            count, last = selects.get(state, (0, None))
+            if count < 2 and (last is None or attempt - last >= 4):
+                ecp.keypress('Select')
+                selects[state] = (count + 1, attempt)
+                controller._sleep(2)
+            continue
         playing = (player.get('state') == 'play' and player.get('error') != 'true'
                    and (player.get('plugin') or {}).get('id') == app.id
                    and bool((player.get('format') or {}).get('video'))
@@ -249,8 +316,17 @@ def start_game(controller, game, event, events):
                         'playback_evidence': 'two_live_matchup_overlays_with_prime_video_playback',
                         'playback_observation_count': len(verified)}
         else:
-            verified.clear()
-            if playing and overlay_requests < 3:
-                ecp.keypress('Up')  # Reveal title/Live metadata without pausing.
+            # The overlay shows for only a few seconds, so two matches come from
+            # separate reveals. Its fading in between is no contradiction while
+            # Prime keeps playing; any other screen starts over.
+            if not (playing and state == 'unknown'):
+                verified.clear()
+            if playing and overlay_requests < 6 and (revealed_at is None or attempt - revealed_at >= 2):
+                # Down shows the title and LIVE Main Broadcast for about five
+                # seconds without pausing. Up opens Prime's Stats panel instead,
+                # which stays on screen (2026-10-22).
+                ecp.keypress('Down')
                 overlay_requests += 1
+                revealed_at = attempt
+                controller._sleep(1.5)  # Captures read it about 2 to 5 s after Down.
     raise NavigationError('Prime Video opened, but the requested live game could not be visually verified; check the Roku')

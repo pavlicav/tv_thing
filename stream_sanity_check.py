@@ -231,6 +231,9 @@ def process_group_sample(root_pid):
         "rss_mib": sum(item["rss_kib"] for item in selected) / 1024,
         "ffmpeg_count": sum("ffmpeg" in item["args"] for item in selected),
         "source_count": sum("dvb_source.py" in item["args"] for item in selected),
+        "slide_processes": [item["args"][:160] for item in selected
+                            if "sports_guide_video.py" in item["args"]
+                            or "/sports-guide/" in item["args"]],
     }
 
 
@@ -280,11 +283,13 @@ def collect_playlist(base_url, seen_segments, failures, limits,
         return []
 
     found = []
+    folder = playlist.rpartition("/")[0]
     for uri, duration in playlist_segments(raw.decode(errors="replace")):
         if uri in seen_segments:
             continue
         try:
-            data = http_bytes(base_url, f"/stream/{uri}", timeout=3)
+            data = http_bytes(base_url, f"/stream/{folder + '/' if folder else ''}{uri}",
+                              timeout=3)
         except (OSError, urllib.error.URLError) as error:
             failures.append(f"playlist segment unavailable: {uri}: {error}")
             continue
@@ -471,6 +476,61 @@ def roku_round(base_url, target, token, args, seen_segments, samples,
     return capture_id, latency, dwelt
 
 
+def slides_status(base_url, name):
+    return (http_json(base_url, "/api/v1/status", timeout=3).get("slides") or {}).get(name) or {}
+
+
+def slides_round(base_url, name, args, seen_segments, samples, failures):
+    """Start a slide channel's video cold, watch it, and see it stop by itself.
+
+    A slide channel has no tuner and no tune: its video starts when its
+    playlist is first asked for and stops once nobody asks. So a round waits
+    for it to be stopped, times request-to-segments (the playlist answers once
+    its first segments are written), dwells as a viewer would, then stops
+    asking and requires the renderer and encoder to stop within the idle time.
+    """
+    idle = float(slides_status(base_url, name).get("idle_seconds") or 60)
+    deadline = time.monotonic() + idle + 20
+    while slides_status(base_url, name).get("running"):
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"{name} video kept running with nobody watching")
+        sample_host(base_url, args.server_pid, samples, failures)
+        time.sleep(1)
+    playlist = f"{name}/index.m3u8"
+    started = time.monotonic()
+    found = []
+    while time.monotonic() - started < args.max_request_seconds and not found:
+        found = collect_playlist(base_url, seen_segments, failures, args, playlist=playlist)
+        if not found:
+            time.sleep(0.1)
+    latency = time.monotonic() - started
+    status = slides_status(base_url, name)
+    generation = status.get("generation")
+    if not found:
+        failures.append(f"{name} produced no segment within {args.max_request_seconds:g}s")
+        return generation, latency, []
+    dwelt = list(found)
+    dwell_deadline = time.monotonic() + args.dwell_seconds
+    while time.monotonic() < dwell_deadline:
+        dwelt += collect_playlist(base_url, seen_segments, failures, args, playlist=playlist)
+        sample_host(base_url, args.server_pid, samples, failures)
+        time.sleep(1)
+    if slides_status(base_url, name).get("generation") != generation:
+        failures.append(f"{name}: the video restarted while watched "
+                        f"({generation} -> {slides_status(base_url, name).get('generation')})")
+    # Nobody asks now: the renderer and encoder must go, and take nothing with them.
+    deadline = time.monotonic() + idle + 20
+    while slides_status(base_url, name).get("running"):
+        if time.monotonic() >= deadline:
+            failures.append(f"{name} video still running {idle + 20:g}s after its last viewer")
+            break
+        time.sleep(1)
+    after = process_group_sample(args.server_pid)
+    if after.get("slide_processes"):
+        failures.append(f"{name}: a renderer or encoder outlived its stream: {after['slide_processes']}")
+    return generation, latency, dwelt
+
+
 # The Roku lane's limits, set by the owner on 2026-10-06 when the Roku moved
 # from vizelVision into TV Thing -- a deliberate policy for a different
 # stream, not a relaxation of the tuner lanes' limits:
@@ -487,6 +547,12 @@ ROKU_DEFAULTS = {
     # the Roku navigates.
     "max_ffmpeg_processes": 3,
 }
+
+
+# A slide channel's video (the Sports Guide) gets the tuner lanes' limits on
+# media, CPU, memory and the GPU, unchanged. Only the encoder count allows its
+# own beside the digital lane's packager and the Roku's capture, which stay up.
+SLIDES_DEFAULTS = {"max_ffmpeg_processes": 3, "dwell_seconds": 12}
 
 
 def mean(values):
@@ -580,6 +646,12 @@ def main(argv=None):
              "Applies the Roku lane's own limits (ROKU_DEFAULTS) to any "
              "limit not given explicitly, and holds the roku lock while it runs.",
     )
+    parser.add_argument(
+        "--slides", metavar="NAME",
+        help="gate a slide channel's on-demand video instead (e.g. sports-guide): "
+             "each round starts it cold, watches it, and requires it to stop "
+             "once nobody watches. Applies SLIDES_DEFAULTS to any limit not given.",
+    )
     parser.add_argument("--lock-owner", default="stream gate")
     explicit = {
         action.dest for action in parser._actions
@@ -589,6 +661,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.roku_target:
         for key, value in ROKU_DEFAULTS.items():
+            if key not in explicit:
+                setattr(args, key, value)
+    if args.slides:
+        for key, value in SLIDES_DEFAULTS.items():
             if key not in explicit:
                 setattr(args, key, value)
 
@@ -621,7 +697,20 @@ def main(argv=None):
                         "real-stream gate: nothing else moves while it measures", 1800)
             if "roku" in tokens:
                 wait_roku_idle(args.url, tokens["roku"])
-        if args.roku_target:
+        if args.slides:
+            if args.roku_target or args.channel_id or args.cable_channel:
+                raise RuntimeError("--slides gates a slide channel alone")
+            segment_prefix = args.slides.replace("-", "")
+            for index in range(args.retunes):
+                print(f"[{index + 1}/{args.retunes}] starting {args.slides} cold", flush=True)
+                generation, latency, dwelt = slides_round(
+                    args.url, args.slides, args, seen_segments, samples, failures)
+                stream_ids.append(generation)
+                latencies.append(latency)
+                round_counts.append(len(dwelt))
+                roku_samples.append((generation, set(dwelt)))
+            selected = []
+        elif args.roku_target:
             segment_prefix = "rokuseg"
             if args.channel_id or args.cable_channel:
                 raise RuntimeError("--roku-target gates the Roku lane alone")
@@ -645,7 +734,9 @@ def main(argv=None):
             raise RuntimeError(
                 "--channel-id and --cable-channel are mutually exclusive"
             )
-        if args.cable_channel:
+        if args.slides:
+            pass    # no channels: the slide channel's rounds are done
+        elif args.cable_channel:
             if any(not 1 <= channel <= 135 for channel in args.cable_channel):
                 raise RuntimeError("cable channels must be between 1 and 135")
             selected = [
@@ -690,7 +781,7 @@ def main(argv=None):
         if len(selected) < 2:
             selected = selected * 2
         tuned_lane = "analog" if args.cable_channel else "digital"
-        for index in range(args.retunes if not args.roku_target else 0):
+        for index in range(args.retunes if not (args.roku_target or args.slides) else 0):
             channel = selected[index % len(selected)]
             print(
                 f"[{index + 1}/{args.retunes}] tuning "
@@ -741,7 +832,7 @@ def main(argv=None):
         failures.append(f"final status unavailable: {error}")
 
     decoded_generations = 0
-    decode_sets = roku_samples if args.roku_target \
+    decode_sets = roku_samples if args.roku_target or args.slides \
         else [(stream_id, None) for stream_id in stream_ids]
     for stream_id, uris in decode_sets:
         if not stream_id:

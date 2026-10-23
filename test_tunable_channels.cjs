@@ -55,3 +55,23 @@ test('without a lineup the old alphabetical list comes back, station first', () 
   assert.equal(list[0].id, 'vizelvision');
   assert.equal(list[0].number, null);
 });
+
+test('the Sports Guide is a slide channel in its place, playing its page', () => {
+  const lineup = {
+    house: [{ tv_number: 0, tv_section: 'House channel' }, { tv_number: 70, tv_section: 'House channel' }],
+    slides: [{ tv_number: 60, tv_name: 'VizelVision Sports Guide', tv_section: 'Live Sports',
+               channel_id: 'sports-guide', page_path: 'sports-guide.html' }] };
+  const sources = [{ id: 'mlb', name: 'Baseball', dated: true }];
+  const feeds = { mlb: [{ id: '9', name: 'Guardians at Rays', tv_number: 61, tv_section: 'Live Sports' }] };
+  const list = catalog([], sources, feeds, '2026-10-19', lineup);
+  assert.deepEqual(list.map(row => row.number), [0, 60, 61, 70]);
+  const guide = list[1];
+  assert.equal(guide.kind, 'slides');
+  assert.equal(guide.id, 'slides:sports-guide');
+  assert.equal(guide.page, 'sports-guide.html');
+  assert.equal(guide.name, 'VizelVision Sports Guide');
+  assert.equal(guide.section, 'Live Sports');
+  assert.ok(/\bsports guide\b/.test(guide.search) && guide.search.startsWith('60 ch 60 '));
+  // An older server sends no slides: nothing to list.
+  assert.equal(catalog([], [], {}, null, { house: lineup.house }).length, 2);
+});

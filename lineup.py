@@ -20,7 +20,9 @@ are placed by rule:
 A channel is keyed by its source and its id there: ``digital/22.4`` (the
 antenna's virtual channel number, which survives a rescan; the id embeds the
 PSIP name, which need not), ``youtube-tv/NBC``. The station is
-``vizelvision`` and may hold several numbers.
+``vizelvision`` and may hold several numbers. With a ``channel`` it is one of
+the station's own slide channels instead (``SLIDES``), such as the Sports
+Guide, which plays in the browser rather than relaying the station.
 """
 from __future__ import annotations
 
@@ -33,6 +35,8 @@ from dataclasses import dataclass
 HOUSE = "vizelvision"
 ANTENNA = "digital"
 ANY_SOURCE = "*"
+# The station's slide channels: channel id -> name. server.py knows the pages that play them.
+SLIDES = {"sports-guide": "VizelVision Sports Guide"}
 
 
 class LineupError(ValueError):
@@ -57,6 +61,10 @@ class Plan:
     sections: tuple
     fixed: dict         # key -> (number, name override or None)
     house: tuple        # (number, name) of each of the station's numbers
+    slides: tuple = ()  # (number, name, channel id) of each of its slide channels
+
+    def station_numbers(self):
+        return {number for number, _ in self.house} | {number for number, _, _ in self.slides}
 
     def section_of(self, number):
         return next((s for s in self.sections if s.holds(number)), None)
@@ -113,7 +121,7 @@ def parse_plan(document):
                                   "sources but not all; a split block lists the same ones")
 
     plan = Plan(tuple(sections), {}, ())
-    fixed, house, numbers = {}, [], set()
+    fixed, house, slides, numbers = {}, [], [], set()
     for index, raw in enumerate(document.get("channels") or []):
         where = f"channels[{index}]"
         if not isinstance(raw, dict) or not raw.get("source"):
@@ -126,6 +134,12 @@ def parse_plan(document):
         if section and (section.games or section.overflow):
             raise LineupError(f"{where}: {number} is in {section.name!r}, which numbers itself")
         name = raw.get("name") or None
+        if raw["source"] == HOUSE and raw.get("channel"):
+            if raw["channel"] not in SLIDES:
+                raise LineupError(f"{where}: the station has no {raw['channel']!r} channel; "
+                                  f"it has {', '.join(sorted(SLIDES))}")
+            slides.append((number, name or SLIDES[raw["channel"]], raw["channel"]))
+            continue
         if raw["source"] == HOUSE:
             house.append((number, name or "VizelVision"))
             continue
@@ -135,7 +149,7 @@ def parse_plan(document):
         if key in fixed:
             raise LineupError(f"{where}: {key} already has {fixed[key][0]}")
         fixed[key] = (number, name)
-    return Plan(tuple(sections), fixed, tuple(sorted(house)))
+    return Plan(tuple(sections), fixed, tuple(sorted(house)), tuple(sorted(slides)))
 
 
 def antenna_keys(channels):
@@ -252,7 +266,7 @@ class Lineup:
         with self._lock:
             assigned = self._assigned()
             changed = False
-            fixed_numbers = {number for number, _ in plan.fixed.values()} | {n for n, _ in plan.house}
+            fixed_numbers = {number for number, _ in plan.fixed.values()} | plan.station_numbers()
             for key in [key for key in assigned if key in plan.fixed]:
                 del assigned[key]     # Now listed: lineup.json has the say.
                 changed = True
@@ -293,7 +307,7 @@ class Lineup:
         except LineupError:
             return {}
         with self._lock:
-            taken = ({number for number, _ in plan.fixed.values()} | {n for n, _ in plan.house}
+            taken = ({number for number, _ in plan.fixed.values()} | plan.station_numbers()
                      | {entry["number"] for entry in self._assigned().values()})
         by_block = {}
         for source_id, items in pools.items():
@@ -327,6 +341,15 @@ class Lineup:
         except LineupError:
             return []
         return [self._view(plan, number, name) for number, name in plan.house]
+
+    def slides(self):
+        """The station's slide channels, as views with their ``channel_id``."""
+        try:
+            plan = self.plan()
+        except LineupError:
+            return []
+        return [dict(self._view(plan, number, name), channel_id=channel)
+                for number, name, channel in plan.slides]
 
     def sections(self):
         """The lineup card's sections, for headings; [] when unusable."""

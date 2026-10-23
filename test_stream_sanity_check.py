@@ -204,3 +204,83 @@ class CpuAccountingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SlideGateTests(unittest.TestCase):
+    """--slides: a slide channel's on-demand video, started cold each round."""
+
+    SEGMENT = b"\x47" + b"\x00" * 187
+
+    def fake(self, linger=False, leak=False):
+        # Like the server: the video runs while its playlist is asked for, and
+        # idles out a few status polls after the last request.
+        state = {"running": False, "generation": None, "starts": 0, "polls_since_request": 0,
+                 "requested": []}
+
+        def http_json(base_url, path, method="GET", payload=None, timeout=5):
+            if path == "/api/v1/status":
+                if state["running"] and not linger:
+                    state["polls_since_request"] += 1
+                    if state["polls_since_request"] > 3:
+                        state["running"] = False
+                return {"lanes": {"digital": {}, "roku": {"available": False}},
+                        "slides": {"sports-guide": {"running": state["running"], "idle_seconds": 0.01,
+                                                    "generation": state["generation"] if state["running"] else None}}}
+            if path == "/api/v1/tuner/lock":
+                return {"ok": True, "token": "t"}
+            if path == "/api/v1/tuner/lock/release":
+                return {"ok": True}
+            raise AssertionError(path)
+
+        def http_bytes(base_url, path, method="GET", payload=None, timeout=5):
+            path = path.split("?")[0]
+            state["requested"].append(path)
+            if path == "/stream/sports-guide/index.m3u8":
+                if not state["running"]:
+                    state["starts"] += 1
+                    state.update(running=True, generation=f"g{state['starts']}")
+                state["polls_since_request"] = 0
+                gen = state["generation"]
+                return "".join(f"#EXTINF:2.0,\nsportsguide_{gen}_{n:05d}.ts\n" for n in range(4)).encode()
+            return self.SEGMENT
+
+        def sample(pid):
+            return {"cpu_percent": 40.0, "rss_mib": 200.0, "ffmpeg_count": 1, "source_count": 0,
+                    "slide_processes": ["sports_guide_video.py --url x"] if leak and not state["running"] else []}
+
+        return state, http_json, http_bytes, sample
+
+    def run_gate(self, linger=False, leak=False):
+        state, http_json, http_bytes, sample = self.fake(linger, leak)
+        ticks = iter(range(10**9))
+        with mock.patch.object(gate.time, "monotonic", lambda: next(ticks) * 0.25), \
+                mock.patch.object(gate, "http_json", http_json), \
+                mock.patch.object(gate, "http_bytes", http_bytes), \
+                mock.patch.object(gate, "process_group_sample", sample), \
+                mock.patch.object(gate, "gpu_sample", lambda: None), \
+                mock.patch.object(gate, "decode_generation", lambda *a: (True, "")), \
+                mock.patch.object(gate.signal, "signal"), \
+                mock.patch.object(gate.time, "sleep"), \
+                mock.patch("builtins.print") as printed:
+            result = gate.main(["--url", "http://gate.invalid", "--server-pid", "1", "--slides",
+                                "sports-guide", "--retunes", "3", "--dwell-seconds", "3"])
+        self.output = "\n".join(" ".join(map(str, call.args)) for call in printed.call_args_list)
+        return result, state
+
+    def test_each_round_starts_the_video_cold_and_sees_it_stop(self):
+        result, state = self.run_gate()
+        self.assertEqual(state["starts"], 3)
+        self.assertIn("/stream/sports-guide/sportsguide_g1_00000.ts", state["requested"])
+        self.assertIn("PASS  fresh stream generations 3/3", self.output)
+        self.assertIn("concurrent ffmpeg processes max 1 (limit 3)", self.output)
+        self.assertEqual(result, 0, self.output)
+
+    def test_video_that_outlives_its_last_viewer_fails_the_gate(self):
+        result, state = self.run_gate(linger=True)
+        self.assertNotEqual(result, 0)
+        self.assertIn("video still running", self.output + json.dumps(state))
+
+    def test_a_renderer_left_behind_fails_the_gate(self):
+        result, _ = self.run_gate(leak=True)
+        self.assertNotEqual(result, 0)
+        self.assertIn("outlived its stream", self.output)

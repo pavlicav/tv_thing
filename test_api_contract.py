@@ -92,6 +92,25 @@ def test_acquire_tune_retry_renew_release_over_http(api):
     assert next_tune["stream"]["id"] != tune["stream"]["id"]
 
 
+def test_a_locked_tuner_can_be_watched_but_not_changed_over_http(api):
+    request, calls = api
+    code, claim = request("/api/v1/tuner/lock", {"lane": "digital", "owner": "recorder", "duration_seconds": 60})
+    token = claim["token"]
+    code, tune = request("/api/v1/tune", {"source": "digital", "channel_id": "one", "quality": "high",
+                                          "token": token})
+    assert code == 200
+    # The channel it plays is anyone's to watch, at the quality its holder chose.
+    code, watch = request("/api/v1/tune", {"source": "digital", "channel_id": "one", "quality": "low"})
+    assert code == 200 and watch["stream_reused"] is True
+    assert watch["stream"]["id"] == tune["stream"]["id"] and watch["quality"] == "high"
+    # Any other channel is still the holder's to allow.
+    code, refusal = request("/api/v1/tune", {"source": "digital", "channel_id": "two"})
+    assert code == 423 and refusal["lock"]["owner"] == "recorder"
+    assert calls == ["one"]
+    _, locks = request("/api/v1/tuner/lock")
+    assert locks["locks"]["digital"]["owner"] == "recorder"
+
+
 def test_contract_discovery_and_legacy_response(api):
     request, _ = api
     code, discovery = request("/api/v1")
@@ -202,18 +221,37 @@ def test_hockey_is_a_roku_source_and_shares_the_days_numbers(roku_api):
     assert sources["listed"] == []
     code, hockey = request("/api/v1/sources/nhl?date=2026-10-20")
     assert code == 200
-    # The Thursday game (an earlier kickoff) has 60; ESPN+'s three games follow.
+    # The Thursday game (an earlier kickoff) has 61 (60 is the Sports Guide);
+    # ESPN+'s three games follow.
     assert [(i["id"], i["tv_number"], i["playable"]) for i in hockey["items"]] == [
-        ("1", 61, True), ("3", 62, True), ("4", 63, True)]
+        ("1", 62, True), ("3", 63, True), ("4", 64, True)]
     # Baseball's catalog numbers the day's hockey with it, as the guide does.
     code, games = request("/api/v1/sources/mlb?date=2026-10-20")
-    assert [(i["id"], i["tv_number"]) for i in games["items"]] == [("823254", 64)]
+    assert [(i["id"], i["tv_number"]) for i in games["items"]] == [("823254", 65)]
     code, tune = request("/api/v1/tune", {"source": "nhl", "channel_id": "1", "date": "2026-10-20"})
     assert code == 202
     roku = wait_for(request, lambda l: l["selection"] and l["selection"].get("source_id") == "nhl")
     assert roku["selection"]["resolved_source"]["provider"] == "espn_unlimited"
     code, refused = request("/api/v1/tune", {"source": "nhl", "channel_id": "2", "date": "2026-10-20"})
     assert code == 400
+
+
+def test_a_locked_roku_can_be_watched_but_not_moved_over_http(roku_api):
+    request, lane = roku_api
+    code, claim = request("/api/v1/tuner/lock", {"lane": "roku", "owner": "VizelVision master", "duration_seconds": 90})
+    token = claim["token"]
+    code, _ = request("/api/v1/tune", {"source": "youtube-tv", "channel_id": "ESPN", "token": token})
+    assert code == 202
+    wait_for(request, lambda l: l["selection"] and l["selection"].get("channel_id") == "ESPN")
+
+    code, watch = request("/api/v1/tune", {"source": "youtube-tv", "channel_id": "espn"})
+    assert code == 200 and watch["reused"] is True and watch["stream"]["ready"]
+    for other in ({"source": "youtube-tv", "channel_id": "NBC"},
+                  {"source": "roku-manual", "channel_id": "manual"}):
+        code, refusal = request("/api/v1/tune", other)
+        assert code == 423 and refusal["lock"]["owner"] == "VizelVision master"
+    assert lane.controller.plays == ["ESPN"] and lane.controller.ecp.keys == []
+    assert lane.selection_view()["channel_id"] == "ESPN"
 
 
 def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypatch):
@@ -231,21 +269,32 @@ def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypat
         ("NBC", 16, "WILX"), ("ESPN", 33, "ESPN")]
     code, tnf = request("/api/v1/sources/thursday-night-football?date=2026-10-01")
     assert [(i["id"], i["tv_number"], i["tv_section"]) for i in tnf["items"]] == [
-        ("401872964", 60, "Live Sports")]
+        ("401872964", 61, "Live Sports")]
     code, sources = request("/api/v1/sources")
     assert [view["tv_number"] for view in sources["lineup"]["house"]] == [0, 70]
+    # 60 is the station's Sports Guide, a page of slides rather than a stream.
+    assert sources["lineup"]["slides"] == [{
+        "tv_number": 60, "tv_name": "VizelVision Sports Guide", "tv_section": "Live Sports",
+        "channel_id": "sports-guide", "page_path": "sports-guide.html",
+        "data_path": "/api/v1/sports-guide", "stream_path": "/stream/sports-guide/index.m3u8"}]
     assert {"first": 1, "last": 29, "name": "Local stations"} in sources["lineup"]["sections"]
 
     code, card = request("/api/v1/lineup?date=2026-10-01")
     assert code == 200 and card["errors"] == [] and card["lineup_error"] is None
     assert [(row["tv_number"], row["kind"], row.get("channel_id")) for row in card["channels"]] == [
         (0, "vizelvision", None), (4, "digital", "wrc_hd_4_1"), (16, "roku", "NBC"),
-        (33, "roku", "ESPN"), (60, "roku", "401872964"), (61, "roku", "823254"),
-        (70, "vizelvision", None), (109, "roku", "manual"), (300, "digital", "surprise_7_5")]
-    assert card["channels"][4]["source_id"] == "thursday-night-football"
-    assert card["channels"][4]["date"] == "2026-10-01"
+        (33, "roku", "ESPN"), (60, "slides", "sports-guide"), (61, "roku", "401872964"),
+        (62, "roku", "823254"), (70, "vizelvision", None), (109, "roku", "manual"),
+        (300, "digital", "surprise_7_5")]
+    assert card["channels"][4]["name"] == "VizelVision Sports Guide"
+    assert card["channels"][4]["page_path"] == "sports-guide.html"
+    assert card["channels"][5]["source_id"] == "thursday-night-football"
+    assert card["channels"][5]["date"] == "2026-10-01"
     code, discovery = request("/api/v1")
     assert discovery["endpoints"]["lineup"]["path"] == "/api/v1/lineup"
+    assert discovery["endpoints"]["sports_guide"]["path"] == "/api/v1/sports-guide"
+    code, spec = request("/api/v1/openapi.json")
+    assert "/sports-guide" in spec["paths"]
 
 
 def test_roku_remote_and_check_over_http(roku_api):

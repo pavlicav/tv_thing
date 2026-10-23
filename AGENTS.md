@@ -7,18 +7,21 @@ on `viviserv` before production files or services are changed. The core stream
 stack is:
 
 - FFmpeg: every invocation and its arguments (live packagers, the recorder, the
-  HD PVR capture copy, the Roku verifier's frame decoder), encoder selection,
-  and thread or resource limits;
+  HD PVR capture copy, the Roku verifier's frame decoder, the Sports Guide's
+  video encoder and `sports_guide_video.py`, the renderer that feeds it),
+  encoder selection, and thread or resource limits;
 - HLS output: playlists, segments, and the streams directory;
 - the digital and analog tuners and capture hardware access (`dvb_source.py`,
   `tuner.py`, `analog_tuner.py`, the HD PVR device);
-- process supervision (spawning, restarting, reaping, watchdogs) and the
-  systemd unit.
+- process supervision (spawning, restarting, reaping, watchdogs, and
+  `slide_stream.py`'s on-demand start and idle stop) and the systemd unit.
 
 Roku tuning (navigating YouTube TV, Sunday Ticket, MLB, or Prime Video: screen
 recognition, OCR, key sequences, and the lane's selection logic) and UI changes
-(`static/`, `roku_app/`) do not need the gate; the fast suite is enough. A
-change that also touches the core stream stack is gated.
+(`static/`, `roku_app/`) do not need the gate; the fast suite is enough. Nor
+do the Sports Guide's listings (`sports_guide.py`) and its browser slides; its
+video is core stream stack, gated with `stream_sanity_check.py --slides
+sports-guide`. A change that also touches the core stream stack is gated.
 
 The gate:
 

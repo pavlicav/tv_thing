@@ -27,9 +27,17 @@ ESPN_WEEK_URL = 'https://site.api.espn.com/apis/site/v2/sports/{path}/scoreboard
 ESPN_EVENT_URL = 'https://site.api.espn.com/apis/site/v2/sports/{path}/summary?event={id}'
 ESPN_TEAMS_URL = 'https://site.api.espn.com/apis/site/v2/sports/{path}/teams'
 LEAGUES = {'mlb': 'MLB', 'nfl': 'NFL', 'ncaaf': 'College Football (Power 5)',
-           'nba': 'NBA', 'nhl': 'NHL', 'wnba': 'WNBA', 'nwsl': 'NWSL'}
+           'nba': 'NBA', 'nhl': 'NHL', 'wnba': 'WNBA', 'nwsl': 'NWSL',
+           # Only the Sports Guide (sports_guide.py) lists these.
+           'ncaam': "Men's College Basketball", 'ncaaw': "Women's College Basketball",
+           'mls': 'MLS', 'epl': 'Premier League', 'ucl': 'Champions League'}
 ESPN_PATHS = {'mlb': 'baseball/mlb', 'nfl': 'football/nfl', 'nba': 'basketball/nba', 'nhl': 'hockey/nhl',
-              'wnba': 'basketball/wnba', 'nwsl': 'soccer/usa.nwsl', 'ncaaf': 'football/college-football'}
+              'wnba': 'basketball/wnba', 'nwsl': 'soccer/usa.nwsl', 'ncaaf': 'football/college-football',
+              'ncaam': 'basketball/mens-college-basketball', 'ncaaw': 'basketball/womens-college-basketball',
+              'mls': 'soccer/usa.1', 'epl': 'soccer/eng.1', 'ucl': 'soccer/uefa.champions'}
+# ESPN's college scoreboards list only ranked teams unless asked for a whole division:
+# FBS for football, Division I for basketball.
+ESPN_GROUPS = {'ncaaf': 80, 'ncaam': 50, 'ncaaw': 50}
 # Leagues whose games come from ESPN in sports mode (MLB uses the Stats API and its own routing).
 ESPN_LEAGUES = ('nfl', 'nba', 'nhl', 'wnba', 'nwsl', 'ncaaf')
 # ESPN's current conference memberships: ACC, Big 12, Big Ten, SEC, Pac-12.
@@ -165,14 +173,14 @@ class EspnScoreboard:
                                         details={'league': league, **details}) from exc
         return payload if isinstance(payload, dict) else {}
 
-    def _fetch(self, key, url, league, details):
+    def _fetch(self, key, url, league, details, keep=None):
         with self._lock:
             cached = self._cache.get(key)
             if cached and time.monotonic() - cached[0] < self.cache_seconds:
                 return cached[1]
         payload = self._get(url, league, details)
         games = [self._normalize(league, event) for event in payload.get('events', [])
-                 if isinstance(event, dict) and (league != 'ncaaf' or self._power_five_game(event))]
+                 if isinstance(event, dict) and (keep is None or keep(event))]
         games.sort(key=lambda g: g['start_time'] or '')
         result = (games, payload)
         with self._lock:
@@ -188,12 +196,16 @@ class EspnScoreboard:
                    for competitor in competition.get('competitors') or [] if isinstance(competitor, dict)
                    for team in [competitor.get('team') or {}])
 
-    def games(self, league, day):
+    def games(self, league, day, *, power_five=True):
+        """A day's games. College football's are the Power 5's and Notre Dame's, unless
+        power_five is False: then every FBS game."""
         url = ESPN_URL.format(path=ESPN_PATHS[league], day=day.replace('-', ''))
-        if league == 'ncaaf':
-            # Default ESPN college scoreboards only list ranked teams; request all FBS games.
-            url += '&groups=80&limit=1000'
-        return self._fetch((league, day), url, league, {'date': day})[0]
+        if league in ESPN_GROUPS:
+            url += f'&groups={ESPN_GROUPS[league]}&limit=1000'
+        if league == 'ncaaf' and power_five:
+            return self._fetch((league, day), url, league, {'date': day}, self._power_five_game)[0]
+        key = (league, day, 'all') if league == 'ncaaf' else (league, day)
+        return self._fetch(key, url, league, {'date': day})[0]
 
     def week(self, league, season_type=None, week=None):
         """One NFL week, the current one when week is None, with the season's week calendar."""
@@ -264,6 +276,8 @@ class EspnScoreboard:
         teams = {c.get('homeAway'): {'id': (c.get('team') or {}).get('id'),
                                      'name': (c.get('team') or {}).get('displayName'),
                                      'nickname': (c.get('team') or {}).get('name'),
+                                     # "Commanders", "Georgia", "Man United".
+                                     'short': (c.get('team') or {}).get('shortDisplayName'),
                                      'abbreviation': (c.get('team') or {}).get('abbreviation'),
                                      'score': c.get('score')}
                  for c in competition.get('competitors') or [] if isinstance(c, dict)}

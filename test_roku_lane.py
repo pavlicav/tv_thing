@@ -238,6 +238,32 @@ def test_navigate_false_never_moves_the_roku(lane):
     assert lane.controller.plays == []
 
 
+def test_watch_serves_only_what_needs_no_key(lane):
+    assert lane.watch({"source_id": "youtube-tv", "channel_id": "ESPN"}) is None
+    lane.controller.release.clear()
+    tune(lane)
+    status, result = lane.watch({"source_id": "youtube-tv", "channel_id": "espn"})
+    assert status == 202 and result["operation"]["target"]["channel_id"] == "ESPN"  # On its way.
+    lane.controller.release.set()
+    settle(lane)
+    status, result = lane.watch({"source_id": "youtube-tv", "channel_id": "ESPN"})
+    assert status == 200 and result["reused"] is True
+    assert lane.watch({"source_id": "youtube-tv", "channel_id": "NBC"}) is None
+    assert lane.watch({"source_id": "roku-manual"}) is None
+
+    lane.capture["stream_id"] = "cap-2"  # Stale: the key-free check renews it.
+    status, result = lane.watch({"source_id": "youtube-tv", "channel_id": "ESPN"})
+    assert status == 200 and result["resumed"] is True
+    lane.capture["stream_id"] = "cap-3"
+    lane.controller.feedback.motion = False
+    assert lane.watch({"source_id": "youtube-tv", "channel_id": "ESPN"}) is None
+    assert lane.controller.plays == ["ESPN"] and lane.controller.ecp.keys == []
+
+    lane.keypress("Down")  # Someone at the remote: the Manual Roku is what is on.
+    status, result = lane.watch({"source_id": "roku-manual"})
+    assert status == 200 and result["selection"]["manual"] is True
+
+
 def test_force_navigates_even_when_verified(lane):
     tune(lane)
     settle(lane)

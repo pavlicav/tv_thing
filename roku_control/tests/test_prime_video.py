@@ -102,6 +102,31 @@ class PlaybackTests(unittest.TestCase):
         self.ecp.launch.assert_called_once_with('13', content_id=EVENT['content_id'], media_type='live')
         self.assertEqual([c.args[0] for c in self.ecp.keypress.call_args_list], ['Home', 'Select'])
 
+    def test_profile_then_event_page_watch_then_live_overlays(self):
+        self.run_game([{'state': 'profile', 'focused_profile': True, 'matched': False},
+                       *[{'state': 'event_page', 'matched': False}] * 2,
+                       *[{'state': 'game_overlay', 'matched': True}] * 2])
+        self.assertEqual([c.args[0] for c in self.ecp.keypress.call_args_list], ['Home', 'Select', 'Select'])
+
+    def test_event_page_then_watch_live_menu(self):
+        """2026-10-22: Watch opened a menu with Watch Live / Main Broadcast focused."""
+        self.run_game([{'state': 'event_page', 'matched': False}, {'state': 'watch_menu', 'matched': False},
+                       *[{'state': 'game_overlay', 'matched': True}] * 2])
+        self.assertEqual([c.args[0] for c in self.ecp.keypress.call_args_list], ['Home', 'Select', 'Select'])
+
+    def test_overlay_is_revealed_with_down_and_may_fade_between_matches(self):
+        """2026-10-22: the title shows for a few seconds after Down; Up opened
+        Prime's Stats panel, which stayed on screen."""
+        self.run_game([{'state': 'unknown', 'matched': False}, {'state': 'game_overlay', 'matched': True},
+                       {'state': 'unknown', 'matched': False}, {'state': 'game_overlay', 'matched': True}])
+        keys = [c.args[0] for c in self.ecp.keypress.call_args_list]
+        self.assertEqual(keys, ['Home', 'Down', 'Down'])
+
+    def test_event_page_that_stays_gets_two_watch_selects_at_most(self):
+        with self.assertRaisesRegex(NavigationError, 'could not be visually verified'):
+            self.run_game([{'state': 'event_page', 'matched': False}] * 24)
+        self.assertEqual([c.args[0] for c in self.ecp.keypress.call_args_list], ['Home', 'Select', 'Select'])
+
     def test_sign_in_subscription_and_wrong_profile_are_actionable(self):
         for state in ('sign_in', 'subscription', 'profile'):
             with self.subTest(state=state):
@@ -114,7 +139,10 @@ class PlaybackTests(unittest.TestCase):
     def test_existing_player_with_wrong_game_never_becomes_ready(self):
         with self.assertRaisesRegex(NavigationError, 'could not be visually verified'):
             self.run_game([{'state': 'unknown', 'matched': False}] * 24)
-        self.assertNotIn('Select', [c.args[0] for c in self.ecp.keypress.call_args_list])
+        keys = [c.args[0] for c in self.ecp.keypress.call_args_list]
+        self.assertNotIn('Select', keys)
+        self.assertNotIn('Up', keys)
+        self.assertLessEqual(keys.count('Down'), 6)
 
     def test_audio_only_and_wrong_plugin_are_rejected(self):
         for change in ({'format': {'audio': 'aac', 'video': 'none'}}, {'plugin': {'id': '195316'}}):
@@ -123,7 +151,14 @@ class PlaybackTests(unittest.TestCase):
                 with self.assertRaises(NavigationError):
                     self.run_game([{'state': 'game_overlay', 'matched': True}] * 24)
 
-    def test_two_matches_must_be_consecutive(self):
+    def test_another_screen_between_matches_starts_over(self):
+        observations = [{'state': 'game_overlay', 'matched': True}, {'state': 'loading', 'matched': False}]*12
+        with self.assertRaises(NavigationError):
+            self.run_game(observations)
+
+    def test_playback_stopping_between_matches_starts_over(self):
+        states = iter(['play', 'buffer'] * 12)
+        self.ecp.media_player.side_effect = lambda: {**self.player, 'state': next(states)}
         observations = [{'state': 'game_overlay', 'matched': True}, {'state': 'unknown', 'matched': False}]*12
         with self.assertRaises(NavigationError):
             self.run_game(observations)
@@ -134,7 +169,9 @@ class ObservedFrameTests(unittest.TestCase):
     def setUpClass(cls):
         cls.feedback = VisualFeedback(FeedbackConfig())
         cls.frames = {}
-        for name in ('prime-profile', 'prime-live-overlay'):
+        for name in ('prime-profile', 'prime-profile-alone', 'prime-splash', 'prime-event-page',
+                     'prime-event-page-two-lines', 'prime-watch-menu', 'prime-live-overlay',
+                     'prime-live-overlay-lwe', 'prime-stats-panel'):
             raw = subprocess.run(['ffmpeg', '-v', 'error', '-i', str(Path(__file__).parent / 'fixtures' / (name+'.jpg')),
                                   '-f', 'image2pipe', '-vcodec', 'ppm', '-'], check=True, capture_output=True).stdout
             cls.frames[name] = PpmFrame.parse(raw)
@@ -144,6 +181,48 @@ class ObservedFrameTests(unittest.TestCase):
         self.assertEqual(result['state'], 'profile')
         self.assertTrue(result['focused_profile'])
         self.assertFalse(observe(self.feedback, self.frames['prime-profile'], GAME, 'Someone else')['focused_profile'])
+
+    def test_chooser_without_a_kids_profile(self):
+        """2026-10-15 and 10-22: only the profile and a dim "New" were left; the
+        chooser went unrecognized until every attempt ran out."""
+        result = observe(self.feedback, self.frames['prime-profile-alone'], GAME, 'Vivian')
+        self.assertEqual(result, {'state': 'profile', 'matched': False, 'focused_profile': True})
+        self.assertEqual(observe(self.feedback, self.frames['prime-profile-alone'], GAME, 'Someone else')['state'],
+                         'unknown')
+
+    def test_event_page_with_watch_focused_only_for_this_game(self):
+        """2026-10-15: the deep link stopped on the event's page, Watch focused."""
+        seahawks_broncos = {**GAME, 'away': {'name': 'Seattle Seahawks', 'nickname': 'Seahawks'},
+                            'home': {'name': 'Denver Broncos', 'nickname': 'Broncos'}}
+        self.assertEqual(observe(self.feedback, self.frames['prime-event-page'], seahawks_broncos, 'Vivian')['state'],
+                         'event_page')
+        self.assertEqual(observe(self.feedback, self.frames['prime-event-page'], GAME, 'Vivian')['state'], 'unknown')
+        # 2026-10-22: a two-line description put Watch 22 px lower.
+        patriots_bears = {**GAME, 'away': {'name': 'New England Patriots', 'nickname': 'Patriots'},
+                          'home': {'name': 'Chicago Bears', 'nickname': 'Bears'}}
+        self.assertEqual(observe(self.feedback, self.frames['prime-event-page-two-lines'], patriots_bears,
+                                 'Vivian')['state'], 'event_page')
+
+    def test_watch_live_menu_for_this_game_only(self):
+        patriots_bears = {**GAME, 'away': {'name': 'New England Patriots', 'nickname': 'Patriots'},
+                          'home': {'name': 'Chicago Bears', 'nickname': 'Bears'}}
+        self.assertEqual(observe(self.feedback, self.frames['prime-watch-menu'], patriots_bears, 'Vivian')['state'],
+                         'watch_menu')
+        self.assertEqual(observe(self.feedback, self.frames['prime-watch-menu'], GAME, 'Vivian')['state'], 'unknown')
+
+    def test_overlay_whose_live_badge_reads_lwe(self):
+        """2026-10-22 (Prime 16.0.383): OCR read the red LIVE badge as "LWE"."""
+        patriots_bears = {**GAME, 'away': {'name': 'New England Patriots', 'nickname': 'Patriots'},
+                          'home': {'name': 'Chicago Bears', 'nickname': 'Bears'}}
+        self.assertTrue(observe(self.feedback, self.frames['prime-live-overlay-lwe'], patriots_bears, '')['matched'])
+        self.assertFalse(observe(self.feedback, self.frames['prime-live-overlay-lwe'], GAME, '')['matched'])
+        # What Up opens instead: Stats, with no title to verify.
+        self.assertFalse(observe(self.feedback, self.frames['prime-stats-panel'], patriots_bears, '')['matched'])
+
+    def test_launch_splash_is_loading_without_ocr(self):
+        # Full-frame OCR of this splash ran past two minutes.
+        with patch.object(self.feedback.ocr, 'read', side_effect=AssertionError('OCR ran')):
+            self.assertEqual(observe(self.feedback, self.frames['prime-splash'], GAME, 'Vivian')['state'], 'loading')
 
     def test_actual_live_overlay_identifies_both_teams(self):
         self.assertTrue(observe(self.feedback, self.frames['prime-live-overlay'], GAME, '')['matched'])
