@@ -726,6 +726,43 @@ class RowlessGuideTests(unittest.TestCase):
             self.assertEqual([e.get("action") for e in events if e["event"] == "state_action"],
                              ["recover_to_roku_home"])
 
+    def _empty_live_tab(self, directory, guide_after_relaunch):
+        ecp = FakeEcp()
+        feedback = FakeFeedback()
+
+        def detect(frame, channels, media_player):
+            if 'Home' in ecp.keys and guide_after_relaunch:
+                return {"state": AppState.LIVE_GUIDE, "evidence": "calibrated_guide_row",
+                        "focus": "program", "channel": "ESPN", "guide_index": 2}
+            if not ecp.keys or ecp.keys[-1] == 'Home':
+                return {"state": AppState.YOUTUBE_TV_HOME, "evidence": "live_tab_focus_geometry",
+                        "navigation_tab": "live"}
+            return {"state": AppState.YOUTUBE_TV_HOME, "evidence": "ocr_top_navigation"}
+        feedback.detect_youtube_tv_state = detect
+        controller = RokuStreamController(ControllerTests().config(Path(directory)), ecp=ecp,
+                                          feedback=feedback, sleeper=lambda _: None)
+        return controller, ecp
+
+    def test_a_live_tab_without_guide_rows_relaunches_youtube_tv(self):
+        """2026-10-21: the Live tab loaded an ESPN shelf and no channel rows; Down
+        never left it. A fresh launch brought the guide back."""
+        with tempfile.TemporaryDirectory() as directory:
+            controller, ecp = self._empty_live_tab(directory, guide_after_relaunch=True)
+            events = []
+            observation = controller._drive_to_live_guide("195316", events)
+            self.assertEqual(observation["focus"], "program")
+            self.assertEqual(ecp.keys, ["Down", "Down"]
+                             + ["Down"] * RokuStreamController.EMPTY_LIVE_DOWNS + ["Home"])
+            self.assertEqual([e.get("action") for e in events if e["event"] == "state_action"],
+                             ["relaunch_for_empty_live_guide"])
+
+    def test_a_live_tab_still_empty_after_relaunch_fails_quickly(self):
+        with tempfile.TemporaryDirectory() as directory:
+            controller, ecp = self._empty_live_tab(directory, guide_after_relaunch=False)
+            with self.assertRaisesRegex(NavigationError, "even after relaunching"):
+                controller._drive_to_live_guide("195316", [])
+            self.assertEqual(ecp.keys.count("Home"), 1)
+
     def test_a_toolbar_and_a_shelf_are_still_crossed_with_down(self):
         with tempfile.TemporaryDirectory() as directory:
             ecp = FakeEcp()

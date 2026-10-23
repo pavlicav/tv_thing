@@ -21,6 +21,10 @@ from .operations import EventLog, OperationStore
 class RokuStreamController:
     # How many Downs may look for a guide row before the screen is treated as unknown.
     ROWLESS_DOWNS = 4
+    # How many Downs may look for the guide below the Live tab before YouTube TV
+    # is relaunched: on 2026-10-21 the Live tab loaded only an ESPN shelf and no
+    # channel rows, and only a fresh launch brought the rows back.
+    EMPTY_LIVE_DOWNS = 4
 
     def __init__(
         self,
@@ -411,6 +415,10 @@ class RokuStreamController:
         # fullscreen program was taken for Home -- and Down will never find a
         # row there.
         rowless_downs = 0
+        # Downs from the Live tab that never reached the guide, and whether
+        # YouTube TV was already relaunched for that.
+        empty_live_downs = 0
+        relaunched_for_empty_live = False
 
         for transition in range(1, 21):
             observation = self._observe_state(app_id)
@@ -529,9 +537,30 @@ class RokuStreamController:
                 elif evidence == 'ocr_top_navigation' and not live_entry_started:
                     keys = ('Up',)  # Confirm a focused tab before selecting Live.
                 elif live_entry_started and evidence == 'ocr_top_navigation':
+                    if empty_live_downs >= self.EMPTY_LIVE_DOWNS:
+                        if relaunched_for_empty_live:
+                            raise NavigationError(
+                                "YouTube TV's Live tab shows no guide rows, even after relaunching YouTube TV",
+                                details={"state_transitions": list(events)},
+                            )
+                        # The guide never loaded: relaunch YouTube TV from Roku Home.
+                        self.ecp.keypress("Home")
+                        self._publish_operation(
+                            phase="recovering",
+                            message="The Live guide has no channel rows; relaunching YouTube TV",
+                        )
+                        events.append({"event": "state_action", "from": state,
+                                       "action": "relaunch_for_empty_live_guide",
+                                       "empty_live_downs": empty_live_downs})
+                        self._sleep(nav.post_exit_settle_seconds)
+                        empty_live_downs = 0
+                        relaunched_for_empty_live = True
+                        live_entry_started = False
+                        continue
                     # The Live landing page may insert a promotional shelf
                     # before the grid. Observe it and advance one shelf only.
                     keys = ('Down',)
+                    empty_live_downs += 1
                 else:
                     keys = ('Down', 'Down') if observation.get('navigation_tab') == 'live' else nav.open_live_guide_keys
                     live_entry_started = True
