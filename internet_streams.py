@@ -42,6 +42,8 @@ MAX_SEGMENT_BYTES = 64 * 1024 * 1024
 TIMEOUT_SECONDS = 5
 RESOLVE_SECONDS = 30 * 60      # How long a resolved URL is used before asking again.
 MASTER_SECONDS = 5 * 60        # How long a master playlist is reused.
+LISTINGS_SECONDS = 60          # How long a stream's guide listings are reused.
+LISTINGS_STALE_SECONDS = 15 * 60   # How long the last good listings stand in when the URL fails.
 LIVE_WINDOW_SECONDS = 120      # How much of a live media playlist is passed on.
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) TV-Thing"
 
@@ -80,6 +82,7 @@ class Stream:
     resolver: str
     params: dict = field(default_factory=dict)
     note: str | None = None
+    guide: str | None = None   # a listings URL for TV Thing's guide (see parse_listings)
 
 
 RESOLVERS = {"url": ("url",), "yle-areena": ("program",)}
@@ -108,9 +111,33 @@ def parse_streams(document):
             raise StreamConfigError(f"{where}: a {resolver} stream needs {', '.join(missing)}")
         if resolver == "url" and not params["url"].startswith(("http://", "https://")):
             raise StreamConfigError(f"{where}: url must be http or https")
+        guide = raw.get("guide") or None
+        if guide is not None and not str(guide).startswith(("http://", "https://")):
+            raise StreamConfigError(f"{where}: guide must be http or https")
         streams[stream_id] = Stream(stream_id, str(raw.get("name") or stream_id), resolver,
-                                    params, raw.get("note") or None)
+                                    params, raw.get("note") or None, guide and str(guide))
     return streams
+
+
+def parse_listings(document):
+    """Guide events from a stream's listings, ``{"events": [{"start", "duration", "title",
+    "description"?}]}`` (Unix seconds, whole seconds), in start order. An event without a
+    start, a positive duration or a title is left out."""
+    events = []
+    raw_events = document.get("events") if isinstance(document, dict) else None
+    for raw in raw_events if isinstance(raw_events, list) else []:
+        if not isinstance(raw, dict):
+            continue
+        start, duration, title = raw.get("start"), raw.get("duration"), raw.get("title")
+        if (not isinstance(start, int) or isinstance(start, bool) or not isinstance(duration, int)
+                or isinstance(duration, bool) or duration <= 0 or not isinstance(title, str) or not title):
+            continue
+        event = {"start": start, "duration": duration, "title": title}
+        if isinstance(raw.get("description"), str) and raw["description"]:
+            event["description"] = raw["description"]
+        events.append(event)
+    events.sort(key=lambda event: event["start"])
+    return events
 
 
 def _open(url, accept="*/*", headers=None):
@@ -281,6 +308,7 @@ class InternetStreams:
         self._config = (None, {})    # (stat signature, {id: Stream} or StreamConfigError)
         self._resolved = {}          # id -> (url, at)
         self._masters = {}           # id -> (master URL, text, at)
+        self._listings = {}          # id -> (events, at)
 
     def streams(self):
         """``{id: Stream}``; StreamConfigError when the file is unusable, {} when absent."""
@@ -333,6 +361,28 @@ class InternetStreams:
         with self._lock:
             self._masters[stream.id] = (final_url, text, now)
         return final_url, text
+
+    def listings(self, stream_id):
+        """The guide events a stream's ``guide`` URL lists (parse_listings); [] for a stream
+        without one. Reused for a minute; when the URL fails, the last good listings stand in
+        for up to 15 minutes, then the row goes empty."""
+        stream = self.streams().get(stream_id)
+        if stream is None or not stream.guide:
+            return []
+        now = self.clock()
+        with self._lock:
+            cached = self._listings.get(stream_id)
+        if cached and now - cached[1] < LISTINGS_SECONDS:
+            return cached[0]
+        try:
+            _, text = self.fetch(stream.guide, "application/json")
+            events = parse_listings(json.loads(text))
+        except (HTTPError, URLError, OSError, TimeoutError, ValueError) as error:
+            print(f"[Internet] {stream.name}'s listings: {error}", flush=True)
+            return cached[0] if cached and now - cached[1] < LISTINGS_STALE_SECONDS else []
+        with self._lock:
+            self._listings[stream_id] = (events, now)
+        return events
 
     def forget(self, stream_id):
         """Drop what is cached for a stream, so the next request resolves it afresh."""

@@ -159,9 +159,9 @@ def test_guide_clips_events_that_started_before_the_window():
 
 def test_guide_titles_are_escaped_not_interpolated_raw():
     """Titles come off the air or the web, so they are untrusted input."""
-    assert "escape(event.title" in GUIDE
+    assert "escape(ListingTitle.listingTitle(event))" in GUIDE
     assert "escape(nameOf(channel))" in GUIDE
-    assert "escape([episode, event.episode_title]" in GUIDE
+    assert "escape([episode, named]" in GUIDE
     assert "escape(event.rating)" in GUIDE
     assert "node.textContent = text == null" in GUIDE
 
@@ -292,6 +292,9 @@ def test_roku_tab_lists_feeds_and_drives_the_remote_under_its_lock():
     assert 'source.lane === "roku"' in INDEX
     assert "api/v1/sources/${source.id}${query}" in roku
     assert "date=${encodeURIComponent(state.roku.date)}" in roku
+    # Until someone picks a date, the lists follow the games' day as it turns.
+    assert "if (!state.roku.datePicked) state.roku.date = gameDay();" in roku
+    assert "state.roku.datePicked = state.roku.date !== gameDay();" in roku
     # Every change carries this page's own lock token, and a 423 is only ever
     # overridden by a person in the override dialog.
     assert "token: rokuToken()" in roku
@@ -316,6 +319,21 @@ def test_live_player_runtime():
         pytest.skip("node is required for live player runtime tests")
     subprocess.run([node, "--test", str(ROOT / "test_live_player.cjs")],
                    check=True, capture_output=True, text=True, timeout=15)
+
+
+def test_listing_titles_name_the_game():
+    """The guide and the Watch page call a game by its teams and league."""
+    import shutil
+    import subprocess
+    import pytest
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is required for listing title runtime tests")
+    subprocess.run([node, "--test", str(ROOT / "test_listing_title.cjs")],
+                   check=True, capture_output=True, text=True, timeout=15)
+    for page in (GUIDE, INDEX):
+        assert '<script src="listing-title.js"></script>' in page
+    assert "ListingTitle.listingTitle(on)" in INDEX and "ListingTitle.listingTitle(next)" in INDEX
 
 
 def test_every_page_script_parses():
@@ -463,11 +481,14 @@ def test_guide_lists_youtube_tv_and_sends_its_rows_to_the_watch_page():
     assert "./#watch=${encodeURIComponent(`${event.source_id}/${event.channel_id}`)}" in watch
     assert watch.index("gameRefusal(event)") < watch.index("#watch=")
     refusal = section(GUIDE, "function gameRefusal(event)", "async function load()")
-    assert "event.date !== localDate()" in refusal and "!event.playable" in refusal
+    assert "event.date !== gameDay()" in refusal and "!event.playable" in refusal
     assert "watch(selected.channel, selected.event)" in GUIDE
     # A row with no listing stays; Antenna numbers is the antenna's own view.
     assert "isRoku(channel) ? !antennaNumbers\n" in GUIDE
     assert "isGames(channel) ? !antennaNumbers && channel.events.length > 0" in GUIDE
+    # An internet stream with listings (internet/cabride) plays its relay from Watch.
+    assert "isInternet(channel) ? !antennaNumbers && channel.events.length > 0" in GUIDE
+    assert "isRoku(channel) || isInternet(channel)" in watch
     assert "guide.sports" in GUIDE
     assert "guide.youtube_tv" in GUIDE
 
@@ -487,9 +508,39 @@ def test_watch_page_tunes_the_roku_channel_the_guide_links_to():
     assert "history.replaceState(" in linked
     assert "tuneRoku(linked.source, linked.item)" in linked
     # A game is one of today's, as the Watch page lists them, and one the Roku can reach.
-    assert "(!s.dated || state.roku.date === localDate())" in linked
+    assert "(!s.dated || state.roku.date === gameDay())" in linked
     assert "s.tunable !== false" in linked
     assert "else resume();" in linked
+
+
+def test_the_pages_turn_the_games_day_at_3_am():
+    """As the server does (roku_control/days.py): a night's late games stay
+    today's until 3 AM, so the Watch page lists them and the guide's Watch
+    puts them on."""
+    import json
+    import os
+    import re
+    import shutil
+    import subprocess
+    import pytest
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is required to run the pages' gameDay")
+    moments = ["2026-10-24T23:30:00", "2026-10-25T00:30:00", "2026-10-25T02:59:00",
+               "2026-10-25T03:00:00", "2026-11-01T01:30:00"]
+    run = """
+const RealDate = Date, gameDay = eval(`(${process.argv[1]})`);
+console.log(JSON.stringify(JSON.parse(process.argv[2]).map((moment) => {
+  global.Date = class extends RealDate { constructor(...a) { super(...(a.length ? a : [moment])); } };
+  return gameDay();
+})));"""
+    for page in (INDEX, GUIDE):
+        script = re.search(r"function gameDay\(\) \{.*?\n\s*\}\n", page, re.S).group(0)
+        result = subprocess.run([node, "-e", run, script, json.dumps(moments)],
+                                env={**os.environ, "TZ": "America/New_York"},
+                                capture_output=True, text=True, timeout=15, check=True)
+        assert json.loads(result.stdout) == [
+            "2026-10-24", "2026-10-24", "2026-10-24", "2026-10-25", "2026-10-31"]
 
 
 def test_watch_page_shows_what_is_on_youtube_tv():
@@ -566,7 +617,8 @@ def test_watch_page_banner_uses_the_guide_without_tuning():
     assert 'fetch("api/guide/now"' in banner
     assert "api/guide?channel=" in banner
     assert "method:" not in banner and "api/tune" not in banner
-    assert "escapeHtml(on.title" in banner and "escapeHtml(e.title" in banner
+    assert "escapeHtml(ListingTitle.listingTitle(on))" in banner
+    assert "escapeHtml(ListingTitle.listingTitle(e))" in banner
 
 
 def test_watch_page_video_leaves_room_for_the_banner():

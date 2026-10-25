@@ -575,6 +575,16 @@ games are blacked out locally, and YouTube TV places the Roku in DC or
 Lansing, so Capitals and Red Wings games are marked "may be blacked out"
 (exclusives never are).
 
+**Sunday's football follows YouTube TV's market.** The Sunday-afternoon CBS
+and FOX games are regional, and the Roku's YouTube TV carries Lansing's
+stations (WLNS, WSYM), not Washington's. A game is suggested on YouTube TV's
+CBS or FOX only when YouTube TV's own listings (`yttv_epg.json`) name it at
+kickoff ("NFL Football", "Indianapolis Colts at Minnesota Vikings"), or, past
+the listings' two days, when the Lions play. Every other game in those windows
+is on Sunday Ticket, which blacks out only Lansing's games, and only those are
+in its Live Sports catalog (`roku_control/sports.py`). A Commanders or Ravens
+game is on CBS 9 or FOX 5 over the antenna either way.
+
 The Roku finds a game on YouTube TV's ESPN page (`nhl` source,
 `roku_control/espn_unlimited.py`). The games have no guide rows of their
 own; the page, opened from the ESPN row's station tile, lists them under
@@ -908,6 +918,15 @@ lock or encoder is involved, and the Watch page plays them as it plays
 VizelVision. Give a new stream a number in `lineup.json`, or it takes the first
 free one in 370–379.
 
+A stream can also publish listings: `guide` names a URL answering
+`{"events": [{"start", "duration", "title", "description"}]}`, and the stream
+gets a row in the Guide (and its NOW/NEXT banner on Watch), read at most once a
+minute. Channel 144, **Cab Ride**, uses it: hazel's `cabride.service`
+(`~hazel/cabride`, `127.0.0.1:8791`) plays train cab rides laid end to end from
+the wall clock, as if it never stopped, and runs its one stream-copy `ffmpeg`
+only while someone watches. Its schedule follows the clock, so the Guide shows
+the rides hours ahead.
+
 ### TV Thing channel numbers
 
 Every channel has a TV Thing number, laid out like an old cable lineup card in
@@ -974,11 +993,14 @@ A game is listed only when it can be watched here, and shows where:
 
 * **On a national broadcaster in the lineup**, by that channel's name and
   number: TBS 31, ESPN 33. A network game is on its DC station over the
-  antenna (ABC 7, FOX 5, CBS 9, NBC 4, CW 8).
+  antenna (ABC 7, FOX 5, CBS 9, NBC 4, CW 8). Sunday afternoon's CBS and FOX
+  NFL games are regional: a Commanders or Ravens game is on CBS 9 or FOX 5,
+  and the game YouTube TV's listings name on Lansing's CBS 19 or FOX 17 is
+  there.
 * **On a Roku game source**, by its Live Sports number and the service:
-  Sunday Ticket for an out-of-market Sunday game (a Commanders or Ravens game
-  is on CBS 9 or FOX 5 instead), Prime Video for Thursday Night Football,
-  MLB.TV, and ESPN+ for the NHL on ESPN Unlimited.
+  Sunday Ticket for any other Sunday-afternoon CBS or FOX game, Prime Video
+  for Thursday Night Football, MLB.TV, and ESPN+ for the NHL on ESPN
+  Unlimited.
 
 Streaming-only games (Peacock, Apple TV's MLS, Prime Video's NBA, ESPN+ outside
 hockey), regional sports networks, and finished games are left out. Before

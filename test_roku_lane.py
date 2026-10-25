@@ -376,6 +376,14 @@ def test_targets_are_validated_and_games_resolved(lane):
     lane.normalize({"source_id": "sunday-ticket", "channel_id": "401872964", "date": "2026-10-04"})
 
 
+def test_a_game_without_a_date_is_on_the_games_day(lane, monkeypatch):
+    # At 1 AM that is still last night (roku_control/days.py), so its late games tune.
+    monkeypatch.setattr(roku_lane.days, "today", lambda: "2026-10-24")
+    target, _ = lane.normalize({"source_id": "mlb", "channel_id": "823254"})
+    assert target["date"] == "2026-10-24"
+    assert lane.catalog("mlb")["date"] == lane.catalog("nhl")["date"] == "2026-10-24"
+
+
 def test_game_navigation_uses_the_game_route(lane):
     status, _ = lane.tune({"source_id": "mlb", "channel_id": "823254", "date": "2026-10-01"})
     assert status == 202

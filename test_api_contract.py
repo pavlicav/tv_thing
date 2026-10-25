@@ -278,10 +278,11 @@ def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypat
         "channel_id": "sports-guide", "page_path": "sports-guide.html",
         "data_path": "/api/v1/sports-guide", "stream_path": "/stream/sports-guide/index.m3u8"}]
     assert {"first": 1, "last": 29, "name": "Local stations"} in sources["lineup"]["sections"]
-    # 29 is an internet stream, played from TV Thing's relay of it.
+    # 29 and 144 are internet streams, played from TV Thing's relay of them.
     assert [(view["tv_number"], view["channel_id"], view["stream_path"])
             for view in sources["lineup"]["internet"]] == [
-        (29, "pentulive", "/stream/internet/pentulive/index.m3u8")]
+        (29, "pentulive", "/stream/internet/pentulive/index.m3u8"),
+        (144, "cabride", "/stream/internet/cabride/index.m3u8")]
 
     code, card = request("/api/v1/lineup?date=2026-10-01")
     assert code == 200 and card["errors"] == [] and card["lineup_error"] is None
@@ -289,7 +290,7 @@ def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypat
         (0, "vizelvision", None), (4, "digital", "wrc_hd_4_1"), (16, "roku", "NBC"),
         (29, "internet", "pentulive"), (33, "roku", "ESPN"), (60, "slides", "sports-guide"), (61, "roku", "401872964"),
         (62, "roku", "823254"), (70, "vizelvision", None), (109, "roku", "manual"),
-        (300, "digital", "surprise_7_5")]
+        (144, "internet", "cabride"), (300, "digital", "surprise_7_5")]
     assert card["channels"][3]["stream_path"] == "/stream/internet/pentulive/index.m3u8"
     assert card["channels"][5]["name"] == "VizelVision Sports Guide"
     assert card["channels"][5]["page_path"] == "sports-guide.html"

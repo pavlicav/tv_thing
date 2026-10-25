@@ -7,7 +7,7 @@ import pytest
 
 import internet_streams
 from internet_streams import (InternetStreams, StreamConfigError, StreamUnavailable,
-                              parse_streams, rewrite_master, rewrite_media)
+                              parse_listings, parse_streams, rewrite_master, rewrite_media)
 
 MASTER = """#EXTM3U
 #EXT-X-VERSION:3
@@ -44,6 +44,62 @@ def test_streams_are_validated():
             parse_streams({"streams": [bad]})
     with pytest.raises(StreamConfigError, match="twice"):
         parse_streams({"streams": [{"id": "a", "resolver": "url", "url": "https://x"}] * 2})
+
+
+def test_a_stream_may_name_a_listings_url_for_the_guide():
+    streams = parse_streams({"streams": [
+        {"id": "cab", "resolver": "url", "url": "http://127.0.0.1:8791/cab/index.m3u8",
+         "guide": "http://127.0.0.1:8791/guide.json"},
+        {"id": "cam", "resolver": "url", "url": "https://example.com/live.m3u8"}]})
+    assert streams["cab"].guide == "http://127.0.0.1:8791/guide.json"
+    assert streams["cam"].guide is None
+    with pytest.raises(StreamConfigError, match="guide"):
+        parse_streams({"streams": [{"id": "a", "resolver": "url", "url": "https://x",
+                                    "guide": "file:///etc/passwd"}]})
+
+
+def test_listings_keep_well_formed_events_in_start_order():
+    events = parse_listings({"events": [
+        {"start": 200, "duration": 60, "title": "Second", "description": "Line · A → B · Japan"},
+        {"start": 100, "duration": 100, "title": "First", "extra": "ignored"},
+        {"start": 300, "duration": 0, "title": "No length"},
+        {"start": "400", "duration": 60, "title": "Text start"},
+        {"start": 500, "duration": 60},
+        {"start": True, "duration": 60, "title": "Not a number"},
+        "not an event"]})
+    assert events == [{"start": 100, "duration": 100, "title": "First"},
+                      {"start": 200, "duration": 60, "title": "Second",
+                       "description": "Line · A → B · Japan"}]
+    assert parse_listings({"events": "nope"}) == [] == parse_listings([])
+
+
+def test_listings_are_cached_and_stand_in_briefly_when_the_url_fails(tmp_path):
+    config = tmp_path / "streams.json"
+    config.write_text(json.dumps({"streams": [
+        {"id": "cab", "resolver": "url", "url": "http://127.0.0.1:8791/cab/index.m3u8",
+         "guide": "http://127.0.0.1:8791/guide.json"},
+        {"id": "cam", "resolver": "url", "url": "https://example.com/live.m3u8"}]}))
+    now = [1000.0]
+    calls = []
+    answer = {"events": [{"start": 900, "duration": 600, "title": "Ride"}]}
+
+    def fetch(url, accept="*/*", headers=None):
+        calls.append(url)
+        if answer is None:
+            raise OSError("connection refused")
+        return url, json.dumps(answer)
+
+    streams = InternetStreams(config, fetch=fetch, clock=lambda: now[0])
+    assert streams.listings("cab") == [{"start": 900, "duration": 600, "title": "Ride"}]
+    assert streams.listings("cam") == [] and streams.listings("nope") == []
+    now[0] += 30
+    streams.listings("cab")
+    assert calls == ["http://127.0.0.1:8791/guide.json"]    # reused within the minute
+    answer = None
+    now[0] += 60
+    assert streams.listings("cab")[0]["title"] == "Ride"     # the last good listings stand in
+    now[0] += 15 * 60
+    assert streams.listings("cab") == []                     # until they are too old
 
 
 def test_the_master_names_its_renditions_by_position():

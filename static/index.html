@@ -662,6 +662,7 @@
   <script src="hls.min.js"></script>
   <script src="live-player.js"></script>
   <script src="tunable-channels.js"></script>
+  <script src="listing-title.js"></script>
   <script>
   (() => {
     "use strict";
@@ -727,6 +728,7 @@
         sources: [],       // the Roku's feed sources, in order
         items: {},         // source id -> its feeds
         date: null,        // the day the game lists show
+        datePicked: false, // chosen under "Games on"; else date follows the games' day
         lane: null,        // /api/v1/status lanes.roku
         apps: [],
         lock: null,        // our own lock: {token, expires_at}, or null
@@ -787,8 +789,8 @@
         .filter(e => e.start >= after && e.start < until)
         .slice(0, 4)
         .map(e =>
-          `<li title="${escapeHtml(e.title || "No title")} · ${fmtClock(e.start)}">` +
-          `<b>${fmtClock(e.start)}</b><span>${escapeHtml(e.title || "No title")}</span></li>`);
+          `<li title="${escapeHtml(ListingTitle.listingTitle(e))} · ${fmtClock(e.start)}">` +
+          `<b>${fmtClock(e.start)}</b><span>${escapeHtml(ListingTitle.listingTitle(e))}</span></li>`);
       if (!rows.length) return "";
       return `<div class="bn-later"><span class="bn-k">LATER</span>` +
              `<ol class="bn-list">${rows.join("")}</ol></div>`;
@@ -831,11 +833,12 @@
       if (on) {
         nowHtml +=
           `<div class="bn-row"><span class="bn-k">NOW</span>` +
-          `<span class="bn-title">${escapeHtml(on.title || "No title")}</span>` +
+          `<span class="bn-title">${escapeHtml(ListingTitle.listingTitle(on))}</span>` +
           `<span class="bn-time">${fmtClock(on.start)} – ${fmtClock(on.start + on.duration)}</span>` +
           (on.captions ? '<span class="bn-cc">CC</span>' : "") + `</div>` +
           `<div class="bn-progress"><i style="width:${progressOf(on, now).toFixed(1)}%"></i></div>`;
-        const about = [on.episode_title, on.description].filter(Boolean).join(" — ");
+        const named = ListingTitle.namesTeams(on) ? null : on.episode_title;
+        const about = [named, on.description].filter(Boolean).join(" — ");
         if (about) nowHtml += `<div class="bn-desc">${escapeHtml(about)}</div>`;
       }
       loadSchedule(key);
@@ -843,7 +846,7 @@
       if (!later && next) {
         later =
           `<div class="bn-row next"><span class="bn-k">NEXT</span>` +
-          `<span class="bn-title">${escapeHtml(next.title || "No title")}</span>` +
+          `<span class="bn-title">${escapeHtml(ListingTitle.listingTitle(next))}</span>` +
           `<span class="bn-time">${fmtClock(next.start)}</span></div>`;
       }
       return `<div class="bn-split"><div class="bn-now">${nowHtml}</div>${later}</div>`;
@@ -875,7 +878,9 @@
         const entry = state.internet || {};
         num.textContent = entry.number !== null && entry.number !== undefined ? String(entry.number) : "WEB";
         num.title = "";
-        body.innerHTML = '<div class="bn-row"><span class="bn-k">NOW</span>' +
+        // A stream that publishes listings (internet/cabride) shows them as a channel does.
+        const listed = entry.id && listingHtml(entry.id.replace(/^internet:/, "internet/"), now);
+        body.innerHTML = listed || '<div class="bn-row"><span class="bn-k">NOW</span>' +
           `<span class="bn-title">${escapeHtml(entry.name || "Internet stream")}</span></div>` +
           `<div class="bn-desc">${escapeHtml(entry.sub || "Internet stream")}</div>`;
       } else if (state.playing === "slides") {
@@ -2151,10 +2156,14 @@
       return minutes < 90 ? `${minutes} minutes ago` : `${Math.round(minutes / 60)} hours ago`;
     }
 
-    function localDate() {
-      const now = new Date();
+    // The games' day: it turns at 3 AM, not midnight, so a night's late games
+    // stay listed, on their numbers, until they are over (as the server lists
+    // them, roku_control/days.py).
+    function gameDay() {
+      const day = new Date();
+      if (day.getHours() < 3) day.setDate(day.getDate() - 1);
       const pad = n => String(n).padStart(2, "0");
-      return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      return `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
     }
 
     function gameClock(item) {
@@ -2180,7 +2189,7 @@
         els.rokuLockText.textContent = "Unlocked: anyone can change it";
         els.rokuLock.textContent = "Lock Roku";
       }
-      if (!state.roku.date) state.roku.date = localDate();
+      if (!state.roku.date) state.roku.date = gameDay();
       if (document.activeElement !== els.rokuDate) els.rokuDate.value = state.roku.date;
       const operation = state.roku.lane && state.roku.lane.roku && state.roku.lane.roku.operation;
       els.rokuStop.hidden = !(operation && operation.active);
@@ -2269,7 +2278,7 @@
     async function loadRokuItems(force) {
       if (!force && Date.now() - rokuItemsAt < 60000) return;
       rokuItemsAt = Date.now();
-      if (!state.roku.date) state.roku.date = localDate();
+      if (!state.roku.datePicked) state.roku.date = gameDay();
       await Promise.all(state.roku.sources.map(async source => {
         const query = source.dated ? `?date=${encodeURIComponent(state.roku.date)}` : "";
         try {
@@ -2446,6 +2455,7 @@
     els.rokuDate.addEventListener("change", () => {
       if (!els.rokuDate.value) return;
       state.roku.date = els.rokuDate.value;
+      state.roku.datePicked = state.roku.date !== gameDay();
       loadRokuItems(true);
     });
     els.rokuLock.addEventListener("click", async () => {
@@ -2634,6 +2644,7 @@
     // The guide links here as #watch=youtube-tv%2FNBC to put a Roku channel
     // on, so the tune shows its progress and asks about a lock as usual. A
     // game (#watch=mlb%2F823254) is one of today's, as the games are listed.
+    // An internet stream (#watch=internet%2Fcabride) plays its relay.
     // The link is used once: a reload must not send the Roku off again.
     function linkedRokuTarget() {
       const match = /^#watch=(.+)$/.exec(location.hash);
@@ -2643,8 +2654,12 @@
       try { value = decodeURIComponent(match[1]); } catch (_) { return null; }
       const slash = value.indexOf("/");
       if (slash <= 0) return null;
+      if (value.slice(0, slash) === "internet") {
+        const entry = tunableChannels().find(e => e.kind === "internet" && e.id === `internet:${value.slice(slash + 1)}`);
+        return entry ? { internet: entry } : null;
+      }
       const source = state.roku.sources.find(s => s.id === value.slice(0, slash) && s.tunable !== false
-        && (!s.dated || state.roku.date === localDate()));
+        && (!s.dated || state.roku.date === gameDay()));
       const item = source && (state.roku.items[source.id] || [])
         .find(i => String(i.id) === value.slice(slash + 1));
       return item ? { source, item } : null;
@@ -2656,7 +2671,8 @@
       render();
       loadGuideNow();
       const linked = /^#watch=/.test(location.hash) ? await rokuItems.then(linkedRokuTarget) : null;
-      if (linked) tuneRoku(linked.source, linked.item);
+      if (linked && linked.internet) tuneInternet(linked.internet);
+      else if (linked) tuneRoku(linked.source, linked.item);
       else resume();
       startSourcePolling();
       // vizelVision links here as /tv/#roku to watch and drive the Roku.

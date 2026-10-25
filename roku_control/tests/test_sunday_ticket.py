@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import datetime, timezone
 import gzip
 from pathlib import Path
 import tempfile
@@ -271,6 +272,113 @@ class SundayTicketListingTests(unittest.TestCase):
             suggested = catalog._suggest(game)
         self.assertTrue(suggested['on_sunday_ticket'])
         self.assertEqual(suggested['channels'], ['FOX'])
+
+
+def nfl_game(game_id, kickoff, away, home, network):
+    """A game from ESPN's scoreboard; away and home are (name, abbreviation)."""
+    def side(name, abbreviation):
+        return {'name': name, 'nickname': name.split()[-1], 'abbreviation': abbreviation}
+    return {'league': 'nfl', 'game_id': game_id, 'title': f'{away[0]} at {home[0]}', 'start_time': kickoff,
+            'state': 'pre', 'status': 'Scheduled', 'finished': False, 'away': side(*away), 'home': side(*home),
+            'broadcasts': [{'name': network, 'market': 'national'}]}
+
+
+def listing(start, minutes, title, episode=None):
+    begin = int(datetime.fromisoformat(start).timestamp())
+    return {'start': begin, 'duration': minutes * 60, 'title': title,
+            **({'episode_title': episode} if episode else {})}
+
+
+# Sunday, October 25, 2026, as ESPN listed it: the CBS and FOX games are regional.
+SLATE = [nfl_game(401873014, '2026-10-25T17:00Z', ('Indianapolis Colts', 'IND'), ('Minnesota Vikings', 'MIN'), 'CBS'),
+         nfl_game(401873012, '2026-10-25T17:00Z', ('Cincinnati Bengals', 'CIN'), ('Baltimore Ravens', 'BAL'), 'CBS'),
+         nfl_game(401873017, '2026-10-25T17:00Z', ('San Francisco 49ers', 'SF'), ('Atlanta Falcons', 'ATL'), 'Fox'),
+         nfl_game(401873018, '2026-10-25T17:00Z', ('Tampa Bay Buccaneers', 'TB'), ('Carolina Panthers', 'CAR'), 'Fox'),
+         nfl_game(401873019, '2026-10-25T20:05Z', ('Denver Broncos', 'DEN'), ('Arizona Cardinals', 'ARI'), 'CBS'),
+         nfl_game(401873020, '2026-10-25T20:25Z', ('Green Bay Packers', 'GB'), ('Detroit Lions', 'DET'), 'Fox'),
+         nfl_game(401873022, '2026-10-26T00:20Z', ('Kansas City Chiefs', 'KC'), ('Seattle Seahawks', 'SEA'), 'NBC')]
+# YouTube TV's CBS and FOX that afternoon (yttv_epg.json): Lansing's WLNS and WSYM.
+LANSING = {'CBS': {'events': [listing('2026-10-25T12:00-04:00', 60, 'The NFL Today'),
+                              listing('2026-10-25T13:00-04:00', 180, 'NFL Football',
+                                      'Indianapolis Colts at Minnesota Vikings'),
+                              listing('2026-10-25T16:00-04:00', 30, 'NFL Today Postgame'),
+                              listing('2026-10-25T16:30-04:00', 30, 'NFL Today Postgame')]},
+           'FOX': {'events': [listing('2026-10-25T12:00-04:00', 60, 'FOX NFL Sunday'),
+                              listing('2026-10-25T13:00-04:00', 205, 'NFL Football',
+                                      'San Francisco 49ers at Atlanta Falcons'),
+                              listing('2026-10-25T16:25-04:00', 185, 'NFL Football',
+                                      'Green Bay Packers at Detroit Lions')]},
+           'NBC': {'events': [listing('2026-10-25T20:20-04:00', 200, 'NFL Football',
+                                      'Kansas City Chiefs at Seattle Seahawks')]}}
+STATIONS = [{'name': 'NBC', 'guide_index': 0}, {'name': 'FOX', 'guide_index': 1, 'aliases': ['WTTG']},
+            {'name': 'CBS', 'guide_index': 3, 'aliases': ['WUSA']}]
+
+
+class RegionalMarketTests(unittest.TestCase):
+    """The Roku's YouTube TV carries Lansing's CBS and FOX; the antenna Washington's."""
+
+    def suggest(self, listings, games=SLATE):
+        from roku_control.sports import SportsCatalog
+        with tempfile.TemporaryDirectory() as directory:
+            catalog = SportsCatalog(test_controller.ControllerTests.config(None, Path(directory), STATIONS),
+                                    None, scoreboard=object(), listings=listings)
+            return {game['game_id'] % 100: catalog._suggest(game) for game in games}
+
+    @staticmethod
+    def where(suggested):
+        return {key: (game['suggested_target']['source_id'], game['suggested_target']['channel_id'],
+                      game['on_sunday_ticket']) for key, game in suggested.items()}
+
+    def test_youtube_tv_shows_the_games_its_listings_name_and_sunday_ticket_the_rest(self):
+        suggested = self.suggest(lambda: LANSING)
+        self.assertEqual(self.where(suggested), {
+            14: ('youtube-tv', 'CBS', False),            # Lansing's CBS
+            12: ('sunday-ticket', '401873012', True),    # Washington's CBS, not Lansing's
+            17: ('youtube-tv', 'FOX', False),
+            18: ('sunday-ticket', '401873018', True),
+            19: ('sunday-ticket', '401873019', True),    # Lansing's CBS had its postgame show
+            20: ('youtube-tv', 'FOX', False),
+            22: ('youtube-tv', 'NBC', False)})           # national, at night
+        self.assertEqual(suggested[14]['markets'], {'youtube_tv': True, 'antenna': False, 'network': 'CBS', 'listed': True})
+        self.assertEqual(suggested[12]['markets'], {'youtube_tv': False, 'antenna': True, 'network': 'CBS', 'listed': True})
+        self.assertIn("Washington's WUSA has it", suggested[12]['note'])
+        self.assertEqual(suggested[22]['markets'], {'youtube_tv': True, 'antenna': True, 'network': None, 'listed': False})
+
+    def test_past_the_listings_youtube_tv_has_the_lions(self):
+        def unreachable():
+            raise OSError('no guide')
+        for listings in (None, lambda: None, unreachable, lambda: {'CBS': {'events': []}}):
+            suggested = self.suggest(listings)
+            self.assertEqual(self.where(suggested), {
+                14: ('sunday-ticket', '401873014', True), 12: ('sunday-ticket', '401873012', True),
+                17: ('sunday-ticket', '401873017', True), 18: ('sunday-ticket', '401873018', True),
+                19: ('sunday-ticket', '401873019', True), 20: ('youtube-tv', 'FOX', False),
+                22: ('youtube-tv', 'NBC', False)}, listings)
+            self.assertFalse(suggested[20]['markets']['listed'])
+
+    def test_the_listings_are_worked_out_again_only_when_they_change(self):
+        from roku_control.sports import SportsCatalog
+        guide = [LANSING]
+        catalog = SportsCatalog(None, None, scoreboard=object(), listings=lambda: guide[0])
+        first = catalog._youtube_tv_listings()
+        self.assertEqual(sorted(first), ['CBS', 'FOX'])
+        self.assertIs(catalog._youtube_tv_listings(), first)
+        guide[0] = {'CBS': {'events': []}}
+        self.assertEqual(catalog._youtube_tv_listings(), {})
+
+    def test_a_station_carries_its_own_markets_game(self):
+        from roku_control.sports import SportsCatalog
+        scoreboard = type('Scoreboard', (), {'games': lambda self, league, day:
+                                             SLATE if (league, day) == ('nfl', '2026-10-25') else []})()
+        baseball = type('Baseball', (), {'games': lambda self, day: {'games': []}})()
+        now = datetime(2026, 10, 25, 17, 30, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as directory:
+            catalog = SportsCatalog(test_controller.ControllerTests.config(None, Path(directory), STATIONS),
+                                    baseball, scoreboard=scoreboard, listings=lambda: LANSING)
+            youtube_tv, _ = catalog.games_on({'source_id': 'youtube-tv', 'channel_id': 'CBS'}, now=now)
+            antenna, _ = catalog.games_on({'source_id': 'tv-thing-digital', 'channel_id': '9.1'}, 'WUSA-HD', now=now)
+        self.assertEqual([game['title'] for game in youtube_tv], ['Indianapolis Colts at Minnesota Vikings'])
+        self.assertEqual([game['title'] for game in antenna], ['Cincinnati Bengals at Baltimore Ravens'])
 
 
 class HeaderTextTests(unittest.TestCase):

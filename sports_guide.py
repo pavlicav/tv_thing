@@ -5,18 +5,22 @@ Channel 60 plays it as slides (static/sports-guide.html, from
 
 * on a national broadcaster in the lineup, by that channel's name and number:
   a network on its DC station over the antenna (ABC 7), else a cable channel
-  from YouTube TV (TBS 31);
-* else on one of the Roku's game sources, on its Live Sports number: an
-  out-of-market Sunday game on Sunday Ticket, Thursday Night Football on
+  from YouTube TV (TBS 31). A regional Sunday NFL game on CBS or FOX is on
+  Washington's station only for a DC team, else on YouTube TV's Lansing
+  station when its listings name it;
+* else on one of the Roku's game sources, on its Live Sports number: any
+  other Sunday-afternoon game on Sunday Ticket, Thursday Night Football on
   Prime Video, a baseball game on MLB.TV, an NHL game on ESPN Unlimited.
 
 Streaming-only games (Peacock, Apple TV, ESPN+ outside hockey), regional
 sports networks and games already over are left out. Sports go in a fixed
-order, each sport's games by start time.
+order, each sport's games by start time, then by channel number.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from roku_control.config import normalize_channel_name
 from roku_control.sports import NETWORK_ALIASES, nhl_on_espn_unlimited
@@ -76,15 +80,26 @@ class Channels:
             # ESPN+ and Paramount+ stream; without the "+" they would read as ESPN and Paramount.
             if not part or "+" in part:
                 continue
-            part = NETWORK_ALIASES.get(part.upper(), part)
-            key = normalize_channel_name(part)
-            station = NETWORK_STATIONS.get(key)
-            if station and station[1] in self.antenna:
-                return station[0], self.antenna[station[1]]
-            if key in self.rows:
-                row, number = self.rows[key]
-                return SHORT_NAMES.get(row, row), number
+            found = self.station(part) or self.youtube_tv(part)
+            if found:
+                return found
         return None
+
+    def station(self, name):
+        """``(label, tv_number)`` of a network's DC station over the antenna, or None."""
+        station = NETWORK_STATIONS.get(_key(name))
+        return (station[0], self.antenna[station[1]]) if station and station[1] in self.antenna else None
+
+    def youtube_tv(self, name):
+        """``(label, tv_number)`` of YouTube TV's row for a broadcaster, or None. A network's
+        row is its Lansing station."""
+        found = self.rows.get(_key(name))
+        return (SHORT_NAMES.get(found[0], found[0]), found[1]) if found else None
+
+
+def _key(name):
+    name = str(name or "")
+    return normalize_channel_name(NETWORK_ALIASES.get(name.upper(), name))
 
 
 def _start(value):
@@ -123,9 +138,17 @@ def _where(league, game, numbered, channels):
     """Where a game from ESPN's scoreboard can be watched here, or None."""
     game_id = str(game.get("game_id"))
     if league == "nfl":
-        # A Sunday-afternoon game out of market is on Sunday Ticket, not on the
-        # CBS or FOX ESPN calls national; Thursday's is on Prime Video.
-        source = (game.get("suggested_target") or {}).get("source_id")
+        # A Sunday-afternoon CBS or FOX game is regional: on Washington's station
+        # over the antenna for a DC team, else on Lansing's in YouTube TV when its
+        # listings say so, else on Sunday Ticket. Thursday's is on Prime Video.
+        target = game.get("suggested_target") or {}
+        source, markets = target.get("source_id"), game.get("markets") or {}
+        regional = markets.get("network")
+        station = channels.station(regional) if regional and markets.get("antenna") else None
+        if station is None and regional and source == "youtube-tv":
+            station = channels.youtube_tv(target.get("channel_id"))
+        if station:
+            return _channel(station)
         if source in ("sunday-ticket", "thursday-night-football"):
             return _service(source, numbered.get((source, game_id)))
     found = _national(game, channels)
@@ -158,8 +181,8 @@ def day_games(espn, catalogs, channels, *, live_only=False):
     ``espn``: ``{league: games}`` from roku_control's scoreboard (the NFL's
     with their suggested targets); ``catalogs``: ``{source_id: listing}``,
     the Roku's numbered game catalogs, baseball's among them; ``channels``: a
-    Channels. ``live_only`` keeps just the games being played (yesterday's,
-    after midnight).
+    Channels. ``live_only`` keeps just the games being played (last night's,
+    after the day turns at 3 AM).
     """
     numbered = {(source_id, str(item.get("id"))): item
                 for source_id, listing in catalogs.items() for item in (listing or {}).get("items", ())}
@@ -185,13 +208,110 @@ def day_games(espn, catalogs, channels, *, live_only=False):
     return rows
 
 
+def _number(row):
+    number = row.get("tv_number")
+    return number if isinstance(number, int) else float("inf")
+
+
 def by_sport(rows):
-    """``[{sport, games}]`` in SPORTS order, each sport's games by start time."""
+    """``[{sport, games}]`` in SPORTS order, each sport's games by start time,
+    those at the same time by channel number."""
     order = [sport for sport, _ in SPORTS]
     grouped = {}
     for row in rows:
         grouped.setdefault(row["sport"], []).append(row)
     return [{"sport": sport, "games": sorted(
                 grouped[sport], key=lambda row: (row["time_tbd"] or row["start"] is None,
-                                                 row["start"] or 0, row["title"]))}
+                                                 row["start"] or 0, _number(row), row["title"]))}
             for sport in order if sport in grouped]
+
+
+# The antenna's listings title a game by its sport alone ("College Football"):
+# the station sends no teams. The guide names them from ESPN's scoreboard,
+# by these titles' leagues (static/listing-title.js gives the same titles
+# their brackets).
+LISTING_LEAGUES = (
+    (re.compile(r"College Football"), "ncaaf"),
+    (re.compile(r"(Men's )?College Basketball"), "ncaam"),
+    (re.compile(r"Women's College Basketball"), "ncaaw"),
+    (re.compile(r"NFL Football"), "nfl"),
+    (re.compile(r"MLB Baseball|\d{4} (World Series|(American|National) League (Championship|Division) Series"
+                r"|MLB Wild Card Series)"), "mlb"),
+    (re.compile(r"NBA Basketball|\d{4} NBA (Finals|Playoffs)"), "nba"),
+    (re.compile(r"WNBA Basketball|\d{4} WNBA (Finals|Playoffs)"), "wnba"),
+    (re.compile(r"NHL Hockey|\d{4} Stanley Cup (Final|Playoffs)"), "nhl"),
+    (re.compile(r"Premier League Soccer"), "epl"),
+    (re.compile(r"MLS Soccer"), "mls"),
+    (re.compile(r"NWSL Soccer"), "nwsl"),
+)
+# The antenna's affiliates other than NETWORK_STATIONS' DC ones, by network.
+AFFILIATES = {"54.1": "CW"}   # WNUV, the CW from Baltimore
+# How far a game's start may be from its airing's: ESPN gives the broadcast
+# window's start, as the listing does.
+MATCH_SECONDS = 15 * 60
+_EASTERN = ZoneInfo("America/New_York")
+
+
+def _league(title):
+    return next((league for pattern, league in LISTING_LEAGUES if pattern.fullmatch(title or "")), None)
+
+
+def _network(name):
+    """The network NETWORK_STATIONS names for an ESPN broadcast, or None."""
+    name = str(name or "")
+    station = NETWORK_STATIONS.get(normalize_channel_name(NETWORK_ALIASES.get(name.upper(), name)))
+    return station and station[0]
+
+
+def _station_networks():
+    networks = {number: label for label, number in NETWORK_STATIONS.values()}
+    networks.update(AFFILIATES)
+    return networks
+
+
+def _unnamed(channels):
+    """The antenna's game airings with no teams: ``(number, index, league, day, network)``."""
+    networks = _station_networks()
+    for number, channel in channels.items():
+        network = networks.get(number)
+        if network is None:
+            continue
+        for index, event in enumerate(channel.get("events") or ()):
+            league = None if event.get("episode_title") else _league(event.get("title"))
+            if league:
+                day = datetime.fromtimestamp(event["start"], _EASTERN).date().isoformat()
+                yield number, index, league, day, network
+
+
+def scoreboards_wanted(channels):
+    """The ``(league, day)`` scoreboards name_games needs for these channels."""
+    return {(league, day) for _, _, league, day, _ in _unnamed(channels)}
+
+
+def name_games(channels, scoreboards):
+    """The antenna's channels, their games' airings named by their teams.
+
+    ``channels``: guide channels by antenna number; ``scoreboards``:
+    ``{(league, day): games}`` from roku_control's scoreboard, every division
+    game. An airing titled by its sport alone gets ``episode_title`` "LSU at
+    Auburn" (and ``teams_from`` "ESPN") when exactly one game ESPN lists
+    nationally on its station's network starts within MATCH_SECONDS of it.
+    With none, or two (a network's regional window), it keeps its title alone.
+    The channels given are not changed.
+    """
+    named = {}
+    for number, index, league, day, network in _unnamed(channels):
+        event = channels[number]["events"][index]
+        found = [game for game in scoreboards.get((league, day)) or ()
+                 if game.get("start_time_tbd") is not True
+                 and (start := _start(game.get("start_time"))) is not None
+                 and abs(start - event["start"]) <= MATCH_SECONDS
+                 and any(broadcast.get("market") in (None, "national") and _network(broadcast.get("name")) == network
+                         for broadcast in game.get("broadcasts") or ())]
+        if len(found) == 1:
+            title = f"{_team(found[0].get('away'))} at {_team(found[0].get('home'))}"
+            named.setdefault(number, {})[index] = dict(event, episode_title=title, teams_from="ESPN")
+    return {number: dict(channel, events=[named.get(number, {}).get(index, event)
+                                          for index, event in enumerate(channel.get("events") or ())])
+            if number in named else channel
+            for number, channel in channels.items()}

@@ -123,6 +123,7 @@
     {"number": 141, "source": "youtube-tv", "channel": "Recipe.TV"},
     {"number": 142, "source": "youtube-tv", "channel": "AWE"},
     {"number": 143, "source": "youtube-tv", "channel": "Discovery Turbo"},
+    {"number": 144, "source": "internet", "channel": "cabride", "note": "Cab Ride: train cab rides, played only while watched (hazel's cabride.service)"},
     {"number": 150, "source": "digital", "channel": "32.2", "note": "PBS Kids"},
     {"number": 151, "source": "digital", "channel": "26.3", "note": "WETA Kids"},
     {"number": 152, "source": "digital", "channel": "22.3", "note": "MPT Kids"},

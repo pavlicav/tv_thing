@@ -20,7 +20,7 @@ import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from pathlib import Path
@@ -42,6 +42,7 @@ import yttv_epg
 from roku_control.errors import (BaseballScheduleError, ChannelNotFoundError,
                                  ConfigError, ControlBusyError, EcpError,
                                  RokuStreamError)
+from roku_control.days import today as games_day
 from roku_control.sports import estimated_end
 
 BASE_DIR = Path(__file__).parent
@@ -740,6 +741,26 @@ def internet_views():
     return [dict(view or {}, channel_id=stream.id, name=stream.name, note=stream.note,
                  stream_path=f"/stream/internet/{stream.id}/index.m3u8")
             for stream, view in zip(streams, views)]
+
+
+def internet_guide_channels():
+    """The internet streams that publish listings (``guide`` in internet_streams.json) as
+    guide rows keyed ``internet/<id>``. A listing that does not answer leaves its row empty."""
+    try:
+        streams = web_streams.streams()
+    except internet_streams.StreamConfigError:
+        return {}
+    channels = {}
+    for view in internet_views():
+        stream = streams.get(view["channel_id"])
+        if stream is None or not stream.guide:
+            continue
+        key = f"internet/{stream.id}"
+        channels[key] = {"key": key, "kind": "internet", "source_id": internet_streams.SOURCE,
+                         "channel_id": stream.id, "name": stream.name, "note": stream.note,
+                         **{field: view.get(field) for field in ("tv_number", "tv_name", "tv_section")},
+                         "stream_path": view["stream_path"], "events": web_streams.listings(stream.id)}
+    return channels
 
 
 def numbered_roku_listings(listings):
@@ -3927,8 +3948,9 @@ def sports_guide_channels(floor, ceiling, now):
     """
     if roku is None:
         return {}, None
-    first = datetime.fromtimestamp(floor, _EASTERN).date()
-    last = datetime.fromtimestamp(ceiling or now + SPORTS_GUIDE_HOURS * 3600, _EASTERN).date()
+    # Games' days, which turn at 3 AM: a night's late games keep their rows past midnight.
+    first, last = (date.fromisoformat(games_day(datetime.fromtimestamp(moment, _EASTERN)))
+                   for moment in (floor, ceiling or now + SPORTS_GUIDE_HOURS * 3600))
     days = [(first + timedelta(days=n)).isoformat() for n in range(max(0, (last - first).days) + 1)]
     sources = (*roku_lane.GAME_SOURCES, *roku_lane.LISTED_SOURCES)
     # A request per schedule and day; one at a time, a slow one would hold up the guide.
@@ -3963,8 +3985,9 @@ def sports_guide_channels(floor, ceiling, now):
 
 
 # VizelVision's Sports Guide (channel 60): today's games by sport, each on the
-# channel that carries it. After midnight, the night's games still on stay in it.
-SPORTS_GUIDE_LATE_HOURS = 6
+# channel that carries it. The day turns at 3 AM (roku_control/days.py); for
+# three hours more, the night's games still on stay in it.
+SPORTS_GUIDE_LATE_HOURS = 3
 # Every viewer of the slides asks; the scoreboards change by the minute at most.
 SPORTS_GUIDE_CACHE_SECONDS = 60
 _sports_guide_cache = {"day": None, "at": 0.0, "payload": None}
@@ -4088,7 +4111,7 @@ def api_v1_sports_guide(now=None):
     """
     clock = int(time.time()) if now is None else now
     eastern = datetime.fromtimestamp(clock, _EASTERN)
-    today = eastern.date().isoformat()
+    today = games_day(eastern)
     cache = _sports_guide_cache
     if (now is None and cache["day"] == today
             and time.monotonic() - cache["at"] < SPORTS_GUIDE_CACHE_SECONDS):
@@ -4099,8 +4122,9 @@ def api_v1_sports_guide(now=None):
         return {**payload, "available": False, "games": 0, "sports": [], "errors": [
             {"message": "The Roku lane is not configured, so TV Thing has no schedules."}]}
     days = [today]
-    if eastern.hour < SPORTS_GUIDE_LATE_HOURS:
-        days.append((eastern.date() - timedelta(days=1)).isoformat())
+    night = games_day(eastern - timedelta(hours=SPORTS_GUIDE_LATE_HOURS))
+    if night != today:
+        days.append(night)
     sources = (*roku_lane.GAME_SOURCES, *roku_lane.LISTED_SOURCES)
 
     def scoreboard(league, day):
@@ -4168,8 +4192,10 @@ def guide_payload(number=None, window_hours=None, now=None):
     The antenna's channels are keyed by their antenna number, as always;
     YouTube TV's follow, keyed ``youtube-tv/NAME`` (see yttv_guide_channels),
     then the day's games on the Live Sports numbers, keyed ``games/NUMBER``
-    (see sports_guide_channels). ``available`` and the counts beside it
-    describe the broadcast guide; ``youtube_tv`` and ``sports`` the others.
+    (see sports_guide_channels), and the internet streams that publish
+    listings, keyed ``internet/ID`` (see internet_guide_channels).
+    ``available`` and the counts beside it describe the broadcast guide;
+    ``youtube_tv`` and ``sports`` the others.
     """
     guide = epg.load_guide()
     now = int(time.time()) if now is None else now
@@ -4189,11 +4215,13 @@ def guide_payload(number=None, window_hours=None, now=None):
             if "tv_number" in channel:
                 lineup_numbers.setdefault(channel.get("number"), {
                     key: channel[key] for key in ("tv_number", "tv_name", "tv_section")})
+        antenna = {}
         for key, channel in guide["channels"].items():
             if number and key != number:
                 continue
-            channels[key] = {**channel, **lineup_numbers.get(key, {}), "key": key,
-                             "kind": "digital", "events": current(channel["events"])}
+            antenna[key] = {**channel, **lineup_numbers.get(key, {}), "key": key,
+                            "kind": "digital", "events": current(channel["events"])}
+        channels.update(name_antenna_games(antenna))
     yttv_channels, yttv_guide = yttv_guide_channels()
     for key, channel in yttv_channels.items():
         if number and key != number:
@@ -4207,6 +4235,13 @@ def guide_payload(number=None, window_hours=None, now=None):
         if number and key != number:
             continue
         channels[key] = {**channel, "events": current(channel["events"])}
+    if not number or str(number).startswith("internet/"):
+        for key, channel in internet_guide_channels().items():
+            events = current(channel["events"])
+            # A stream whose listings say nothing (or did not answer) has no row.
+            if (number and key != number) or not events:
+                continue
+            channels[key] = {**channel, "events": events}
 
     if not guide:
         return {
@@ -4247,10 +4282,31 @@ def guide_payload(number=None, window_hours=None, now=None):
     }
 
 
+def name_antenna_games(channels):
+    """The antenna's channels, their games named by their teams from ESPN.
+
+    See sports_guide.name_games. A scoreboard that does not answer leaves
+    its airings titled by their sport.
+    """
+    wanted = sports_guide.scoreboards_wanted(channels) if roku is not None else set()
+    if not wanted:
+        return channels
+    with ThreadPoolExecutor(max_workers=len(wanted)) as pool:
+        asked = {key: pool.submit(roku.sports.scoreboard.games, *key, power_five=False) for key in wanted}
+    scoreboards = {}
+    for key, future in asked.items():
+        try:
+            scoreboards[key] = future.result()
+        except Exception:  # noqa: BLE001 - one schedule never sinks the guide
+            continue
+    return sports_guide.name_games(channels, scoreboards)
+
+
 def guide_now_payload(now=None):
     """What is on right now, and what is next, per channel.
 
-    Antenna channels by number, YouTube TV's as ``youtube-tv/NAME``.
+    Antenna channels by number, YouTube TV's as ``youtube-tv/NAME``, internet
+    streams with listings as ``internet/ID``.
     """
     now = int(time.time()) if now is None else now
     guide = epg.load_guide()
@@ -4267,6 +4323,19 @@ def guide_now_payload(now=None):
                 following = event
         if current or following:
             entries[number] = {"now": current, "next": following}
+    # The antenna's games named by their teams, as the guide names them; the
+    # named airings come back in order, now before next.
+    antenna = {number: {"events": [event for event in entry.values() if event]}
+               for number, entry in entries.items() if number in (guide or {}).get("channels", {})}
+    for number, channel in name_antenna_games(antenna).items():
+        named = iter(channel["events"])
+        entries[number] = {slot: event and next(named) for slot, event in entries[number].items()}
+    for key, channel in internet_guide_channels().items():
+        on = next((event for event in channel["events"]
+                   if event["start"] <= now < event["start"] + event["duration"]), None)
+        later = next((event for event in channel["events"] if event["start"] > now), None)
+        if on or later:
+            entries[key] = {"now": on, "next": later}
     return {
         "available": bool(guide),
         "generated_at": (guide or {}).get("generated_at"),

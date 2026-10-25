@@ -99,6 +99,41 @@ def test_a_game_on_a_roku_source_is_on_its_live_sports_number():
     assert rows[2]["live"] is True and rows[3]["live"] is False
 
 
+def test_a_regional_nfl_game_is_on_its_own_markets_station():
+    # October 25: YouTube TV's CBS (Lansing's) had Colts at Vikings, the antenna's (Washington's)
+    # Bengals at Ravens; the others in the window were on Sunday Ticket.
+    channels = sports_guide.Channels([*ANTENNA, {"number": "9.1", "tv_number": 9}], YOUTUBE_TV)
+
+    def market(network, youtube_tv, antenna):
+        return {"network": network, "youtube_tv": youtube_tv, "antenna": antenna, "listed": True}
+
+    def ticket(game_id):
+        return {"source_id": "sunday-ticket", "channel_id": str(game_id), "date": "2026-10-25"}
+    espn = {"nfl": [
+        game(14, "2026-10-25T17:00Z", ("Colts",), ("Vikings",), "CBS",
+             suggested_target={"source_id": "youtube-tv", "channel_id": "CBS"}, markets=market("CBS", True, False)),
+        game(12, "2026-10-25T17:00Z", ("Bengals",), ("Ravens",), "CBS",
+             suggested_target=ticket(12), markets=market("CBS", False, True)),
+        game(18, "2026-10-25T17:00Z", ("Buccaneers",), ("Panthers",), "Fox",
+             suggested_target=ticket(18), markets=market("FOX", False, False)),
+        game(20, "2026-10-25T20:25Z", ("Packers",), ("Lions",), "Fox",
+             suggested_target={"source_id": "youtube-tv", "channel_id": "FOX"}, markets=market("FOX", True, False)),
+        game(22, "2026-10-26T00:20Z", ("Chiefs",), ("Seahawks",), "NBC",
+             suggested_target={"source_id": "youtube-tv", "channel_id": "NBC"},
+             markets={"network": None, "youtube_tv": True, "antenna": True, "listed": False})]}
+    catalogs = {"sunday-ticket": {"items": [{"id": "12", "tv_number": 61}, {"id": "18", "tv_number": 62}]}}
+    rows = sports_guide.day_games(espn, catalogs, channels)
+    assert [(row["title"], row["network"], row["tv_number"], row["via"]) for row in rows] == [
+        ("Colts at Vikings", "CBS", 19, "channel"),       # YouTube TV's row, not CBS 9
+        ("Bengals at Ravens", "CBS", 9, "channel"),       # over the antenna, not Sunday Ticket
+        ("Buccaneers at Panthers", "Sunday Ticket", 62, "sunday-ticket"),
+        ("Packers at Lions", "FOX", 17, "channel"),       # YouTube TV's row, not FOX 5
+        ("Chiefs at Seahawks", "NBC", 4, "channel")]      # national: the antenna's NBC
+    # Without Washington's station, a DC team's game is left to Sunday Ticket.
+    rows = sports_guide.day_games({"nfl": espn["nfl"][1:2]}, catalogs, CHANNELS)
+    assert [(row["network"], row["tv_number"]) for row in rows] == [("Sunday Ticket", 61)]
+
+
 def test_finished_games_go_and_after_midnight_only_the_ones_still_on_stay():
     espn = {"nhl": [game(1, "2026-10-19T23:00Z", ("A",), ("B",), "TNT", state="post"),
                     game(2, "2026-10-20T02:00Z", ("C",), ("D",), "TNT", state="in"),
@@ -109,14 +144,15 @@ def test_finished_games_go_and_after_midnight_only_the_ones_still_on_stay():
     assert sports_guide.day_games({"nhl": [postponed]}, {}, CHANNELS) == []
 
 
-def test_the_guide_goes_by_sport_then_time():
+def test_the_guide_goes_by_sport_then_time_then_channel():
     rows = sports_guide.day_games({
         "nhl": [game(1, "2026-10-24T23:00Z", ("Kings",), ("Devils",), "TNT")],
         "nba": [game(2, "2026-10-24T23:30Z", ("Bucks",), ("76ers",), "ESPN")],
         "ncaaf": [game(3, "2026-10-24T19:30Z", ("Iowa",), ("Minnesota",), "BTN"),
                   game(4, "2026-10-24T16:00Z", ("Pitt",), ("Miami",), "ESPN"),
                   game(5, None, ("Late",), ("Kick",), "ESPN", start_time_tbd=True),
-                  game(6, "2026-10-24T16:00Z", ("Indiana",), ("Michigan",), "Fox")],
+                  game(6, "2026-10-24T16:00Z", ("Indiana",), ("Michigan",), "Fox"),
+                  game(8, "2026-10-24T16:00Z", ("Army",), ("Navy",), "ABC")],
         "nfl": [game(7, "2026-10-24T20:00Z", ("Saints",), ("Steelers",), "CBS",
                      suggested_target={"source_id": "youtube-tv"})],
     }, {}, CHANNELS)
@@ -124,8 +160,9 @@ def test_the_guide_goes_by_sport_then_time():
     # The pros and the colleges each have their own pages, the NFL first.
     assert [sport["sport"] for sport in guide] == ["NFL Football", "College Football", "Basketball", "Hockey"]
     assert [row["title"] for row in guide[0]["games"]] == ["Saints at Steelers"]
+    # Games at the same time go by channel: FOX 5, ABC 7, ESPN 33.
     assert [row["title"] for row in guide[1]["games"]] == [
-        "Indiana at Michigan", "Pitt at Miami", "Iowa at Minnesota", "Late at Kick"]
+        "Indiana at Michigan", "Army at Navy", "Pitt at Miami", "Iowa at Minnesota", "Late at Kick"]
     assert guide[1]["games"][-1]["time_tbd"] is True and guide[1]["games"][-1]["start"] is None
     assert sports_guide.by_sport([]) == []
 
@@ -155,6 +192,73 @@ def test_the_scoreboard_reads_every_fbs_and_division_one_game_for_the_guide():
     every = board.games("ncaaf", "2026-10-24", power_five=False)
     assert [g["home"]["short"] for g in every] == ["Georgia", "Toledo"]
     assert len(urls) == 2 and all("groups=80" in url for url in urls)
+    # Over 500 ESPN lists 25 games, which on a Saturday leaves out the evening.
+    assert all("limit=500" in url for url in urls)
     assert board.games("ncaaf", "2026-10-24", power_five=False) is every and len(urls) == 2
     board.games("ncaam", "2026-11-07")
     assert "basketball/mens-college-basketball/scoreboard?dates=20261107&groups=50" in urls[-1]
+
+
+# ---------------------------------------------------------------------------
+# The antenna's games, named by their teams in the program guide
+# ---------------------------------------------------------------------------
+
+NOON = 1792857600   # 2026-10-24 12:00 Eastern
+
+
+def airing(title, start=NOON, **extra):
+    return {"start": start, "duration": 3 * 3600, "title": title, **extra}
+
+
+def test_an_antenna_airing_is_named_by_the_one_game_on_its_network_then():
+    channels = {"7.1": {"name": "WJLA", "events": [airing("Paid Program", NOON - 1800), airing("College Football")]},
+                "50.1": {"name": "WDCW-DT", "events": [airing("College Football")]},
+                "54.1": {"name": "CWWNUV", "events": [airing("College Football")]},
+                "26.1": {"name": "WETA-HD", "events": [airing("College Football")]}}
+    assert sports_guide.scoreboards_wanted(channels) == {("ncaaf", "2026-10-24")}
+    scoreboards = {("ncaaf", "2026-10-24"): [
+        game(1, "2026-10-24T16:00Z", ("LSU Tigers", "LSU"), ("Auburn Tigers", "Auburn"), "ABC"),
+        game(2, "2026-10-24T16:00Z", ("California Golden Bears", "California"), ("SMU Mustangs", "SMU"), "CW"),
+        game(3, "2026-10-24T16:00Z", ("Pitt Panthers", "Pitt"), ("Miami Hurricanes", "Miami"), "ESPN")]}
+    named = sports_guide.name_games(channels, scoreboards)
+    assert named["7.1"]["events"][1] == dict(channels["7.1"]["events"][1],
+                                             episode_title="LSU at Auburn", teams_from="ESPN")
+    assert named["7.1"]["events"][0] is channels["7.1"]["events"][0]
+    # The CW's game is on its DC station and on Baltimore's.
+    assert named["50.1"]["events"][0]["episode_title"] == "California at SMU"
+    assert named["54.1"]["events"][0]["episode_title"] == "California at SMU"
+    # A station with no network is left alone, and nothing given is changed.
+    assert named["26.1"] is channels["26.1"]
+    assert "episode_title" not in channels["7.1"]["events"][1]
+
+
+def test_an_airing_keeps_its_title_unless_exactly_one_game_matches():
+    channels = {"5.1": {"events": [airing("College Football")]},
+                "9.1": {"events": [airing("College Football", NOON + 3.5 * 3600)]},
+                "4.1": {"events": [airing("College Football", NOON + 7.5 * 3600)]},
+                "50.1": {"events": [airing("College Football", episode_title="Duke at UNC")]},
+                "7.1": {"events": [airing("NFL Football")]}}
+    scoreboards = {("ncaaf", "2026-10-24"): [
+        # Two FOX games at noon: a regional window, either one.
+        game(1, "2026-10-24T16:00Z", ("Indiana Hoosiers", "Indiana"), ("Michigan Wolverines", "Michigan"), "Fox"),
+        game(2, "2026-10-24T16:00Z", ("BYU Cougars", "BYU"), ("UCF Knights", "UCF"), "FOX"),
+        # CBS's game is an hour after the airing starts.
+        game(3, "2026-10-24T20:30Z", ("Michigan State Spartans", "Michigan St"), ("UCLA Bruins", "UCLA"), "CBS"),
+        # NBC's is only on the home team's station.
+        game(4, "2026-10-24T23:30Z", ("USC Trojans", "USC"), ("Wisconsin Badgers", "Wisconsin"), ("NBC", "home"))]}
+    named = sports_guide.name_games(channels, scoreboards)
+    for number in ("5.1", "9.1", "4.1", "7.1"):
+        assert "episode_title" not in named[number]["events"][0], number
+    assert named["50.1"]["events"][0]["episode_title"] == "Duke at UNC"
+    # A scoreboard that did not answer: the airings keep their titles.
+    assert sports_guide.name_games(channels, {}) == channels
+    assert sports_guide.scoreboards_wanted(channels) == {("ncaaf", "2026-10-24"), ("nfl", "2026-10-24")}
+
+
+def test_a_game_within_a_quarter_hour_of_its_airing_matches():
+    channels = {"9.1": {"events": [airing("College Football", NOON + 3.5 * 3600)]}}
+    board = lambda start: {("ncaaf", "2026-10-24"): [  # noqa: E731
+        game(1, start, ("Michigan State Spartans", "Michigan St"), ("UCLA Bruins", "UCLA"), "CBS")]}
+    assert sports_guide.name_games(channels, board("2026-10-24T19:42Z"))["9.1"]["events"][0][
+        "episode_title"] == "Michigan St at UCLA"
+    assert "episode_title" not in sports_guide.name_games(channels, board("2026-10-24T19:46Z"))["9.1"]["events"][0]

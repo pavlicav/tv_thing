@@ -49,7 +49,9 @@ the guide's channels (`/api/v1/guide`) add
 They are absent when the server's `lineup.json` is unusable. Identity is
 unchanged: tune and record by `channel_id` (or the antenna `number`) as before,
 never by `tv_number`. A day's games are numbered per date, so a game's number
-belongs to the date it was listed for.
+belongs to the date it was listed for. A games day turns at 03:00 Eastern, not
+at midnight: until then a `date` left out means the night before, so its late
+games keep their numbers until they are over.
 
 `GET /api/v1/sources` adds `lineup`: `{path, sections, house, slides}`, where
 `house` lists VizelVision's numbers and `slides` the station's slide channels,
@@ -78,8 +80,9 @@ with `kind`, `source_id`, `channel_id` and (for games) `date`. A Roku catalog
 that could not be read is named in `errors` and left out.
 
 `GET /api/v1/sports-guide` is the Sports Guide's listings: today's games
-(Eastern) that can be watched here, as `sports: [{sport, games}]` in a fixed
-order (Football, Baseball, Basketball, Hockey, Soccer), each sport's games by
+(Eastern, the day turning at 03:00) that can be watched here, as
+`sports: [{sport, games}]` in a fixed order (Football, Baseball, Basketball,
+Hockey, Soccer), each sport's games by
 start time. A game has `league`, `tag`, `start` (Unix seconds, null when the
 time is to be announced, with `time_tbd`), `live`, `title` ("Away at Home"),
 `away`, `home`, `network` and `tv_number`: the broadcaster's lineup channel
@@ -104,6 +107,13 @@ no lock and no encoder, and any number of players (VizelVision included) may
 use it. Errors are JSON: **404** for an unknown stream or rendition, **503** when
 the programme is not live, **502** when upstream fails, **403** when Yle
 refuses to play it here.
+
+A stream may name a listings URL as `guide`: JSON `{"events": [{"start", "duration",
+"title", "description"}]}` (Unix seconds). TV Thing reads it at most once a minute
+(5 s timeout) and lists the stream in the programme guide (below). When it fails, the
+last good listings stand in for 15 minutes. Channel 144, Cab Ride (`cabride`), is one:
+hazel's `cabride.service` on `127.0.0.1:8791` plays train cab rides only while watched
+and publishes its schedule at `/guide.json`.
 
 ## Integration flow
 
@@ -299,12 +309,19 @@ starting in the next N hours). Three kinds of row share it:
   `errors` (a schedule that did not answer, by `source_id` and `date`). A
   request for one other row (`?channel=7.1`) reads no schedule and gives
   `sports: null`.
+* **Internet streams** that publish listings (`guide` in
+  `internet_streams.json`), keyed `internet/ID` (`kind: "internet"`, with
+  `source_id` `internet`, `channel_id`, `name`, `note` and `stream_path`).
+  Events have `start`, `duration`, `title` and sometimes `description`. The
+  guide's Watch plays the relay (`#watch=internet%2FID` on the Watch page);
+  there is nothing to record.
 
-Every row has `key` and `kind` (`digital`, `roku` or `games`) and the
+Every row has `key` and `kind` (`digital`, `roku`, `games` or `internet`) and the
 channel-number fields above. Antenna events have `start`, `duration`, `title`, `captions`
 and sometimes `description`. YouTube TV events may also have `episode_title`,
 `season`, `episode`, `new`, `live` and `rating`. GET `api/v1/guide/now` gives
-`now` and `next` per row under the same keys (Live Sports is not in it).
+`now` and `next` per row under the same keys (Live Sports is not in it;
+internet streams with listings are).
 Tune a YouTube TV row through its Roku source (`source: "youtube-tv"`,
 `channel_id`), and a game by its airing's `source_id`, `channel_id` and
 `date`, never by a row's key.

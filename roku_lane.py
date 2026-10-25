@@ -26,6 +26,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import date
 
+from roku_control import days
 from roku_control.errors import (ConfigError, ControlBusyError, CueCancelledError, EcpError,
                                  NavigationError, RokuStreamError, SundayTicketBlackoutError)
 from roku_control.sports import TYPICAL, nhl_on_espn_unlimited
@@ -94,8 +95,8 @@ def moved(before, after):
 
 
 def _iso_date(value):
-    if value is None:
-        return date.today().isoformat()
+    if value is None:   # the games' day, which turns at 3 AM
+        return days.today()
     if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
         raise ConfigError("date must use YYYY-MM-DD format")
     try:
@@ -617,6 +618,7 @@ def load(config_path, *, capture_source, reuse_max_age=900.0, ecp=None, feedback
     from roku_control.controller import RokuStreamController
     from roku_control.lane_feedback import LaneCaptureFeedback
     from roku_control.sports import SportsCatalog
+    import yttv_epg
 
     if not Path(config_path).is_file():
         return None
@@ -627,6 +629,8 @@ def load(config_path, *, capture_source, reuse_max_age=900.0, ecp=None, feedback
     controller = RokuStreamController(config, ecp=ecp, feedback=feedback)
     controller.recover_operations()
     baseball = BaseballCatalog(config)
-    return RokuLane(config, controller, baseball=baseball, sports=SportsCatalog(config, baseball),
+    # YouTube TV's own (Lansing's) listings say which regional NFL games its CBS and FOX show.
+    sports = SportsCatalog(config, baseball, listings=lambda: (yttv_epg.load_guide() or {}).get("channels"))
+    return RokuLane(config, controller, baseball=baseball, sports=sports,
                     capture_source=capture_source, reuse_max_age=reuse_max_age)
 

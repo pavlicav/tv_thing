@@ -873,11 +873,86 @@ def test_guide_now_reports_current_and_following_programmes(monkeypatch):
     assert entry["next"]["title"] == "Up next"
 
 
+def _cab_ride_listings(monkeypatch, now):
+    """The Cab Ride internet stream (channel 144) with three rides listed."""
+    rides = [{"start": now - 1800, "duration": 3600, "title": "Aizu Railway",
+              "description": "AIZU Mount Express · Kinugawa-Onsen → Aizu-Wakamatsu · Japan"},
+             {"start": now + 1800, "duration": 900, "title": "Train in the Snow"},
+             {"start": now + 2700, "duration": 7200, "title": "Bergen Line"}]
+    monkeypatch.setattr(server.web_streams, "listings",
+                        lambda stream_id: rides if stream_id == "cabride" else [])
+
+
+def test_guide_lists_internet_streams_that_publish_listings(monkeypatch):
+    now = 1_800_000_000
+    monkeypatch.setattr(server.epg, "load_guide", lambda: _stored_guide(now))
+    _cab_ride_listings(monkeypatch, now)
+    payload = server.guide_payload(now=now)
+
+    cab = payload["channels"]["internet/cabride"]
+    assert (cab["kind"], cab["source_id"], cab["channel_id"], cab["tv_number"], cab["name"]) == (
+        "internet", "internet", "cabride", 144, "Cab Ride")
+    assert cab["stream_path"] == "/stream/internet/cabride/index.m3u8"
+    assert [e["title"] for e in cab["events"]] == ["Aizu Railway", "Train in the Snow", "Bergen Line"]
+    # Pentulive publishes none, so it has no row; the antenna's rows are as ever.
+    assert "internet/pentulive" not in payload["channels"]
+    assert payload["channels"]["9.1"]["kind"] == "digital"
+    # One row, and a window, as for any other.
+    assert set(server.guide_payload(number="internet/cabride", now=now)["channels"]) == {"internet/cabride"}
+    narrow = server.guide_payload(window_hours=0.25, now=now)
+    assert [e["title"] for e in narrow["channels"]["internet/cabride"]["events"]] == ["Aizu Railway"]
+    assert "internet/cabride" not in server.guide_payload(number="9.1", now=now)["channels"]
+
+
+def test_guide_now_names_what_an_internet_stream_plays(monkeypatch):
+    now = 1_800_000_000
+    monkeypatch.setattr(server.epg, "load_guide", lambda: _stored_guide(now))
+    _cab_ride_listings(monkeypatch, now)
+    entry = server.guide_now_payload(now=now)["channels"]["internet/cabride"]
+    assert entry["now"]["title"] == "Aizu Railway"
+    assert entry["next"]["title"] == "Train in the Snow"
+
+
 def test_guide_now_is_empty_without_a_guide(monkeypatch):
     monkeypatch.setattr(server.epg, "load_guide", lambda: None)
     payload = server.guide_now_payload()
     assert payload == {"available": False, "generated_at": None,
                        "youtube_tv_available": False, "channels": {}}
+
+
+def test_the_guide_names_the_antennas_games_from_espn(monkeypatch):
+    from types import SimpleNamespace
+    now = 1792859400   # 2026-10-24 12:30 Eastern
+    stored = _stored_guide(now)
+    stored["channels"]["7.1"] = {"number": "7.1", "name": "WJLA", "events": [
+        {"event_id": 9, "start": now - 1800, "duration": 3 * 3600, "title": "College Football"}]}
+    monkeypatch.setattr(server.epg, "load_guide", lambda: stored)
+    asked = []
+
+    def games(league, day, *, power_five=True):
+        asked.append((league, day, power_five))
+        team = lambda name: {"name": name, "short": name}  # noqa: E731
+        return [{"game_id": 1, "start_time": "2026-10-24T16:00Z", "away": team("LSU"),
+                 "home": team("Auburn"), "broadcasts": [{"name": "ABC", "market": "national"}]}]
+
+    monkeypatch.setattr(server, "roku", SimpleNamespace(
+        catalog=lambda source_id, requested_date=None: {"items": []},
+        sports=SimpleNamespace(scoreboard=SimpleNamespace(games=games))))
+    event = server.guide_payload(now=now)["channels"]["7.1"]["events"][0]
+    assert (event["title"], event["episode_title"], event["teams_from"]) == (
+        "College Football", "LSU at Auburn", "ESPN")
+    # Every FBS game, not only the Power 5's.
+    assert asked == [("ncaaf", "2026-10-24", False)]
+    entries = server.guide_now_payload(now=now)["channels"]
+    assert entries["7.1"]["now"]["episode_title"] == "LSU at Auburn" and entries["7.1"]["next"] is None
+    assert entries["9.1"]["now"]["title"] == "On now"
+
+    def down(league, day, *, power_five=True):
+        raise BaseballScheduleError("Could not load the College Football schedule: timed out")
+
+    monkeypatch.setattr(server.roku.sports.scoreboard, "games", down)
+    event = server.guide_payload(now=now)["channels"]["7.1"]["events"][0]
+    assert event["title"] == "College Football" and "episode_title" not in event
 
 
 # ---------------------------------------------------------------------------
@@ -1100,6 +1175,21 @@ def test_the_sports_rows_follow_the_window_and_the_channel_asked_for(monkeypatch
     assert list(server.guide_payload(number="games/64", now=now)["channels"]) == ["games/64"]
 
 
+def test_the_nights_games_keep_their_rows_until_3_am(monkeypatch):
+    monkeypatch.setattr(server.epg, "load_guide", lambda: None)
+    asked = _sports(monkeypatch)
+    now = 1_800_079_200     # 2027-01-16T06:00Z, 01:00 Eastern on the 16th
+    rows = {key: channel for key, channel in server.guide_payload(window_hours=1, now=now)["channels"].items()
+            if key.startswith("games/")}
+    # Still the 15th's games: the 22:00 one, still on, keeps 64 and its Watch.
+    assert {day for _, day in asked} == {"2027-01-15"}
+    assert (rows["games/64"]["events"][0]["channel_id"], rows["games/64"]["events"][0]["date"]) == (
+        "13", "2027-01-15")
+    asked.clear()
+    server.guide_payload(window_hours=1, now=now + 3 * 3600)     # 04:00: the 16th's
+    assert {day for _, day in asked} == {"2027-01-16"}
+
+
 def test_the_lineup_numbers_the_days_games_together(monkeypatch):
     _sports(monkeypatch)
     monkeypatch.setattr(server, "load_channels", lambda: [])
@@ -1190,6 +1280,19 @@ def test_after_midnight_the_sports_guide_keeps_the_games_still_on(monkeypatch):
     assert sorted((error["league"], error["date"]) for error in payload["errors"]) == [
         ("nba", "2027-01-14"), ("nba", "2027-01-15")]
     assert payload["available"] is True
+
+
+def test_until_3_am_the_sports_guide_is_still_the_nights(monkeypatch):
+    asked = _guide_roku(monkeypatch)
+    now = 1_799_992_800     # 2027-01-15T06:00Z, 01:00 Eastern
+    payload = server.api_v1_sports_guide(now=now)
+    assert payload["date"] == "2027-01-14" and {day for _, day, _ in asked} == {"2027-01-14"}
+    assert [(game["title"], game["live"]) for sport in payload["sports"] for game in sport["games"]] == [
+        ("Kings at Kraken", True)]
+    asked.clear()
+    # The night's games still on stay until 6 AM (see above); then the day is the 15th's alone.
+    assert server.api_v1_sports_guide(now=now + 5 * 3600)["date"] == "2027-01-15"
+    assert {day for _, day, _ in asked} == {"2027-01-15"}
 
 
 def test_the_sports_guide_is_read_once_a_minute_and_says_when_it_cannot_be(monkeypatch):

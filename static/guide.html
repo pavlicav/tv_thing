@@ -450,6 +450,7 @@
   </main>
 
 <script src="hls.min.js"></script>
+<script src="listing-title.js"></script>
 <script>
 // The grid is drawn against wall-clock minutes: one minute is PPM pixels, and
 // everything -- ticks, programme blocks, the now line -- is positioned from
@@ -499,16 +500,22 @@ const isRoku = (channel) => channel.kind === 'roku';
 // its own game, with its own target; Watch puts it on the Roku when today's
 // and the Roku can reach it (hockey from YouTube TV's ESPN page).
 const isGames = (channel) => channel.kind === 'games';
-function localDate() {
-  const now = new Date();
+// An internet stream that publishes listings (internet/cabride): it plays the
+// server's relay of it, so Watch puts it on with no tuner and nothing to record.
+const isInternet = (channel) => channel.kind === 'internet';
+// The games' day, which turns at 3 AM (roku_control/days.py): last night's
+// games still on at 1 AM are today's, and Watch puts them on.
+function gameDay() {
+  const day = new Date();
+  if (day.getHours() < 3) day.setDate(day.getDate() - 1);
   const pad = (n) => String(n).padStart(2, '0');
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  return `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
 }
 // Why a game cannot be put on the Roku from here, or '' when it can.
 function gameRefusal(event) {
   if (!event) return 'Choose a game first.';
   if (!event.playable) return 'The Roku cannot reach this game.';
-  if (event.date !== localDate()) return `${event.title} is not on today; Watch is for today's games.`;
+  if (event.date !== gameDay()) return `${event.title} is not on today; Watch is for today's games.`;
   return '';
 }
 // The lineup's name for it (WILX for YouTube TV's NBC), as the Watch page lists it.
@@ -544,7 +551,8 @@ function render() {
     .map(([key, channel]) => ({ ...channel, key: channel.key || key }))
     .filter((channel) => isRoku(channel) ? !antennaNumbers
       : isGames(channel) ? !antennaNumbers && channel.events.length > 0
-        : channel.events.length)
+        : isInternet(channel) ? !antennaNumbers && channel.events.length > 0
+          : channel.events.length)
     .sort(compareChannels);
 
   if (!channels.some((channel) => channel.events.length)) {
@@ -601,7 +609,8 @@ function shownNumber(channel) {
 
 // "· antenna 7.1" where the lineup number differs from the antenna's.
 function antennaNote(channel, before, after) {
-  return !isRoku(channel) && !isGames(channel) && shownNumber(channel) !== channel.number
+  return !isRoku(channel) && !isGames(channel) && !isInternet(channel)
+    && shownNumber(channel) !== channel.number
     ? `${before}${channel.number}${after}` : '';
 }
 
@@ -707,6 +716,7 @@ function drawRows(list, width, now) {
         ? 'its listing did not answer this time' : 'this frequency did not read this time')
       : `Watch ${shownNumber(channel)} ${nameOf(channel)}` + antennaNote(channel, ' (antenna ', ')')
         + (isRoku(channel) ? ' on the Roku (YouTube TV)' : '')
+        + (isInternet(channel) ? ' (internet stream)' : '')
         + (isRoku(channel) && !channel.listing ? ' — no listings are published for it' : '');
     // A game row is a different game each day: its name picks the one on now or next.
     chan.onclick = () => {
@@ -762,13 +772,13 @@ function block(channel, event, now) {
   node.style.left = `${left}px`;
   node.style.width = `${Math.max(2, right - left - 2)}px`;
   node.dataset.start = event.start;
-  const title = escape(event.title || 'No title');
+  const title = escape(ListingTitle.listingTitle(event));
   node.innerHTML =
     (event.start < windowStart ? '<span class="arrow">&#9664;</span>' : '') +
     `<span class="prog-title">${title}</span>` +
     (event.captions ? '<span class="cc">CC</span>' : '') +
     (end > windowEnd ? '<span class="arrow" style="margin-left:auto">&#9654;</span>' : '');
-  node.title = `${event.title || 'No title'} · ${fmtTime(event.start)}–${fmtTime(end)}`;
+  node.title = `${ListingTitle.listingTitle(event)} · ${fmtTime(event.start)}–${fmtTime(end)}`;
   node.onclick = () => { userMoved = true; select(channel, event, { keepTime: false }); };
   node.ondblclick = () => watch(channel, event);
   if (selected && keyOf(selected.channel) === keyOf(channel)
@@ -832,10 +842,12 @@ function select(channel, event, { keepTime = true, scroll = true } = {}) {
   const now = nowUnix();
   const parts = [];
   // YouTube TV's listings name the episode, as a set-top box's guide does.
+  // A game titled by its teams names its sport there instead.
   const episode = [event.season && `S${event.season}`, event.episode && `E${event.episode}`]
     .filter(Boolean).join(' ');
-  if (event.episode_title || episode) {
-    parts.push(`<span>${escape([episode, event.episode_title].filter(Boolean).join(' · '))}</span>`);
+  const named = ListingTitle.namesTeams(event) ? event.title : event.episode_title;
+  if (named || episode) {
+    parts.push(`<span>${escape([episode, named].filter(Boolean).join(' · '))}</span>`);
   }
   parts.push(
     `<span>${fmtDay(event.start)} ${fmtTime(event.start)} – ${fmtTime(end)}</span>`,
@@ -854,15 +866,18 @@ function select(channel, event, { keepTime = true, scroll = true } = {}) {
   }
 
   $('d-chan').textContent = `${shownNumber(channel)}  ${nameOf(channel)}`
-    + antennaNote(channel, '  · ', '') + (isRoku(channel) ? '  · YouTube TV' : '');
-  $('d-title').textContent = event.title || 'No title';
+    + antennaNote(channel, '  · ', '') + (isRoku(channel) ? '  · YouTube TV'
+      : isInternet(channel) ? '  · Internet' : '');
+  $('d-title').textContent = ListingTitle.listingTitle(event);
   $('d-sub').innerHTML = parts.join('');
   $('d-desc').textContent = event.description || (isRoku(channel)
-      ? 'No description in the listing.' : 'No description — this station sends titles only.');
+      ? 'No description in the listing.' : event.teams_from
+      ? `No description — this station sends titles only; the teams are from ${event.teams_from}'s schedule.`
+      : 'No description — this station sends titles only.');
   $('d-watch').hidden = isGames(channel) && Boolean(gameRefusal(event));
   $('d-watch').textContent = `Watch ${shownNumber(channel)}`;
-  $('d-record').hidden = end <= now || isGames(channel);
-  $('btn-record-key').disabled = end <= now || isGames(channel);
+  $('d-record').hidden = end <= now || isGames(channel) || isInternet(channel);
+  $('btn-record-key').disabled = end <= now || isGames(channel) || isInternet(channel);
   $('d-record').disabled = false;
   $('d-record').innerHTML = '<span class="rec">●</span> Record';
 }
@@ -921,7 +936,7 @@ async function watch(channel, event) {
   }
   // The Roku takes a minute or two to find a YouTube TV channel, and may be
   // locked; the Watch page shows that progress and asks about the lock.
-  if (isRoku(channel)) {
+  if (isRoku(channel) || isInternet(channel)) {
     location.href = `./#watch=${encodeURIComponent(keyOf(channel))}`;
     return;
   }

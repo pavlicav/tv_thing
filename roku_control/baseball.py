@@ -9,6 +9,7 @@ import urllib.request
 from datetime import date, datetime, timezone
 from typing import Callable
 
+from . import days
 from .config import AppConfig, normalize_channel_name
 from .errors import BaseballScheduleError, ChannelNotFoundError, ConfigError
 
@@ -62,7 +63,7 @@ def scoreline(game: dict[str, object]) -> str:
 
 def _iso_date(value: str | None) -> str:
     if value is None or not value.strip():
-        return date.today().isoformat()
+        return days.today()
     try:
         return date.fromisoformat(value).isoformat()
     except ValueError as exc:
