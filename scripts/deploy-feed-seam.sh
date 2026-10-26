@@ -104,7 +104,14 @@ wait_for() {  # seconds, description, command...
     say "$what"
 }
 
-locks_clear() { [ "$(json "$P/api/v1/tuner/lock" "all(v is None for v in d['locks'].values())")" = "True" ]; }
+locks_clear() {  # url
+    [ "$(json "$1/api/v1/tuner/lock" "all(v is None for v in d['locks'].values())")" = "True" ]
+}
+# Selecting the HD PVR's input (component, roku.json's input_index, as TV Thing does before every
+# capture) answers at once. When the device has hung, it blocks until killed, and every capture
+# opens it to no data (2026-10-25). --get-input is no test: the driver answers it from memory.
+hdpvr_answers() { timeout -k 2 5 v4l2-ctl --device "$DEVICE" --set-input=0; }
+HDPVR_RESET="echo 0 | sudo tee /sys/bus/usb/devices/2-12/authorized; sleep 3; echo 1 | sudo tee /sys/bus/usb/devices/2-12/authorized (or unplug its power for 10 s)"
 lane_ready() {  # url lane
     [ "$(json "$1/api/v1/status" "bool(d['lanes']['$2']['stream'].get('ready'))")" = "True" ]
 }
@@ -137,6 +144,7 @@ precheck() {
     [ "$due" = "0" ] || fail "a VCR timer starts within the hour: TV Thing would be down for it"
     [ -d "$TV/roku_state/templates-720p" ] || fail "the Roku's calibration templates are missing"
     [ -e "$DEVICE" ] || fail "the HD PVR is not connected ($DEVICE)"
+    lane_ready "$P" roku || fail "production's Roku capture is not running: is the HD PVR hung? Reset it: $HDPVR_RESET"
     [ -n "$KEY" ] || fail "no VizelVision API key in $VV_CONFIG"
     on_air=$(json "$VV/v1/master" "json.dumps(d.get('on_air'))") || fail "VizelVision is not answering"
     prepared=$(json "$VV/v1/master" "json.dumps(d.get('prepared'))")
@@ -162,7 +170,7 @@ stop_vizelvision() {
     cp -p "$TV/streams/tuner_locks.json" "$LOGDIR/" 2>/dev/null
     user_systemctl stop vizelvision-web.service vizelvision-master.service
     STOPPED=1
-    wait_for 150 "TV Thing's tuner locks have expired" locks_clear || fail "a tuner lock is still held"
+    wait_for 150 "TV Thing's tuner locks have expired" locks_clear "$P" || fail "a tuner lock is still held"
 }
 
 start_vizelvision() {
@@ -217,6 +225,9 @@ restore_air() {  # Up next resumed (web starts it paused); what was on air put b
 # --- gates ------------------------------------------------------------------------------------
 gate() {  # name, url, pid, args...
     local name=$1 url=$2 pid=$3; shift 3
+    # A gate locks every lane. A recording cancelled just before lets go of its lock only on
+    # the VCR's next tick (the headroom check's did not, 2026-10-25).
+    wait_for 60 "Every lane is unlocked" locks_clear "$url" || { say "a lane is still locked at $url"; return 1; }
     say "Gate: $name"
     as_vivian "$PY" "$STAGE/stream_sanity_check.py" --url "$url" --server-pid "$pid" "$@" \
         2>&1 | tee "$LOGDIR/gate-$name.log"
@@ -307,8 +318,10 @@ rollback() {
         fi
     fi
     if [ "$restart" = 1 ]; then
+        hdpvr_answers >/dev/null 2>&1 || say "THE HD PVR DOES NOT ANSWER: the Roku lane stays down until it is reset: $HDPVR_RESET"
         systemctl start tv-thing.service
         wait_for 120 "TV Thing is back" lane_ready "$P" digital || say "TV Thing did not come back; check journalctl -u tv-thing"
+        wait_for 60 "TV Thing's Roku capture is back" lane_ready "$P" roku || say "TV Thing's Roku capture did not come back: reset the HD PVR: $HDPVR_RESET"
     fi
     start_vizelvision
     restore_air
@@ -340,7 +353,7 @@ systemctl reset-failed 'tv-thing-candidate*' 2>/dev/null
 # No PSIP guide sweeps on the candidate: one would take the tuner mid-gate.
 systemd-run --unit="$CANDIDATE" --collect --uid=vivian --gid=vivian \
     -p WorkingDirectory="$STAGE" -p MemoryMax=1800M -p CPUQuota=800% -p TasksMax=192 \
-    -p LimitFSIZE=16M:16G -p OOMPolicy=continue -p RuntimeMaxSec=3600 \
+    -p LimitFSIZE=16M:16G -p OOMPolicy=continue -p RuntimeMaxSec=3600 -p TimeoutStopSec=5 \
     --setenv=PORT=8098 --setenv=TV_THING_BIND=127.0.0.1 --setenv=TV_THING_BIND_LOOPBACK=1 \
     --setenv=TV_THING_STREAMS_DIR="$STAGE/streams" --setenv=TV_THING_RECORDINGS_DIR="$STAGE/recordings" \
     --setenv=TV_THING_STATE_DIR="$STAGE/state" \
@@ -364,6 +377,7 @@ journalctl -u "$CANDIDATE" --no-pager > "$LOGDIR/candidate.journal" 2>&1
 cp -p "$STAGE/state/feed/recordings-journal.jsonl" "$LOGDIR/candidate-journal.jsonl" 2>/dev/null
 systemctl stop "$CANDIDATE.service"
 pgrep -u vivian -f "$STAGE/" >/dev/null && fail "the candidate left processes behind: $(pgrep -u vivian -af "$STAGE/")"
+hdpvr_answers >/dev/null 2>&1 || fail "the HD PVR stopped answering after the candidate: reset it before deploying again: $HDPVR_RESET"
 
 # --- 5. promote, restart, and gate production -------------------------------------------------
 say "Promoting TV Thing"

@@ -342,6 +342,11 @@ procs = {
 primary_video_lane = LANE_DIGITAL
 
 lock = threading.RLock()
+# Set on the way out, before anything is stopped: from then on no lane starts. Stopping a
+# lane wakes its keeper, and a recording ending wakes the always-on one; a process either
+# starts then outlives the server, holding its tuner or the HD PVR, and keeps the unit
+# stopping until systemd kills it (the Roku capture, 2026-10-06; the digital lane, 2026-10-25).
+shutting_down = threading.Event()
 scanning = False      # True while a band scan is running
 guide_refreshing = False   # True while a PSIP guide refresh holds the tuner
 # Set to ask a running guide refresh to stop at the next frequency boundary.
@@ -1528,6 +1533,8 @@ def start_digital(channel, quality="medium", taps=None):
     the source feeds besides the encoder (by default, what this process's
     recordings need).
     """
+    if shutting_down.is_set():
+        return False, "The server is shutting down", False
     STREAMS_DIR.mkdir(exist_ok=True)
 
     # Stop both halves before opening the next timestamp domain. Marking the
@@ -1702,6 +1709,8 @@ def start_analog(channel, quality="medium"):
 
     The digital lane is untouched: the two front-ends are independent.
     """
+    if shutting_down.is_set():
+        return False, "The server is shutting down", None
     try:
         frequency_hz = analog_tuner.cable_frequency_hz(channel)
     except (TypeError, ValueError):
@@ -1739,6 +1748,8 @@ def always_on_worker():
     while True:
         always_on_wakeup.wait(timeout=5)
         always_on_wakeup.clear()
+        if shutting_down.is_set():
+            return
 
         if not ALWAYS_ON:
             continue
@@ -1805,10 +1816,6 @@ ROKU_RESTART_BACKOFF = (2, 5, 10, 30)
 # Built in main() from roku.json; None when the lane is not configured.
 roku = None
 roku_wakeup = threading.Event()
-# Set on the way out: stopping the lane wakes the keeper, which must not then
-# start a capture that outlives the server and holds the HD PVR (it did, in
-# the 2026-10-06 rehearsal, against vizelVision's own capture).
-roku_shutting_down = threading.Event()
 # Replaced wholesale, never mutated, so roku_lane can read it without the
 # server mutex (it calls back from threads that may already hold its own).
 roku_capture_state = {"running": False, "stream_id": None, "error": None,
@@ -1885,7 +1892,7 @@ def start_roku_capture():
     global roku_capture_state
     if roku is None:
         return False, "The Roku lane is not configured"
-    if roku_shutting_down.is_set():
+    if shutting_down.is_set():
         return False, "The server is shutting down"
     device = roku_device()
     STREAMS_DIR.mkdir(exist_ok=True)
@@ -1974,7 +1981,7 @@ def roku_keeper():
     while True:
         roku_wakeup.wait(timeout=5)
         roku_wakeup.clear()
-        if roku_shutting_down.is_set():
+        if shutting_down.is_set():
             return
         if roku is None:
             continue
@@ -6619,7 +6626,7 @@ def main():
         print("\nShutting down...")
     finally:
         host_watch_stopping.set()
-        roku_shutting_down.set()
+        shutting_down.set()
         shutdown_recording()
         stop_all()
         for stream in SLIDE_STREAMS.values():

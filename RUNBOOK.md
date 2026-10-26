@@ -97,8 +97,9 @@ comm -12 <(git -C "$TV" status --porcelain | awk '{print $NF}' | sort) \
 # Nothing recording, and no timer due soon.
 j $P/api/v1/recordings "len(d['active_recordings']), [(t.get('start'), t.get('channel_id')) for t in d['timers']]"
 
-# The HD PVR is plugged in.
+# The HD PVR is plugged in, and production's Roku capture runs on it.
 ls /dev/v4l/by-id/usb-AMBA_Hauppauge_HD_PVR_00A4E5AC-video-index0
+ready $P roku && echo "Roku capture running"
 
 # What is on air now, and whether it is held.
 j $VV/v1/master "d.get('on_air'), d.get('prepared')"
@@ -143,7 +144,7 @@ The candidate is production's tree as it runs: its uncommitted files, Roku calib
 | Recordings | `/mnt/sda1/media/TV Recordings` | `$STAGE/recordings` |
 | State (the journal) | `~/tv_thing/state` | `$STAGE/state` |
 | PSIP guide sweeps | on | off (`TV_THING_EPG=0`), so nothing sweeps the tuner mid-gate |
-| Unit | `tv-thing.service` | `$CAND`: the unit's limits, and a one-hour cap (`RuntimeMaxSec=3600`) |
+| Unit | `tv-thing.service` | `$CAND`: the unit's limits (`TimeoutStopSec=5` included), and a one-hour cap (`RuntimeMaxSec=3600`) |
 
 ```bash
 mkdir -p "$STAGE/streams" "$STAGE/recordings" "$STAGE/state"
@@ -153,7 +154,7 @@ rsync -a --files-from="$LOG/branch-files.txt" "$WT/" "$STAGE/"
 
 sudo systemd-run --unit="$CAND" --collect --uid=vivian --gid=vivian \
     -p WorkingDirectory="$STAGE" -p MemoryMax=1800M -p CPUQuota=800% -p TasksMax=192 \
-    -p LimitFSIZE=16M:16G -p OOMPolicy=continue -p RuntimeMaxSec=3600 \
+    -p LimitFSIZE=16M:16G -p OOMPolicy=continue -p RuntimeMaxSec=3600 -p TimeoutStopSec=5 \
     --setenv=PORT=8098 --setenv=TV_THING_BIND=127.0.0.1 --setenv=TV_THING_BIND_LOOPBACK=1 \
     --setenv=TV_THING_STREAMS_DIR="$STAGE/streams" --setenv=TV_THING_RECORDINGS_DIR="$STAGE/recordings" \
     --setenv=TV_THING_STATE_DIR="$STAGE/state" \
@@ -184,6 +185,9 @@ Each gate passes when it exits 0. All three must pass.
     --cgroup "/sys/fs/cgroup/system.slice/$CAND.service" | tee "$LOG/headroom-candidate.log"
 
 # c. Three Roku navigations (ESPN, NBC, ESPN) on one continuous capture, under the Roku limits.
+#    A gate locks every lane, and b's cancelled recording lets go of the digital lane's lock
+#    only on the VCR's next tick, so wait for every lock to clear first.
+until [ "$(j $C/api/v1/tuner/lock "all(v is None for v in d['locks'].values())")" = True ]; do sleep 2; done
 "$PY" "$STAGE/stream_sanity_check.py" --url $C --server-pid "$CPID" \
     --roku-target youtube-tv:ESPN --roku-target youtube-tv:NBC --retunes 3 \
     | tee "$LOG/gate-candidate-roku.log"
@@ -232,6 +236,16 @@ journalctl -u "$CAND" --no-pager > "$LOG/candidate.journal"
 cp -p "$STAGE/state/feed/recordings-journal.jsonl" "$LOG/candidate-journal.jsonl"
 sudo systemctl stop "$CAND.service"
 pgrep -u vivian -af "$STAGE/" && echo "LEFT PROCESSES BEHIND: stop here" || echo "candidate gone, nothing left"
+
+# The HD PVR still answers. Selecting its input is what hangs when it has hung (--get-input does not).
+timeout -k 2 5 v4l2-ctl --device /dev/v4l/by-id/usb-AMBA_Hauppauge_HD_PVR_00A4E5AC-video-index0 --set-input=0 \
+    && echo "HD PVR answers" || echo "HD PVR HUNG: reset it (below) before going on"
+```
+
+**If the HD PVR has hung** (2026-10-25, after a candidate run): production's capture opens it to no data ("could not find codec parameters"), and VizelVision cannot air YouTube TV. Re-plug it over USB; TV Thing picks it up again within ~15 s. If it doesn't come back, unplug its power for 10 s.
+
+```bash
+echo 0 | sudo tee /sys/bus/usb/devices/2-12/authorized; sleep 3; echo 1 | sudo tee /sys/bus/usb/devices/2-12/authorized
 ```
 
 ### 7. Promote, and start production (the one restart)

@@ -2217,13 +2217,33 @@ def test_a_stopping_server_never_restarts_the_roku_capture(monkeypatch):
     monkeypatch.setattr(server, "roku", object())
     monkeypatch.setattr(server.subprocess, "Popen",
                         lambda *a, **k: started.append(a) or (_ for _ in ()).throw(OSError("no")))
-    monkeypatch.setattr(server, "roku_shutting_down", __import__("threading").Event())
-    server.roku_shutting_down.set()
+    monkeypatch.setattr(server, "shutting_down", __import__("threading").Event())
+    server.shutting_down.set()
     ok, error = server.start_roku_capture()
     assert not ok and "shutting down" in error and started == []
     # The keeper returns instead of looping on.
     server.roku_wakeup.set()
     server.roku_keeper()
+
+
+def test_a_stopping_server_starts_no_tuner_lane(monkeypatch):
+    """2026-10-25: a recording ending during shutdown woke the always-on keeper, which
+    retuned the digital lane after systemd had signalled the unit; the new dvb_source and
+    ffmpeg kept it stopping for 90 s, until systemd killed them."""
+    started = []
+    monkeypatch.setattr(server.subprocess, "Popen",
+                        lambda *a, **k: started.append(a) or (_ for _ in ()).throw(OSError("no")))
+    monkeypatch.setattr(server, "stop_digital", lambda: started.append("stop"))
+    monkeypatch.setattr(server, "load_playback_state", lambda: ({"id": "x"}, "medium"))
+    monkeypatch.setattr(server, "shutting_down", __import__("threading").Event())
+    server.shutting_down.set()
+    assert server.start_digital({"id": "x"}) == (False, "The server is shutting down", False)
+    assert server.start_analog(3) == (False, "The server is shutting down", None)
+    assert started == [], "nothing stopped or spawned"
+    # The always-on keeper returns instead of retuning.
+    server.always_on_wakeup.set()
+    server.always_on_worker()
+    assert started == []
 
 
 # ---------------------------------------------------------------------------
