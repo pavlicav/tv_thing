@@ -111,7 +111,18 @@ locks_clear() {  # url
 # capture) answers at once. When the device has hung, it blocks until killed, and every capture
 # opens it to no data (2026-10-25). --get-input is no test: the driver answers it from memory.
 hdpvr_answers() { timeout -k 2 5 v4l2-ctl --device "$DEVICE" --set-input=0; }
-HDPVR_RESET="echo 0 | sudo tee /sys/bus/usb/devices/2-12/authorized; sleep 3; echo 1 | sudo tee /sys/bus/usb/devices/2-12/authorized (or unplug its power for 10 s)"
+hdpvr_port() {  # the HD PVR's USB port (2-3), found by its USB id whether or not its driver bound
+    local d
+    for d in /sys/bus/usb/devices/*; do
+        [ "$(cat "$d/idVendor" 2>/dev/null):$(cat "$d/idProduct" 2>/dev/null)" = "2040:4902" ] && { basename "$d"; return; }
+    done
+    echo "PORT"
+}
+# What brought it back on 2026-10-25: a power cycle, then a port that works (2-12 had turned bad).
+hdpvr_reset() {
+    local port; port=$(hdpvr_port)
+    echo "unplug its power for 10 s; if its driver still does not bind (sudo dmesg | grep hdpvr), move it to another USB port. A USB re-plug alone: echo 0 | sudo tee /sys/bus/usb/devices/$port/authorized; sleep 3; echo 1 | sudo tee /sys/bus/usb/devices/$port/authorized"
+}
 lane_ready() {  # url lane
     [ "$(json "$1/api/v1/status" "bool(d['lanes']['$2']['stream'].get('ready'))")" = "True" ]
 }
@@ -144,7 +155,7 @@ precheck() {
     [ "$due" = "0" ] || fail "a VCR timer starts within the hour: TV Thing would be down for it"
     [ -d "$TV/roku_state/templates-720p" ] || fail "the Roku's calibration templates are missing"
     [ -e "$DEVICE" ] || fail "the HD PVR is not connected ($DEVICE)"
-    lane_ready "$P" roku || fail "production's Roku capture is not running: is the HD PVR hung? Reset it: $HDPVR_RESET"
+    lane_ready "$P" roku || fail "production's Roku capture is not running: is the HD PVR hung? Reset it: $(hdpvr_reset)"
     [ -n "$KEY" ] || fail "no VizelVision API key in $VV_CONFIG"
     on_air=$(json "$VV/v1/master" "json.dumps(d.get('on_air'))") || fail "VizelVision is not answering"
     prepared=$(json "$VV/v1/master" "json.dumps(d.get('prepared'))")
@@ -318,10 +329,10 @@ rollback() {
         fi
     fi
     if [ "$restart" = 1 ]; then
-        hdpvr_answers >/dev/null 2>&1 || say "THE HD PVR DOES NOT ANSWER: the Roku lane stays down until it is reset: $HDPVR_RESET"
+        hdpvr_answers >/dev/null 2>&1 || say "THE HD PVR DOES NOT ANSWER: the Roku lane stays down until it is reset: $(hdpvr_reset)"
         systemctl start tv-thing.service
         wait_for 120 "TV Thing is back" lane_ready "$P" digital || say "TV Thing did not come back; check journalctl -u tv-thing"
-        wait_for 60 "TV Thing's Roku capture is back" lane_ready "$P" roku || say "TV Thing's Roku capture did not come back: reset the HD PVR: $HDPVR_RESET"
+        wait_for 60 "TV Thing's Roku capture is back" lane_ready "$P" roku || say "TV Thing's Roku capture did not come back: reset the HD PVR: $(hdpvr_reset)"
     fi
     start_vizelvision
     restore_air
@@ -377,7 +388,7 @@ journalctl -u "$CANDIDATE" --no-pager > "$LOGDIR/candidate.journal" 2>&1
 cp -p "$STAGE/state/feed/recordings-journal.jsonl" "$LOGDIR/candidate-journal.jsonl" 2>/dev/null
 systemctl stop "$CANDIDATE.service"
 pgrep -u vivian -f "$STAGE/" >/dev/null && fail "the candidate left processes behind: $(pgrep -u vivian -af "$STAGE/")"
-hdpvr_answers >/dev/null 2>&1 || fail "the HD PVR stopped answering after the candidate: reset it before deploying again: $HDPVR_RESET"
+hdpvr_answers >/dev/null 2>&1 || fail "the HD PVR stopped answering after the candidate: reset it before deploying again: $(hdpvr_reset)"
 
 # --- 5. promote, restart, and gate production -------------------------------------------------
 say "Promoting TV Thing"

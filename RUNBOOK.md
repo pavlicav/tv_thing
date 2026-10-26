@@ -242,10 +242,16 @@ timeout -k 2 5 v4l2-ctl --device /dev/v4l/by-id/usb-AMBA_Hauppauge_HD_PVR_00A4E5
     && echo "HD PVR answers" || echo "HD PVR HUNG: reset it (below) before going on"
 ```
 
-**If the HD PVR has hung** (2026-10-25, after a candidate run): production's capture opens it to no data ("could not find codec parameters"), and VizelVision cannot air YouTube TV. Re-plug it over USB; TV Thing picks it up again within ~15 s. If it doesn't come back, unplug its power for 10 s.
+**If the HD PVR has hung** (2026-10-25, after a candidate run): production's capture opens it to no data ("could not find codec parameters"), and VizelVision cannot air YouTube TV. `sudo dmesg | grep hdpvr` says whether its driver bound.
+
+- **Unplug its power for 10 s**, then press its button if its light doesn't come on. A USB re-plug alone did not bring it back that night.
+- **If the driver still doesn't bind** ("unexpected answer of status request, len -110"), move it to another USB port directly on the computer. Port 2-12 had turned bad; it came back on 2-3.
+- TV Thing picks it up again within seconds once `/dev/v4l/by-id/usb-AMBA_Hauppauge_HD_PVR_*` exists.
+
+A USB re-plug, if you want to try one first (the port is the one `lsusb -t` shows it on):
 
 ```bash
-echo 0 | sudo tee /sys/bus/usb/devices/2-12/authorized; sleep 3; echo 1 | sudo tee /sys/bus/usb/devices/2-12/authorized
+P=$(for d in /sys/bus/usb/devices/*; do [ "$(cat $d/idVendor 2>/dev/null):$(cat $d/idProduct 2>/dev/null)" = 2040:4902 ] && basename $d; done); echo 0 | sudo tee /sys/bus/usb/devices/$P/authorized; sleep 3; echo 1 | sudo tee /sys/bus/usb/devices/$P/authorized
 ```
 
 ### 7. Promote, and start production (the one restart)
