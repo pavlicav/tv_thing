@@ -1812,6 +1812,8 @@ ROKU_REUSE_MAX_AGE = float(os.environ.get(
     "TV_THING_ROKU_REUSE_MAX_AGE", "900"
 ))
 ROKU_RESTART_BACKOFF = (2, 5, 10, 30)
+# A capture that has run this long is steady: its failures are forgotten.
+ROKU_STEADY_SECONDS = 60
 
 # Built in main() from roku.json; None when the lane is not configured.
 roku = None
@@ -1976,8 +1978,12 @@ def stop_roku():
 
 
 def roku_keeper():
-    """Keep the Roku capture running, backing off while it keeps failing."""
-    failures = 0
+    """Keep the Roku capture running, backing off while it keeps failing.
+
+    A capture that dies on its own within ROKU_STEADY_SECONDS of starting is a failure too.
+    With the HD PVR gone, ffmpeg starts and exits at once; counting only failed starts, the
+    keeper restarted it about nine times a second (2026-10-25)."""
+    failures, started = 0, None
     while True:
         roku_wakeup.wait(timeout=5)
         roku_wakeup.clear()
@@ -1987,20 +1993,27 @@ def roku_keeper():
             continue
         try:
             if lane_is_running(LANE_ROKU):
-                started = lanes[LANE_ROKU].get("started_at") or time.time()
-                if time.time() - started > 60:
+                if started is not None and time.time() - started > ROKU_STEADY_SECONDS:
                     failures = 0
                 continue
+            # Died young: on its own (the lane is in error, not stopped), soon after starting.
+            if (started is not None and time.time() - started < ROKU_STEADY_SECONDS
+                    and feed.view(LANE_ROKU)["lifecycle"] == "error"):
+                failures += 1
+                print(f"Roku capture died {time.time() - started:.0f} s after starting")
+            started = None
+            if failures:
+                time.sleep(ROKU_RESTART_BACKOFF[min(failures, len(ROKU_RESTART_BACKOFF)) - 1])
+                if shutting_down.is_set():
+                    return
             ok, error = start_roku_capture()
+            if ok:
+                started = time.time()
         except Exception as failure:   # noqa: BLE001 - keeper must not die
             ok, error = False, repr(failure)
         if not ok:
             failures += 1
             print(f"Roku capture restart failed: {error}")
-        delay = ROKU_RESTART_BACKOFF[min(failures, len(ROKU_RESTART_BACKOFF) - 1)] \
-            if failures else 0
-        if failures:
-            time.sleep(delay)
             roku_wakeup.set()
 
 

@@ -2226,6 +2226,40 @@ def test_a_stopping_server_never_restarts_the_roku_capture(monkeypatch):
     server.roku_keeper()
 
 
+@pytest.mark.parametrize("lifecycle, delays", [
+    ("error", [2, 5, 10, 30]),     # each capture dies on its own at once: back off
+    ("idle", []),                  # each was stopped on purpose: a fresh one at once
+])
+def test_the_roku_keeper_backs_off_captures_that_die_young(monkeypatch, lifecycle, delays):
+    """2026-10-25: with the HD PVR gone, ffmpeg started and exited at once, and the keeper,
+    counting only failed starts, restarted it about nine times a second."""
+    import threading
+    from types import SimpleNamespace
+
+    class Awake(threading.Event):
+        def wait(self, timeout=None):
+            return True
+
+    starts, slept = [], []
+    stopping = threading.Event()
+
+    def start():
+        starts.append(1)
+        if len(starts) == 5:
+            stopping.set()
+        return True, None
+
+    monkeypatch.setattr(server, "roku", object())
+    monkeypatch.setattr(server, "roku_wakeup", Awake())
+    monkeypatch.setattr(server, "shutting_down", stopping)
+    monkeypatch.setattr(server, "lane_is_running", lambda lane: False)
+    monkeypatch.setattr(server, "feed", SimpleNamespace(view=lambda lane: {"lifecycle": lifecycle}))
+    monkeypatch.setattr(server, "start_roku_capture", start)
+    monkeypatch.setattr(server.time, "sleep", slept.append)
+    server.roku_keeper()
+    assert len(starts) == 5 and slept == delays
+
+
 def test_a_stopping_server_starts_no_tuner_lane(monkeypatch):
     """2026-10-25: a recording ending during shutdown woke the always-on keeper, which
     retuned the digital lane after systemd had signalled the unit; the new dvb_source and
