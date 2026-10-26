@@ -443,6 +443,10 @@ class LocalFeed:
         """{node, feed_epoch, lanes: {revision, lifecycle, navigating}}."""
         return self.node.status()
 
+    def slides(self):
+        """{name: status} of the slide channels' on-demand video (slide_stream.py)."""
+        return {name: stream.status() for name, stream in self.ops.SLIDE_STREAMS.items()}
+
     # -- navigation ----------------------------------------------------------------
     # Never under server.py's lock: roku_lane calls these from threads that may hold its own.
     def begin_navigation(self, lane, op_id):

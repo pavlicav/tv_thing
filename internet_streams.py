@@ -9,6 +9,12 @@
   it is looked up again every ``RESOLVE_SECONDS`` and whenever the CDN
   refuses it.
 
+Finding the URL is the control plane's (``resolve_stream``, by ``RESOLVERS``);
+relaying it is the feed's (``InternetStreams``, which asks through its
+``resolver``). A resolver that fails while a good URL is in hand leaves that
+URL playing and is asked again a little later, so a relay keeps going while
+the resolving side is down or restarting.
+
 TV Thing relays the stream at ``/stream/internet/<id>/index.m3u8``: the
 master's renditions become ``0.m3u8``, ``1.m3u8``, ... and their segments
 ``0/seg_1.ts`` and so on, in that same namespace, so a client keeps one
@@ -41,6 +47,7 @@ MAX_PLAYLIST_BYTES = 16 * 1024 * 1024
 MAX_SEGMENT_BYTES = 64 * 1024 * 1024
 TIMEOUT_SECONDS = 5
 RESOLVE_SECONDS = 30 * 60      # How long a resolved URL is used before asking again.
+RESOLVE_RETRY_SECONDS = 30     # How long a URL kept past a failed look-up waits for the next.
 MASTER_SECONDS = 5 * 60        # How long a master playlist is reused.
 LISTINGS_SECONDS = 60          # How long a stream's guide listings are reused.
 LISTINGS_STALE_SECONDS = 15 * 60   # How long the last good listings stand in when the URL fails.
@@ -85,7 +92,18 @@ class Stream:
     guide: str | None = None   # a listings URL for TV Thing's guide (see parse_listings)
 
 
-RESOLVERS = {"url": ("url",), "yle-areena": ("program",)}
+@dataclass(frozen=True)
+class Resolver:
+    fields: tuple           # what a stream of this kind lists in internet_streams.json
+    find: object            # (params, fetch) -> the playlist URL it plays now
+    fixed: bool = False     # the URL never changes, so it is never looked up again
+
+
+# A new kind of stream is one function and one entry here.
+RESOLVERS = {
+    "url": Resolver(("url",), lambda params, fetch: params["url"], fixed=True),
+    "yle-areena": Resolver(("program",), lambda params, fetch: resolve_yle_areena(params["program"], fetch)),
+}
 
 
 def parse_streams(document):
@@ -105,7 +123,7 @@ def parse_streams(document):
         resolver = raw.get("resolver")
         if resolver not in RESOLVERS:
             raise StreamConfigError(f"{where}: resolver is one of {', '.join(sorted(RESOLVERS))}")
-        params = {key: str(raw.get(key) or "") for key in RESOLVERS[resolver]}
+        params = {key: str(raw.get(key) or "") for key in RESOLVERS[resolver].fields}
         missing = [key for key, value in params.items() if not value]
         if missing:
             raise StreamConfigError(f"{where}: a {resolver} stream needs {', '.join(missing)}")
@@ -174,6 +192,12 @@ def resolve_yle_areena(program, fetch=_fetch):
     if data.get("pending_event"):
         raise StreamUnavailable(f"Yle Areena's {program} has not started yet", status=503)
     raise StreamUnavailable(f"Yle Areena has nothing live for {program}", status=503)
+
+
+def resolve_stream(stream, fetch=_fetch):
+    """The playlist URL ``stream`` plays now, by its resolver: the control plane's side of
+    the relay. Raises StreamUnavailable, or HTTPError/URLError/OSError from the lookup."""
+    return RESOLVERS[stream.resolver].find(stream.params, fetch)
 
 
 def _is_media(text):
@@ -299,14 +323,17 @@ def _bump(tag, name, by):
 class InternetStreams:
     """The configured streams and the playlist relay, safe across threads."""
 
-    def __init__(self, config_path, fetch=_fetch, clock=time.monotonic, open_url=_open):
+    def __init__(self, config_path, fetch=_fetch, clock=time.monotonic, open_url=_open, resolver=None):
         self.config_path = config_path
         self.fetch = fetch
+        # Who finds a stream's URL: control's resolve_stream, in this process or (split) over
+        # HTTP. Called with a Stream; raises when it cannot say.
+        self.resolver = resolver or (lambda stream: resolve_stream(stream, self.fetch))
         self.open_url = open_url
         self.clock = clock
         self._lock = threading.Lock()
         self._config = (None, {})    # (stat signature, {id: Stream} or StreamConfigError)
-        self._resolved = {}          # id -> (url, at)
+        self._resolved = {}          # id -> (url, at, next look-up if the last one failed)
         self._masters = {}           # id -> (master URL, text, at)
         self._listings = {}          # id -> (events, at)
 
@@ -340,14 +367,24 @@ class InternetStreams:
     def _resolve(self, stream):
         now = self.clock()
         with self._lock:
-            url, at = self._resolved.get(stream.id, (None, 0))
-        if url and (stream.resolver == "url" or now - at < RESOLVE_SECONDS):
+            url, at, retry_at = self._resolved.get(stream.id, (None, 0, None))
+        if url and (RESOLVERS[stream.resolver].fixed or now - at < RESOLVE_SECONDS
+                    or (retry_at is not None and now < retry_at)):
             return url
-        url = (stream.params["url"] if stream.resolver == "url"
-               else resolve_yle_areena(stream.params["program"], self.fetch))
+        try:
+            fresh = self.resolver(stream)
+        except (StreamUnavailable, OSError, ValueError) as error:
+            if not url:
+                raise
+            # The URL in hand still played a moment ago: keep it, and ask again later. One the
+            # CDN refuses was forgotten (forget), so this never props up a dead token.
+            print(f"[Internet] {stream.name}: kept its URL, the look-up failed: {error}", flush=True)
+            with self._lock:
+                self._resolved[stream.id] = (url, at, now + RESOLVE_RETRY_SECONDS)
+            return url
         with self._lock:
-            self._resolved[stream.id] = (url, now)
-        return url
+            self._resolved[stream.id] = (fresh, now, None)
+        return fresh
 
     def _master(self, stream):
         now = self.clock()

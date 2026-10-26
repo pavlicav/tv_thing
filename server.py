@@ -720,7 +720,16 @@ def load_channels():
 
 
 channel_lineup = lineup.Lineup(LINEUP_FILE, LINEUP_STATE_FILE)
-web_streams = internet_streams.InternetStreams(INTERNET_STREAMS_FILE)
+
+
+def resolve_internet_stream(stream):
+    """Control's side of the internet relay: the playlist URL a stream plays now. The relay
+    (the feed's) asks for it here; split, it asks GET /internal/internet/<id>/resolve."""
+    return internet_streams.resolve_stream(stream)
+
+
+web_streams = internet_streams.InternetStreams(
+    INTERNET_STREAMS_FILE, resolver=lambda stream: resolve_internet_stream(stream))
 
 
 def numbered_channels(channels):
@@ -4598,7 +4607,7 @@ def _api_v1_status_payload():
         "scanning": {"channels": scanning},
         "recording": recording_summary(),
         # The station's slide channels as video, made only while watched.
-        "slides": {name: stream.status() for name, stream in SLIDE_STREAMS.items()},
+        "slides": feed_client.slides(),
         # --- compatibility view: the primary video lane, flat ---
         "source": {
             "id": primary,

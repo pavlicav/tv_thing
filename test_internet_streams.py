@@ -207,6 +207,45 @@ def test_a_resolved_url_is_looked_up_again_after_a_while(relay):
     assert sum("player.api.yle.fi" in call for call in cdn.calls) == 2
 
 
+def test_the_relay_asks_its_resolver_and_keeps_a_good_url_while_it_cannot(tmp_path):
+    config = tmp_path / "internet_streams.json"
+    config.write_text(json.dumps({"streams": [
+        {"id": "pentulive", "name": "Pentulive", "resolver": "yle-areena", "program": "1-78104441"}]}))
+    cdn, clock, asked = FakeCdn(), [0.0], []
+
+    def resolver(stream):            # control's resolve_stream, as the feed reaches it
+        asked.append(stream.id)
+        if clock[0] > 0 and cdn.preview == "down":
+            raise OSError("control is restarting")
+        return internet_streams.resolve_stream(stream, cdn)
+
+    streams = InternetStreams(config, fetch=cdn, clock=lambda: clock[0], open_url=cdn.open_url,
+                              resolver=resolver)
+    streams.playlist("pentulive", "1.m3u8")
+    assert asked == ["pentulive"]
+    cdn.preview = "down"
+    clock[0] += internet_streams.RESOLVE_SECONDS + 1
+    assert streams.playlist("pentulive", "1.m3u8").splitlines()[-1] == "1/seg_159.ts", "still playing"
+    # A request that misses the master cache (a failed fetch) inside the retry window gets the
+    # kept URL without asking: a hung resolver is not waited on for every request.
+    streams._resolve(streams.streams()["pentulive"])
+    assert asked == ["pentulive", "pentulive"]
+    clock[0] += internet_streams.MASTER_SECONDS + 1
+    streams.playlist("pentulive", "1.m3u8")
+    assert len(asked) == 3, "asked again once the window is over"
+    cdn.token = "t2"                 # the CDN refuses the URL in hand: it is not kept
+    with pytest.raises(StreamUnavailable):
+        streams.segment("pentulive", "1", "seg_159.ts")
+    cdn.preview = None
+    assert streams.segment("pentulive", "1", "seg_159.ts").read().decode() == f"{CDN}hdntl=t2/seg_159.ts"
+
+
+def test_each_resolver_is_one_table_entry():
+    fixed = parse_streams({"streams": [{"id": "cam", "resolver": "url", "url": "https://example.com/a.m3u8"}]})
+    assert internet_streams.resolve_stream(fixed["cam"], fetch=None) == "https://example.com/a.m3u8"
+    assert internet_streams.RESOLVERS["url"].fixed and not internet_streams.RESOLVERS["yle-areena"].fixed
+
+
 def test_unknown_streams_renditions_and_finished_events(relay, tmp_path):
     streams, cdn, _ = relay
     with pytest.raises(StreamUnavailable) as missing:
