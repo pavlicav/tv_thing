@@ -394,3 +394,32 @@ def test_a_lane_record_reads_the_same_state_through_the_client():
     assert record.state() == client.node.navigation("roku")
     private = feed_node.LaneRecord.private()
     assert private.state()["revision"] == 0 and private.state()["selection"] is None
+
+
+# -- the orphan reaper's scope --------------------------------------------------------------
+
+SYSTEM = "0::/system.slice/tv-thing.service\n"
+FEED = "0::/system.slice/tv-thing-feed.service\n"
+USER_UNIT = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/vizelvision-master.service\n"
+SESSION = "0::/user.slice/user-1000.slice/session-3.scope\n"
+
+
+def test_the_service_a_process_is_in():
+    assert feed_node.service_of(SYSTEM) == "tv-thing.service"
+    assert feed_node.service_of(USER_UNIT) == "vizelvision-master.service"
+    assert feed_node.service_of(SESSION) is None
+    assert feed_node.service_of("12:pids:/x\n1:name=systemd:/system.slice/cron.service\n") == "cron.service"
+    assert feed_node.service_of("") is None
+
+
+@pytest.mark.parametrize("own, theirs, allowed", [
+    (SYSTEM, SYSTEM, True),          # an orphan of this service
+    (SYSTEM, SESSION, True),         # left by a run from a terminal
+    (FEED, SYSTEM, False),           # control's verifier, seen from the feed
+    (SYSTEM, FEED, False),
+    (SYSTEM, USER_UNIT, False),      # VizelVision's
+    (SESSION, SESSION, True),        # a staged candidate's own
+    (SESSION, SYSTEM, False),        # production's, seen from a staged candidate
+])
+def test_the_reaper_never_touches_another_service(own, theirs, allowed):
+    assert feed_node.reapable(own, theirs) is allowed

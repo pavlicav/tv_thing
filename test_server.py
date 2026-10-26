@@ -2301,3 +2301,29 @@ def test_status_and_the_lineup_name_the_sports_guide_video(monkeypatch):
     assert status["slides"]["sports-guide"]["running"] is False
     view = server.slide_views()[0]
     assert view["stream_path"] == "/stream/sports-guide/index.m3u8"
+
+
+def fake_proc(root, pid, argv, cgroup, ppid=1):
+    entry = root / str(pid)
+    entry.mkdir(parents=True)
+    (entry / "cmdline").write_bytes(b"\0".join(part.encode() for part in argv))
+    (entry / "status").write_text(f"Name:\tx\nPPid:\t{ppid}\n")
+    (entry / "cgroup").write_text(cgroup)
+
+
+def test_the_reaper_kills_orphans_but_never_another_services(tmp_path):
+    proc = tmp_path / "proc"
+    (proc / "self").mkdir(parents=True)
+    (proc / "self" / "cgroup").write_text("0::/system.slice/tv-thing.service\n")
+    source = ["python3", str(server.BASE_DIR / "dvb_source.py"), "--frequency", "1"]
+    verifier = ["ffmpeg", "-i", f"udp://127.0.0.1:{server.ROKU_TAP_PORT}?fifo_size=8192", "-f", "image2pipe", "-"]
+    fake_proc(proc, 101, source, "0::/system.slice/tv-thing.service\n")
+    fake_proc(proc, 102, source, "0::/user.slice/user-1000.slice/session-3.scope\n")
+    fake_proc(proc, 103, verifier, "0::/system.slice/tv-thing-control.service\n")
+    fake_proc(proc, 104, verifier, "0::/user.slice/user-1000.slice/user@1000.service/app.slice/"
+                                   "vizelvision-master.service\n")
+    fake_proc(proc, 105, source, "0::/system.slice/tv-thing.service\n", ppid=4242)   # not an orphan
+    fake_proc(proc, 106, ["sleep", "100"], "0::/system.slice/tv-thing.service\n")
+    killed = []
+    assert sorted(server.reap_orphaned_children(proc, kill=lambda pid, sig: killed.append(pid))) == [101, 102]
+    assert sorted(killed) == [101, 102]

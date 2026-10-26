@@ -6247,7 +6247,7 @@ class TVHandler(SimpleHTTPRequestHandler):
         print(f"[HTTP] {args[0]}" if args else "")
 
 
-def reap_orphaned_children():
+def reap_orphaned_children(proc_root=Path("/proc"), kill=os.kill):
     """Kill leftover media children from an unclean previous run.
 
     Three kinds of orphan break a restarted service:
@@ -6262,7 +6262,8 @@ def reap_orphaned_children():
 
     Matching is deliberately narrow: this project's own source script, or a
     process whose arguments name this server's streams directory, and in
-    both cases only processes owned by this user.
+    both cases only processes owned by this user, and never one of another
+    systemd service (feed_node.reapable).
     """
     script = str(BASE_DIR / "dvb_source.py")
     # The Sports Guide's renderer exits once its parent is gone, within a
@@ -6276,8 +6277,12 @@ def reap_orphaned_children():
     roku_tap = f"udp://127.0.0.1:{ROKU_TAP_PORT}?"
     recordings = str(RECORDINGS_DIR)
     own_uid = os.getuid()
+    try:
+        own_cgroup = (proc_root / "self" / "cgroup").read_text()
+    except OSError:
+        own_cgroup = ""
     reaped = []
-    for entry in Path("/proc").iterdir():
+    for entry in proc_root.iterdir():
         if not entry.name.isdigit():
             continue
         pid = int(entry.name)
@@ -6291,7 +6296,10 @@ def reap_orphaned_children():
                 for part in (entry / "cmdline").read_bytes().split(b"\0")
             ]
             status = (entry / "status").read_text()
+            cgroup = (entry / "cgroup").read_text()
         except OSError:
+            continue
+        if not feed_node.reapable(own_cgroup, cgroup):
             continue
         if not parts:
             continue
@@ -6316,7 +6324,7 @@ def reap_orphaned_children():
         if not (owns_tuner or writes_streams or records or reads_roku_tap):
             continue
         try:
-            os.kill(pid, signal.SIGKILL)
+            kill(pid, signal.SIGKILL)
             reaped.append(pid)
         except OSError:
             continue

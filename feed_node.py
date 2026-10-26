@@ -141,6 +141,27 @@ def load_config(path):
         raise FeedConfigError(f"could not read {path}: {exc}") from exc
 
 
+def service_of(cgroup):
+    """The systemd service that a /proc/<pid>/cgroup file's contents put a process in
+    ("tv-thing.service", "vizelvision-master.service"), or None outside any service (a
+    login session, a terminal)."""
+    lines = cgroup.splitlines()
+    line = next((l for l in lines if l.startswith("0::")), None) \
+        or next((l for l in lines if ":name=systemd:" in l), "")
+    path = line.split(":", 2)[-1]
+    units = [part for part in path.split("/") if part.endswith(".service")]
+    return units[-1] if units else None
+
+
+def reapable(own_cgroup, cgroup):
+    """Whether the orphan reaper may touch a process in ``cgroup``: never one belonging to
+    another service. After the split, control's Roku verifier matches the reaper's rules, and
+    VizelVision's processes read the same taps. An orphan in a login session (a run from a
+    terminal) is still fair game: it is what holds the tuner after a manual run."""
+    theirs = service_of(cgroup)
+    return theirs is None or theirs == service_of(own_cgroup)
+
+
 class FeedNode:
     def __init__(self, config, *, clock=time.time):
         self.config, self.clock = config, clock
