@@ -157,6 +157,56 @@ class ControllerTests(unittest.TestCase):
             self.assertTrue(result["matched"])
             self.assertEqual(ecp.keys[:3], ["Up", "Up", "Down"])
 
+    def test_a_scan_that_leaves_the_guide_turns_back(self):
+        """2026-10-25: NBC, the first row, was refused once (too close to a look-alike), the
+        scan went on Up into the Live tab's header, and 14 more Ups never came back."""
+        with tempfile.TemporaryDirectory() as directory:
+            ecp, feedback = FakeEcp(), FakeFeedback()
+            config = self.config(Path(directory), channels=[
+                {"name": "NBC", "guide_index": 0},
+                {"name": "FOX", "guide_index": 1},
+                {"name": "ESPN", "guide_index": 2},
+            ])
+            rows = ["NBC", "FOX", "ESPN"]
+            cursor = {"row": 2, "left_nbc": False}     # on ESPN; -1 and -2 are the header
+
+            def keypress(key):
+                ecp.keys.append(key)
+                step = {"Down": 1, "Up": -1}.get(key, 0)
+                if step and cursor["row"] == 0:
+                    cursor["left_nbc"] = True
+                cursor["row"] = max(-2, min(len(rows) - 1, cursor["row"] + step))
+
+            def off_guide():
+                return NavigationError("No separate guide station tile beside the program highlight",
+                                       details={"off_guide": True})
+
+            def identify(channels, frame=None):
+                if cursor["row"] < 0:
+                    raise off_guide()
+                name = rows[cursor["row"]]
+                return {"channel": name, "guide_index": config.resolve_channel(name)[1].guide_index,
+                        "verification": {"correlation": .99, "correlation_margin": .1}}
+
+            def verify(name, *, configured_path=None, frame=None):
+                if cursor["row"] < 0:
+                    raise off_guide()
+                if rows[cursor["row"]] != name:
+                    raise NavigationError("Wrong guide row", details={"visual_verification": {"matched": False}})
+                if not cursor["left_nbc"]:           # the first visit is too close to call
+                    raise NavigationError("Visible guide row does not match 'NBC'",
+                                          details={"visual_verification": {"matched": False}})
+                return {"matched": True}
+
+            ecp.keypress, feedback.identify_selected, feedback.verify_selected = keypress, identify, verify
+            controller = RokuStreamController(config, ecp=ecp, feedback=feedback, sleeper=lambda _: None)
+            events = []
+            result = controller._open_channel_row(config.resolve_channel("NBC")[1], events,
+                                                  guide_observation={"channel": "ESPN", "guide_index": 2})
+            self.assertTrue(result["matched"])
+            self.assertEqual(ecp.keys[:4], ["Up", "Up", "Up", "Down"], "off the top, then straight back")
+            self.assertEqual([e["direction"] for e in events if e["event"] == "guide_scan_reversed"], ["Down"])
+
     def _seek_guide(self, directory, rows, drop_every=0):
         """A Live guide of ``rows`` (None: a row no template knows, such as a
         Sunday Ticket game) whose cursor the fake remote moves; every

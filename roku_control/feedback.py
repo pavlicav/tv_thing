@@ -239,7 +239,10 @@ class VisualFeedback:
         # and require the separate station tile to exclude promotional banners.
         row_start, row_end = self._guide_row_geometry(frame)
         if frame.width >= 1280 and not self._has_guide_station_tile(frame, row_start, row_end):
-            raise NavigationError('No separate guide station tile beside the program highlight')
+            # off_guide: the highlight is not on a guide row at all (above the first, in
+            # the Live tab's header), so a scan must turn back rather than go on.
+            raise NavigationError('No separate guide station tile beside the program highlight',
+                                  details={'off_guide': True})
         sample_start = int(frame.width * 0.145)
         sample_end = int(frame.width * 0.94)
         window = max(20, frame.width // 12)

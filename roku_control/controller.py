@@ -1388,6 +1388,7 @@ class RokuStreamController:
             self._sleep(nav.guide_settle_seconds)
 
         last_error: NavigationError | None = None
+        off_guide = False
         for scan_offset in range(nav.guide_scan_max_rows + 1):
             self._publish_operation(
                 phase="verifying_guide_row",
@@ -1544,6 +1545,16 @@ class RokuStreamController:
                         return result
 
             if scan_offset < nav.guide_scan_max_rows:
+                # Off the guide (above its first row, in the Live tab's header): going on
+                # can only stay off it, so turn back, once per time the scan leaves it.
+                # 2026-10-25: NBC, the first row, was refused once, and 14 more Ups stayed
+                # in the header.
+                left = bool(last_error is not None and last_error.details.get("off_guide"))
+                if left and not off_guide:
+                    scan_key = "Down" if scan_key == "Up" else "Up"
+                    events.append({"event": "guide_scan_reversed", "reason": "off_guide",
+                                   "scan_offset": scan_offset, "direction": scan_key})
+                off_guide = left
                 # Row offsets are only estimates: dropped keys and new local
                 # stations can put us on either side of the requested channel.
                 # Recompute direction from a recognized neighbor each time.
