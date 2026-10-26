@@ -518,6 +518,27 @@ def test_a_digital_tune_moves_the_lanes_revision(monkeypatch):
         server.reset_lane(server.LANE_DIGITAL)
 
 
+def test_a_tune_request_is_a_feed_command(monkeypatch):
+    """Control changes a lane only through the feed client, as one command per change."""
+    channel = {"id": "wusa_hd_9_1", "name": "WUSA-HD", "frequency": 189_000_000,
+               "service_id": 1, "video_pid": 49, "audio_pid": 52}
+    started = []
+    monkeypatch.setattr(server, "load_channels", lambda: [channel])
+    monkeypatch.setattr(server, "preempt_guide_refresh", lambda: None)
+    monkeypatch.setattr(server, "start_digital",
+                        lambda ch, quality: (started.append(ch["id"]), (False, "no lock", False))[1])
+    commands = len(server.feed._ops)
+    try:
+        payload, status = server.perform_digital_tune("wusa_hd_9_1", "low")
+        assert status == 500 and payload["error"] == "no lock"
+        assert started == ["wusa_hd_9_1"]
+        assert len(server.feed._ops) == commands + 1
+        assert list(server.feed._ops.values())[-1]["lane"] == server.LANE_DIGITAL
+        assert server.feed_client.lane(server.LANE_DIGITAL)["error"] == "no lock"
+    finally:
+        server.reset_lane(server.LANE_DIGITAL)
+
+
 def test_each_lane_publishes_its_own_playlist():
     """Separate playlists are what let both lanes stream at once."""
     paths = {

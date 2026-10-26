@@ -14,6 +14,7 @@ into the feed lane by lane (the plan's Phase 1).
 """
 from __future__ import annotations
 
+import copy
 import json
 import re
 import secrets
@@ -230,3 +231,72 @@ class FeedNode:
             return {"node": self.config.node, "feed_epoch": self.epoch,
                     "lanes": {lane: {"revision": s["revision"], "lifecycle": s["lifecycle"]}
                               for lane, s in self._lanes.items()}}
+
+
+class LocalFeed:
+    """How the control plane reaches the feed when both run in one process (Phase 1).
+
+    RemoteFeed (Phase 2) answers the same calls over HTTP. ``ops`` is server.py's module:
+    the feed's processes still live there, so every name is looked up when it is called.
+    Control code reads lane state and changes lanes only through here, never through
+    server.py's ``lanes`` and ``procs`` directly.
+    """
+
+    def __init__(self, node, ops):
+        self.node, self.ops = node, ops
+
+    # -- reading -------------------------------------------------------------------
+    def lane(self, lane):
+        """The feed's view of one lane: its state, whether its processes run, whether its
+        playlist is ready, and its revision and lifecycle. A copy: it never changes under you."""
+        ops = self.ops
+        with ops.lock:
+            state = copy.deepcopy(ops.lanes[lane])
+            running = ops.lane_is_running(lane)
+            alive = running and ops.lane_processes_alive(lane)
+        ready = running and ops.lane_stream_ready(lane)
+        return {**state, "running": running, "alive": alive, "ready": ready, **self.node.view(lane)}
+
+    def running_lanes(self):
+        return [lane.id for lane in self.node.config.lanes if self.ops.lane_is_running(lane.id)]
+
+    def primary_video_lane(self):
+        return self.ops.primary_video_lane
+
+    # -- commands ------------------------------------------------------------------
+    def _command(self, lane, action):
+        """Run one change to a lane as a feed command. Under server.py's lock first, then
+        the feed's: one lock order everywhere. A Conflict (the lane moved on between the
+        read and the command) is re-read and tried once more, with a new op_id."""
+        with self.ops.lock:
+            for attempt in (1, 2):
+                try:
+                    return self.node.command(secrets.token_hex(8), lane, self.node.precondition(lane), action)
+                except Conflict:
+                    if attempt == 2:
+                        raise
+
+    def tune_digital(self, channel, quality):
+        """(ok, error, stream reused) for a fresh digital generation on this channel."""
+        def tune():
+            ok, error, reused = self.ops.start_digital(channel, quality)
+            if not ok:
+                self.ops.lanes[self.ops.LANE_DIGITAL]["error"] = error or "Failed to tune"
+            return ok, error, reused
+        return self._command(self.ops.LANE_DIGITAL, tune)
+
+    def tune_analog(self, channel, quality):
+        """(ok, error, tuner) for a fresh analog generation on this cable channel."""
+        def tune():
+            ok, error, tuner = self.ops.start_analog(channel, quality)
+            if not ok:
+                self.ops.lanes[self.ops.LANE_ANALOG]["error"] = error or "Failed to tune"
+            return ok, error, tuner
+        return self._command(self.ops.LANE_ANALOG, tune)
+
+    def stop(self, lane):
+        return self._command(lane, lambda: self.ops.stop_lane(lane))
+
+    def stop_all(self):
+        for lane in self.node.config.lanes:
+            self.stop(lane.id)

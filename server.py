@@ -324,6 +324,9 @@ lanes = {name: new_lane_state() for name in ALL_LANES}
 # The feed's own record of each lane: its revision and lifecycle, this run's epoch, and
 # the commands applied (feed_node.py). Every start, stop and crash below reports to it.
 feed = feed_node.FeedNode(FEED_CONFIG)
+# The control plane's only way to the feed: its lanes' state, and every change to them.
+# In one process it calls the functions below; split, it speaks HTTP (see INVARIANTS.md).
+feed_client = feed_node.LocalFeed(feed, sys.modules[__name__])
 tuning_lanes = set()
 
 # Per-lane child processes. Keys are "<lane>_<role>".
@@ -590,7 +593,7 @@ def acquire_tuner_lock(body):
             )
         if until == "program_end":
             if not channel_id and lane == LANE_DIGITAL:
-                channel_id = (lanes[lane]["selection"] or {}).get("id")
+                channel_id = (feed_client.lane(lane)["selection"] or {}).get("id")
             if not channel_id:
                 return api_v1_error(
                     "locking until the end of a programme needs a channel_id, "
@@ -1087,6 +1090,14 @@ def lane_is_running(lane):
     """Whether this lane's encoder (or, for the Roku, its capture) is alive."""
     proc = procs[FEED_CONFIG.lane(lane).process]
     return proc is not None and proc.poll() is None
+
+
+def lane_processes_alive(lane):
+    """Whether every process the lane needs is alive: the digital lane is its tuner
+    source and its encoder, the others one process each."""
+    roles = ("digital_source", "digital_packager") if lane == LANE_DIGITAL \
+        else (FEED_CONFIG.lane(lane).process,)
+    return all(procs[role] is not None and procs[role].poll() is None for role in roles)
 
 
 def reset_lane(lane, lifecycle="idle"):
@@ -1723,12 +1734,7 @@ def always_on_worker():
         ok, error = True, None
         try:
             with lock:
-                source = procs["digital_source"]
-                packager = procs["digital_packager"]
-                healthy = (
-                    source is not None and source.poll() is None
-                    and packager is not None and packager.poll() is None
-                )
+                healthy = feed_client.lane(LANE_DIGITAL)["alive"]
                 # busy_reason() rather than the scanning flag: anything
                 # holding the digital front-end -- a band scan, a guide
                 # refresh -- means restarting the lane can only fail with
@@ -1739,7 +1745,7 @@ def always_on_worker():
                 channel, quality = load_playback_state()
                 if channel is None:
                     continue
-                ok, error, _ = start_digital(channel, quality)
+                ok, error, _ = feed_client.tune_digital(channel, quality)
         except Exception as failure:   # noqa: BLE001 - keeper must not die
             # This thread is the only thing that brings the digital lane
             # back. If it ever raises, the lane stays down until someone
@@ -2065,9 +2071,7 @@ def perform_roku_tune(body):
             "resumed": result.get("resumed", False),
             "stream_reused": result.get("reused", False),
             "operation": result.get("operation") or lane["roku"]["operation"],
-            "active_lanes": [
-                name for name in ALL_LANES if lane_is_running(name)
-            ],
+            "active_lanes": feed_client.running_lanes(),
             "request_ms": round((time.monotonic() - request_started) * 1000, 1),
         }, status
     return roku_call(tune)
@@ -4365,9 +4369,9 @@ def lane_stream_payload(lane):
 
 def _lane_stream_payload(lane):
     """Describe one lane's stream in the shape API clients consume."""
-    state = lanes[lane]
-    active = lane_is_running(lane)
-    ready = active and lane_stream_ready(lane)
+    state = feed_client.lane(lane)
+    active = state["running"]
+    ready = state["ready"]
     health = state.get("health") or {}
     failure = state.get("error") or health.get("reason")
     if health.get("ok") is False and not failure:
@@ -4413,7 +4417,7 @@ def _lane_stream_payload(lane):
         "health": state["health"],
         "started_at": state["started_at"],
         # The feed's count of this lane's changes; a command is issued against it.
-        "revision": feed.view(lane)["revision"],
+        "revision": state["revision"],
     }
 
 
@@ -4425,7 +4429,7 @@ def lane_payload(lane):
 
 def _lane_payload(lane):
     """Full description of one lane: what it is, what it is doing."""
-    state = lanes[lane]
+    state = feed_client.lane(lane)
     config = FEED_CONFIG.lane(lane)
     frontend = config.device
     payload = {
@@ -4434,7 +4438,7 @@ def _lane_payload(lane):
         "description": config.description,
         "node": FEED_CONFIG.node,
         "frontend": frontend,
-        "lifecycle": feed.view(lane)["lifecycle"],
+        "lifecycle": state["lifecycle"],
         # Lanes on different front-ends run concurrently; lanes that share
         # one displace each other.
         "conflicts_with": [
@@ -4464,11 +4468,12 @@ def _lane_payload(lane):
 def frontend_payload():
     """Report the card's RF front-ends and who currently holds each."""
     result = []
+    running = feed_client.running_lanes()
     for device in FEED_CONFIG.devices:
         frontend, label, detail = device.id, device.name, device.detail
         holders = [
             lane for lane in ALL_LANES
-            if LANE_FRONTEND[lane] == frontend and lane_is_running(lane)
+            if LANE_FRONTEND[lane] == frontend and lane in running
         ]
         result.append({
             "id": frontend,
@@ -4490,32 +4495,34 @@ def status_payload():
     Kept so older clients (the Roku app, cached web pages) keep working
     while new clients read /api/v1/status.
     """
-    primary = primary_video_lane
-    if not lane_is_running(primary):
+    running_lanes = feed_client.running_lanes()
+    primary = feed_client.primary_video_lane()
+    if primary not in running_lanes:
         other = next(
-            (lane for lane in VIDEO_LANES if lane_is_running(lane)), None
+            (lane for lane in VIDEO_LANES if lane in running_lanes), None
         )
         if other:
             primary = other
-    state = lanes[primary]
-    running = lane_is_running(primary)
+    state = feed_client.lane(primary)
+    analog = state if primary == LANE_ANALOG else feed_client.lane(LANE_ANALOG)
+    running = state["running"]
     legacy_mode = None
     if running:
         legacy_mode = "tv" if primary == LANE_DIGITAL else "cable"
 
     cable_channel = None
-    if lanes[LANE_ANALOG]["selection"]:
-        cable_channel = lanes[LANE_ANALOG]["selection"].get("channel")
+    if analog["selection"]:
+        cable_channel = analog["selection"].get("channel")
 
     return {
         "mode": legacy_mode,
         "channel": (
             state["selection"] if primary == LANE_DIGITAL else None
         ),
-        "capture": lanes[LANE_ANALOG]["tuner"],
+        "capture": analog["tuner"],
         "cable_channel": cable_channel,
         "streaming": running,
-        "stream_ready": lane_stream_ready(primary),
+        "stream_ready": state["ready"],
         "tuner_backend": (
             TV_SOURCE_BACKEND if primary == LANE_DIGITAL else "analog-v4l2"
         ),
@@ -4545,12 +4552,12 @@ def api_v1_status_payload():
 def _api_v1_status_payload():
     """Return the stable, multi-lane status document API clients read."""
     lanes_payload = {lane: lane_payload(lane) for lane in ALL_LANES}
-    active = [lane for lane in ALL_LANES if lane_is_running(lane)]
+    active = feed_client.running_lanes()
     legacy = status_payload()
-    primary = primary_video_lane
-    if not lane_is_running(primary):
+    primary = feed_client.primary_video_lane()
+    if primary not in active:
         primary = next(
-            (lane for lane in VIDEO_LANES if lane_is_running(lane)), primary
+            (lane for lane in VIDEO_LANES if lane in active), primary
         )
 
     return {
@@ -4565,8 +4572,8 @@ def _api_v1_status_payload():
         "frontends": frontend_payload(),
         "primary_video_lane": primary,
         "streams": [
-            lane_stream_payload(lane) for lane in ALL_LANES
-            if lane_is_running(lane)
+            lanes_payload[lane]["stream"] for lane in ALL_LANES
+            if lane in active
         ],
         "busy_reason": busy_reason(),
         "scanning": {"channels": scanning},
@@ -4578,9 +4585,9 @@ def _api_v1_status_payload():
             "id": primary,
             "kind": primary,
             "name": lanes_payload[primary]["name"],
-        } if lane_is_running(primary) else None,
+        } if primary in active else None,
         "selection": lanes_payload[primary]["selection"]
-        if lane_is_running(primary) else None,
+        if primary in active else None,
         "quality": legacy["quality"],
         "stream": {
             "id": legacy["stream_id"],
@@ -4588,7 +4595,7 @@ def _api_v1_status_payload():
             "ready": legacy["stream_ready"],
             "playlist_path": (
                 f"/stream/{LANE_PLAYLIST[primary]}"
-                if lane_is_running(primary) else None
+                if primary in active else None
             ),
             "content_type": "application/vnd.apple.mpegurl",
             "segment_duration_seconds": legacy["hls_segment_time"],
@@ -4731,8 +4738,8 @@ def lane_plays(lane, key, value):
     already plays changes nothing, so its stream is served as it is -- at the
     holder's quality, feeding the holder's recording taps.
     """
-    state = lanes[lane]
-    return (lane_is_running(lane)
+    state = feed_client.lane(lane)
+    return (state["running"]
             and state["stream_id"] is not None
             and not state.get("error")
             and (state["selection"] or {}).get(key) == value
@@ -4767,24 +4774,23 @@ def perform_digital_tune(channel_id, quality="medium", token=None,
             return {"error": busy}, 409
         if override:
             override_tuner_lock(LANE_DIGITAL)
+        digital = feed_client.lane(LANE_DIGITAL)
         reused = watching or (
             lane_plays(LANE_DIGITAL, "id", channel_id)
-            and lanes[LANE_DIGITAL]["quality"] == quality
+            and digital["quality"] == quality
             # A recording that starts on the channel already playing
             # needs a source generation that feeds its tap.
-            and lanes[LANE_DIGITAL].get("taps", [])
+            and digital.get("taps", [])
             == recording_tap_ports(channel))
         if reused:
             ok, error, stream_reused = True, None, True
         else:
             tuning_lanes.add(LANE_DIGITAL)
             try:
-                ok, error, stream_reused = start_digital(channel, quality)
-                if not ok:
-                    lanes[LANE_DIGITAL]["error"] = error or "Failed to tune"
+                ok, error, stream_reused = feed_client.tune_digital(channel, quality)
             finally:
                 tuning_lanes.discard(LANE_DIGITAL)
-        state = dict(lanes[LANE_DIGITAL])
+        state = feed_client.lane(LANE_DIGITAL)
         snapshot = copy.deepcopy(lane_payload(LANE_DIGITAL))
     if not ok:
         return {"error": error or "Failed to tune"}, 500
@@ -4823,19 +4829,18 @@ def perform_cable_tune(channel, quality="medium", token=None,
             return {"error": busy}, 409
         if override:
             override_tuner_lock(LANE_ANALOG)
+        analog = feed_client.lane(LANE_ANALOG)
         reused = watching or (lane_plays(LANE_ANALOG, "channel", channel)
-                              and lanes[LANE_ANALOG]["quality"] == quality)
+                              and analog["quality"] == quality)
         if reused:
-            ok, error, tuner = True, None, lanes[LANE_ANALOG]["tuner"]
+            ok, error, tuner = True, None, analog["tuner"]
         else:
             tuning_lanes.add(LANE_ANALOG)
             try:
-                ok, error, tuner = start_analog(channel, quality)
-                if not ok:
-                    lanes[LANE_ANALOG]["error"] = error or "Failed to tune"
+                ok, error, tuner = feed_client.tune_analog(channel, quality)
             finally:
                 tuning_lanes.discard(LANE_ANALOG)
-        state = dict(lanes[LANE_ANALOG])
+        state = feed_client.lane(LANE_ANALOG)
         snapshot = copy.deepcopy(lane_payload(LANE_ANALOG))
     if not ok:
         return {"error": error or "Failed to tune cable channel"}, 503
@@ -4942,7 +4947,7 @@ def api_v1_signal():
             "error": str(error),
         }, 503
 
-    selection = lanes[LANE_DIGITAL]["selection"]
+    selection = feed_client.lane(LANE_DIGITAL)["selection"]
     return {
         "api_version": API_VERSION,
         "ok": True,
@@ -5054,10 +5059,10 @@ def api_v1_stop(body):
                 if candidate in ALL_LANES:
                     override_tuner_lock(candidate)
         if lane in (None, "", "all"):
-            stop_all()
+            feed_client.stop_all()
             stopped = list(ALL_LANES)
         elif lane in ALL_LANES:
-            stop_lane(lane)
+            feed_client.stop(lane)
             stopped = [lane]
         else:
             return api_v1_error(
@@ -5070,9 +5075,7 @@ def api_v1_stop(body):
         "api_version": API_VERSION,
         "ok": True,
         "stopped": stopped,
-        "active_lanes": [
-            name for name in ALL_LANES if lane_is_running(name)
-        ],
+        "active_lanes": feed_client.running_lanes(),
     }, 200
 
 
@@ -5318,19 +5321,15 @@ class TVHandler(SimpleHTTPRequestHandler):
                 "streams": [
                     lane_stream_payload(lane) for lane in ALL_LANES
                 ],
-                "active_lanes": [
-                    lane for lane in ALL_LANES if lane_is_running(lane)
-                ],
+                "active_lanes": feed_client.running_lanes(),
             })
             return
 
         if path == "/api/v1/health":
-            active = [
-                lane for lane in ALL_LANES if lane_is_running(lane)
-            ]
+            active = feed_client.running_lanes()
             unhealthy = [
                 lane for lane in active
-                if (lanes[lane]["health"] or {}).get("ok") is False
+                if (feed_client.lane(lane)["health"] or {}).get("ok") is False
             ]
             self.send_json({
                 "api_version": API_VERSION,
@@ -5734,7 +5733,7 @@ class TVHandler(SimpleHTTPRequestHandler):
                 "ok": True,
                 "always_on": ALWAYS_ON,
                 "streaming": any(
-                    lane_is_running(lane) for lane in VIDEO_LANES
+                    lane in VIDEO_LANES for lane in feed_client.running_lanes()
                 ),
             })
             return
