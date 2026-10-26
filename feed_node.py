@@ -405,6 +405,44 @@ class LocalFeed:
         """{alive, returncode, ended, overruns, part, until}, or None."""
         return self.ops.recorders.view(rec_id)
 
+    # -- front-end operations --------------------------------------------------------
+    # A device measured rather than streamed: a scan, the signal meter, a guide read.
+    # Control stops the lane on it first (a command) and keeps its keepers off meanwhile.
+    def _adapter(self, device):
+        adapter = self.node.config.device(device).adapter
+        return 0 if adapter is None else adapter
+
+    def measure(self, device):
+        """The device's signal now, without tuning it or disturbing its stream."""
+        return self.ops.atsc_scan.measure(self._adapter(device))
+
+    def scan_channel(self, device, rf_channel, **options):
+        """Tune one RF channel and report what is on it (lock_timeout, dwell, read_vct)."""
+        return self.ops.atsc_scan.scan_channel(rf_channel, adapter=self._adapter(device), **options)
+
+    def sweep(self, device, rf_channels, lock_timeout, before=None):
+        """Scan each RF channel in turn on the device's front-end, held open for the sweep,
+        yielding each result. ``before(rf)`` is called as each is tuned. Close it
+        (contextlib.closing) to let go of the front-end early."""
+        scan = self.ops.atsc_scan
+        adapter = self._adapter(device)
+        frontend = scan.open_frontend(adapter, writable=True)
+        try:
+            for rf in rf_channels:
+                if before is not None:
+                    before(rf)
+                yield scan.scan_channel(rf, adapter=adapter, lock_timeout=lock_timeout, fd=frontend)
+        finally:
+            os.close(frontend)
+
+    def read_guide(self, device, **options):
+        """Sweep the known frequencies for their PSIP listings (epg.refresh's options)."""
+        return self.ops.epg.refresh(adapter=self._adapter(device), **options)
+
+    def status(self):
+        """{node, feed_epoch, lanes: {revision, lifecycle, navigating}}."""
+        return self.node.status()
+
     # -- navigation ----------------------------------------------------------------
     # Never under server.py's lock: roku_lane calls these from threads that may hold its own.
     def begin_navigation(self, lane, op_id):

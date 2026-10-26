@@ -2057,6 +2057,39 @@ def test_refused_scan_does_not_clear_another_scan(monkeypatch):
     assert b"Channel scan in progress" in handler.wfile.getvalue()
 
 
+def test_a_rescan_sweeps_through_the_feed_and_lets_go_of_the_tuner(monkeypatch):
+    import feed_node
+    monkeypatch.setattr(server, "scanning", False)
+    monkeypatch.setattr(server, "preempt_guide_refresh", lambda: None)
+    monkeypatch.setattr(server, "lock_holder", lambda *args: None)
+    monkeypatch.setattr(server, "busy_reason", lambda: None)
+    monkeypatch.setattr(server, "stop_digital", lambda: None)
+    monkeypatch.setattr(server.time, "sleep", lambda _s: None)
+    opened, closed, saved = [], [], []
+    monkeypatch.setattr(server.atsc_scan, "open_frontend", lambda adapter, writable=False: opened.append(adapter) or 41)
+    monkeypatch.setattr(feed_node.os, "close", closed.append)
+
+    def scan(rf, adapter=0, lock_timeout=2.0, fd=None, **_):
+        assert fd == 41
+        return {"rf_channel": rf, "frequency_hz": rf * 1_000_000, "frequency_mhz": float(rf), "locked": rf == 8,
+                "snr_db": 20.0, "signal_percent": 50, "virtual_channels": [{"number": "8.1"}] if rf == 8 else []}
+
+    monkeypatch.setattr(server.atsc_scan, "scan_channel", scan)
+    monkeypatch.setattr(server, "channels_from_scan", lambda found: [{"id": "w8"}] if found else [])
+    monkeypatch.setattr(server, "save_channels", saved.append)
+    handler = server.TVHandler.__new__(server.TVHandler)
+    handler.path = "/api/rescan/stream?start=7&end=8"
+    handler.wfile = BytesIO()
+    handler.send_response = lambda *args: None
+    handler.send_header = lambda *args: None
+    handler.end_headers = lambda: None
+    handler.handle_rescan_stream()
+    events = handler.wfile.getvalue().decode()
+    assert events.count("event: frequency") == 2 and events.count("event: identify") == 1
+    assert '"ok": true' in events and saved == [[{"id": "w8"}]]
+    assert opened == [0] and closed == [41] and server.scanning is False
+
+
 def test_retry_during_initial_buffering_does_not_restart(clean_locks, monkeypatch):
     monkeypatch.setattr(server, "preempt_guide_refresh", lambda: None)
     monkeypatch.setattr(server, "busy_reason", lambda: None)

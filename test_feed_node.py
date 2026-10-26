@@ -423,3 +423,52 @@ def test_the_service_a_process_is_in():
 ])
 def test_the_reaper_never_touches_another_service(own, theirs, allowed):
     assert feed_node.reapable(own, theirs) is allowed
+
+
+# -- front-end operations through the client -------------------------------------------------
+
+class FakeScanner:
+    def __init__(self):
+        self.calls, self.open, self.closed = [], [], []
+
+    def measure(self, adapter):
+        self.calls.append(("measure", adapter))
+        return {"snr_db": 30}
+
+    def scan_channel(self, rf, adapter=0, **options):
+        self.calls.append(("scan", rf, adapter, options.get("fd")))
+        return {"rf_channel": rf}
+
+    def open_frontend(self, adapter, writable=False):
+        self.open.append((adapter, writable))
+        return 77
+
+
+def front_end(monkeypatch):
+    client, ops = local()
+    ops.atsc_scan = FakeScanner()
+    ops.epg = type("Epg", (), {"refresh": staticmethod(lambda **options: {"options": options})})
+    monkeypatch.setattr(feed_node.os, "close", lambda fd: ops.atsc_scan.closed.append(fd))
+    return client, ops.atsc_scan
+
+
+def test_measurements_go_to_the_devices_adapter(monkeypatch):
+    client, scanner = front_end(monkeypatch)
+    assert client.measure("digital") == {"snr_db": 30}
+    assert client.scan_channel("digital", 9, lock_timeout=2.0) == {"rf_channel": 9}
+    assert scanner.calls == [("measure", 0), ("scan", 9, 0, None)]
+    guide = client.read_guide("digital", channels=[], blocks=4)
+    assert guide["options"] == {"adapter": 0, "channels": [], "blocks": 4}
+
+
+def test_a_sweep_holds_one_front_end_and_lets_go_when_closed_early(monkeypatch):
+    import contextlib
+    client, scanner = front_end(monkeypatch)
+    announced = []
+    with contextlib.closing(client.sweep("digital", [7, 8, 9], 1.5, before=announced.append)) as results:
+        for result in results:
+            if result["rf_channel"] == 8:
+                break                       # the browser went away mid-sweep
+    assert scanner.open == [(0, True)] and scanner.closed == [77], "closed at once, not at GC"
+    assert announced == [7, 8] and [c[1] for c in scanner.calls] == [7, 8]
+    assert all(c[3] == 77 for c in scanner.calls), "every channel on the one held front-end"

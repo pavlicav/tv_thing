@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """TV Thing - ATSC and analog television streaming server."""
 
+import contextlib
 import copy
 import math
 import fcntl
@@ -2621,8 +2622,7 @@ def create_recording(body):
     if mode == "otr":
         # One Touch Recording: whatever the digital lane is showing, until
         # the programme ends (or half an hour if the guide does not say).
-        with lock:
-            channel = lanes[LANE_DIGITAL]["selection"]
+        channel = feed_client.lane(LANE_DIGITAL)["selection"]
         if not channel:
             channel, _quality = load_playback_state()
         if channel is None:
@@ -3655,13 +3655,14 @@ def run_guide_refresh(reason="manual", progress=None, blocks=None,
         guide_abort.clear()
         # Only the digital front-end is needed. An analog stream uses the
         # other tuner and plays straight through a refresh.
-        stop_digital()
+        feed_client.stop(LANE_DIGITAL)
     # dvb_source closes its descriptors before stop_digital returns; give the
     # kernel the same settle window a rescan does before claiming them.
     time.sleep(0.2)
 
     try:
-        guide = epg.refresh(
+        guide = feed_client.read_guide(
+            FRONTEND_DIGITAL,
             channels=load_channels(),
             blocks=EPG_BLOCKS if blocks is None else blocks,
             descriptions=(EPG_DESCRIPTIONS if descriptions is None
@@ -4582,7 +4583,7 @@ def _api_v1_status_payload():
         "api_version": API_VERSION,
         # Which feed this is, and which run of it: a command carries both.
         "node": FEED_CONFIG.node,
-        "feed_epoch": feed.epoch,
+        "feed_epoch": feed_client.status()["feed_epoch"],
         "locks": {lane: lock_view(active_lock(lane)) for lane in ALL_LANES},
         "lanes": lanes_payload,
         "active_lanes": active,
@@ -4933,13 +4934,13 @@ def perform_channel_scan(rf_channel, lock_timeout=2.0, dwell=0.0,
         if busy:
             return {"error": busy}, 409
         scanning = True
-        stop_digital()
+        feed_client.stop(LANE_DIGITAL)
     try:
         # dvb_source closes its descriptors before stop_digital returns.
         time.sleep(0.2)
-        result = atsc_scan.scan_channel(
-            rf_channel, lock_timeout=lock_timeout, dwell=dwell,
-            read_vct=read_vct,
+        result = feed_client.scan_channel(
+            FRONTEND_DIGITAL, rf_channel, lock_timeout=lock_timeout,
+            dwell=dwell, read_vct=read_vct,
         )
     except OSError as error:
         return {"error": f"Could not tune RF {rf_channel}: {error}"}, 503
@@ -4958,7 +4959,7 @@ def perform_channel_scan(rf_channel, lock_timeout=2.0, dwell=0.0,
 def api_v1_signal():
     """Sample the digital front-end without tuning or interrupting a stream."""
     try:
-        sample = atsc_scan.measure(0)
+        sample = feed_client.measure(FRONTEND_DIGITAL)
     except OSError as error:
         return {
             "api_version": API_VERSION,
@@ -5866,7 +5867,7 @@ class TVHandler(SimpleHTTPRequestHandler):
                 # lane uses a different tuner, so an analog stream keeps
                 # playing right through a rescan.
                 send_sse("status", "Releasing the digital tuner...")
-                stop_digital()
+                feed_client.stop(LANE_DIGITAL)
             # dvb_source closes its descriptors before stop_digital returns;
             # give the kernel a short settle window before claiming them.
             time.sleep(0.2)
@@ -5904,18 +5905,17 @@ class TVHandler(SimpleHTTPRequestHandler):
 
             # Announce each channel before it is tuned so the grid can show
             # progress, then hand the sweep one channel at a time.
-            frontend = atsc_scan.open_frontend(0, writable=True)
-            try:
-                for rf in channels_to_scan:
-                    send_sse("frequency", {
-                        "rf_channel": rf,
-                        "frequency": atsc_scan.rf_channel_frequency_hz(rf),
-                    })
-                    on_result(atsc_scan.scan_channel(
-                        rf, lock_timeout=lock_timeout, fd=frontend,
-                    ))
-            finally:
-                os.close(frontend)
+            def announce(rf):
+                send_sse("frequency", {
+                    "rf_channel": rf,
+                    "frequency": atsc_scan.rf_channel_frequency_hz(rf),
+                })
+
+            with contextlib.closing(feed_client.sweep(
+                    FRONTEND_DIGITAL, channels_to_scan, lock_timeout,
+                    before=announce)) as results:
+                for result in results:
+                    on_result(result)
 
             elapsed = time.monotonic() - scan_started
             channels = channels_from_scan(found)
