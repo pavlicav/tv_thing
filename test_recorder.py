@@ -373,7 +373,7 @@ def test_a_recording_tunes_with_a_tap_holds_the_lock_and_finishes(vcr):
     assert status == 423
 
     # Past its end, the worker stops ffmpeg with "q" and files it.
-    proc = server.active_recording["proc"]
+    proc = server.recorders.process(server.active_recording["recorder"])
     server.find_timer(timer["id"])["end"] = time.time() - 1
     server.recording_tick()
     assert proc.written == "q"
@@ -426,7 +426,7 @@ def test_a_crashed_recorder_resumes_into_one_file(vcr):
     timer = schedule_now()
     server.recording_tick()
     first = server.active_recording["part"]
-    server.active_recording["proc"].returncode = 1
+    server.recorders.process(server.active_recording["recorder"]).returncode = 1
     server.recording_tick()
     resumed = server.find_timer(timer["id"])
     assert resumed["status"] == "scheduled"
@@ -474,7 +474,7 @@ def test_a_restart_resumes_under_the_lock_it_already_holds(vcr, monkeypatch):
 def test_pieces_are_filed_when_the_window_closes_before_a_resume(vcr):
     timer = schedule_now()
     server.recording_tick()
-    server.active_recording["proc"].returncode = 1
+    server.recorders.process(server.active_recording["recorder"]).returncode = 1
     server.recording_tick()
     assert server.find_timer(timer["id"])["pieces"]
 
@@ -709,12 +709,12 @@ def test_a_from_live_recording_copies_the_live_stream_without_a_tap(vcr, live):
     # until the live stream is ready.
     assert vcr["tunes"] == [("wjla_7_1", [])]
     assert server.active_lock(server.LANE_DIGITAL)["owner"] == "VCR"
-    assert server.active_recording["proc"] is None
+    assert server.active_recording["recorder"] is None
     assert server.find_timer(timer["id"])["status"] == "recording"
 
     live("gen-1")
     server.recording_tick()
-    proc = server.active_recording["proc"]
+    proc = server.recorders.process(server.active_recording["recorder"])
     assert proc.cmd[proc.cmd.index("-c") + 1] == "copy"
     assert proc.cmd[proc.cmd.index("-i") + 1] \
         == str(server.lane_playlist_path(server.LANE_DIGITAL))
@@ -732,14 +732,14 @@ def test_a_from_live_recording_follows_a_restarted_live_stream(vcr, live):
     server.recording_tick()
     live("gen-1")
     server.recording_tick()
-    first_proc = server.active_recording["proc"]
+    first_proc = server.recorders.process(server.active_recording["recorder"])
     first = server.active_recording["part"]
 
     # The live encoder dies: the copy stops and its piece is kept.
     live(None)
     server.recording_tick()
     assert first_proc.written == "q"
-    assert server.active_recording["proc"] is None
+    assert server.active_recording["recorder"] is None
     stored = server.find_timer(timer["id"])
     assert stored["pieces"] == [str(first)]
 
@@ -765,7 +765,7 @@ def test_a_from_live_copy_that_dies_on_its_own_stream_resumes(vcr, live):
     server.recording_tick()
     live("gen-1")
     server.recording_tick()
-    server.active_recording["proc"].returncode = 1
+    server.recorders.process(server.active_recording["recorder"]).returncode = 1
     server.recording_tick()
     resumed = server.find_timer(timer["id"])
     assert resumed["status"] == "scheduled"
@@ -868,7 +868,7 @@ def test_a_roku_recording_navigates_then_copies_from_the_live_edge(roku_vcr):
     assert roku_vcr["controller"].plays == ["ESPN"]
     assert server.roku_recording["signal"] in ("tuning", "ok")
     server.recording_tick()
-    proc = server.roku_recording["proc"]
+    proc = server.recorders.process(server.roku_recording["recorder"])
     assert proc is not None
     assert str(server.lane_playlist_path(server.LANE_ROKU)) in proc.cmd
     assert proc.cmd[proc.cmd.index("-live_start_index") + 1] == "-3"
@@ -882,7 +882,7 @@ def test_a_roku_recording_ends_when_the_roku_is_moved_off_it(roku_vcr):
     schedule_roku()
     server.recording_tick()
     server.recording_tick()
-    assert server.roku_recording["proc"] is not None
+    assert server.roku_recording["recorder"] is not None
     # Someone overrides the lock and takes the remote.
     server.release_tuner_lock({"lane": "roku", "override": True})
     server.recording_tick()
@@ -903,7 +903,7 @@ def test_the_vcr_shares_a_roku_someone_else_holds_on_its_target(roku_vcr):
     assert server.active_lock(server.LANE_ROKU)["owner"] == "VizelVision master"
     assert roku_vcr["controller"].plays == ["ESPN"]  # It never moved the Roku.
     server.recording_tick()
-    assert server.roku_recording["proc"] is not None
+    assert server.roku_recording["recorder"] is not None
     # The holder moves on: the shared tape ends, the holder's lock stays.
     lane.tune({"source_id": "youtube-tv", "channel_id": "NBC", "token": payload["token"]})
     server.recording_tick()
@@ -1012,3 +1012,17 @@ def test_a_lane_that_cannot_record_is_refused(vcr):
             "start": now + 60, "end": now + 1800})
         assert status == 400 and payload["error"]["code"] == "invalid_lane", lane
     assert server.recordings_payload()["timers"] == []
+
+
+def test_the_feed_ends_a_tape_on_time_even_unasked(vcr):
+    """The feed enforces a recording's end itself: control may be away."""
+    timer = schedule_now()
+    server.recording_tick()
+    current = server.active_recording
+    proc = server.recorders.process(current["recorder"])
+    assert server.recorders.view(current["recorder"])["until"] == timer["end"]
+    server.recorders._recorders[current["recorder"]]["until"] = time.time() - 1
+    server.recorders.sweep()
+    assert proc.written == "q"
+    ends = [e for e in server.recorders.journal() if e["event"] == "end"]
+    assert ends and ends[-1]["reason"] == "until" and ends[-1]["part"] == str(current["part"])

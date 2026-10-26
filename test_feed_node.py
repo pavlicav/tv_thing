@@ -240,3 +240,99 @@ def test_stop_all_stops_every_lane():
     client, ops = local()
     client.stop_all()
     assert [c for c in ops.calls] == [("stop_lane", "digital"), ("stop_lane", "analog"), ("stop_lane", "roku")]
+
+
+# -- Recorders: the feed's VCR processes and their journal -----------------------------------------
+
+class FakeProc:
+    def __init__(self, command):
+        self.command, self.returncode, self.written, self.stdin, self.stderr = command, None, "", self, None
+
+    def write(self, text):
+        self.written += text
+
+    def flush(self):
+        pass
+
+    def close(self):
+        self.returncode = 0
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+
+def recorders(tmp_path, now):
+    spawned = []
+
+    def spawn(command):
+        spawned.append(FakeProc(command))
+        return spawned[-1]
+    return feed_node.Recorders(tmp_path / "journal.jsonl", spawn, clock=lambda: now[0]), spawned
+
+
+def test_a_recorder_is_journalled_from_start_to_end(tmp_path):
+    now = [1000.0]
+    feed, spawned = recorders(tmp_path, now)
+    rec = feed.start(["ffmpeg", "x"], tmp_path / "a.ts.part", 2000, kind="tap", lane="digital", tap_port=18384)
+    assert feed.view(rec)["alive"] and feed.live() == [rec]
+    feed.stop(rec)
+    assert spawned[0].written == "q"
+    view = feed.view(rec)
+    assert view["alive"] is False and view["ended"] == "stopped" and view["returncode"] == 0
+    events = feed.journal()
+    assert [(e["event"], e.get("reason")) for e in events] == [("start", None), ("end", "stopped")]
+    assert events[0]["tap_port"] == 18384 and events[0]["until"] == 2000
+
+
+def test_one_writer_per_part(tmp_path):
+    feed, spawned = recorders(tmp_path, [1000.0])
+    first = feed.start(["ffmpeg"], tmp_path / "a.ts.part", 2000)
+    assert feed.start(["ffmpeg"], tmp_path / "a.ts.part", 2000) == first
+    assert len(spawned) == 1
+    feed.stop(first)
+    assert feed.start(["ffmpeg"], tmp_path / "a.ts.part", 2000) != first, "a new piece may start once it ended"
+
+
+def test_the_feed_stops_a_recording_at_its_end_by_itself(tmp_path):
+    now = [1000.0]
+    feed, spawned = recorders(tmp_path, now)
+    rec = feed.start(["ffmpeg"], tmp_path / "a.ts.part", 1500)
+    feed.sweep()
+    assert spawned[0].written == ""
+    now[0] = 1500
+    feed.sweep()
+    assert spawned[0].written == "q" and feed.view(rec)["ended"] == "until"
+    assert feed.journal()[-1]["reason"] == "until"
+
+
+def test_an_exit_is_noticed_and_journalled(tmp_path):
+    feed, spawned = recorders(tmp_path, [1000.0])
+    rec = feed.start(["ffmpeg"], tmp_path / "a.ts.part", 2000)
+    spawned[0].returncode = 1
+    view = feed.view(rec)
+    assert view["alive"] is False and view["ended"] == "exited" and view["returncode"] == 1
+    assert feed.journal()[-1]["returncode"] == 1
+    feed.stop(rec)
+    assert len(feed.journal()) == 2, "ending twice journals once"
+
+
+def test_a_failed_spawn_starts_nothing(tmp_path):
+    def broken(command):
+        raise OSError("no ffmpeg")
+    feed = feed_node.Recorders(tmp_path / "journal.jsonl", broken)
+    with pytest.raises(OSError):
+        feed.start(["ffmpeg"], tmp_path / "a.ts.part", 2000)
+    assert feed.live() == [] and feed.journal() == []
+
+
+def test_stop_all_and_unknown_ids(tmp_path):
+    feed, spawned = recorders(tmp_path, [1000.0])
+    for name in ("a", "b"):
+        feed.start(["ffmpeg"], tmp_path / f"{name}.ts.part", 2000)
+    feed.stop_all(timeout=2)
+    assert [p.written for p in spawned] == ["q", "q"] and feed.live() == []
+    assert feed.view("nope") is None
+    feed.stop("nope")      # nothing to do

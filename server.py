@@ -1506,7 +1506,7 @@ def start_digital_packager(quality, stream_id, udp_port=TV_UDP_PORT):
     return True, None
 
 
-def start_digital(channel, quality="medium"):
+def start_digital(channel, quality="medium", taps=None):
     """Start a fresh DVB tuner and encoder generation for one channel.
 
     Returns ``(ok, error, False)``. Restarting ffmpeg is intentional: each
@@ -1514,7 +1514,9 @@ def start_digital(channel, quality="medium"):
     must never share CFR or encoder state.
 
     Only the digital front-end is touched, so an analog stream keeps
-    running across a digital retune.
+    running across a digital retune. ``taps`` are the recording tap ports
+    the source feeds besides the encoder (by default, what this process's
+    recordings need).
     """
     STREAMS_DIR.mkdir(exist_ok=True)
 
@@ -1533,7 +1535,7 @@ def start_digital(channel, quality="medium"):
         reset_lane(LANE_DIGITAL)
         return False, error, False
 
-    taps = recording_tap_ports(channel)
+    taps = recording_tap_ports(channel) if taps is None else list(taps)
     source_cmd = build_tv_source_command(channel, udp_port, taps)
     lanes[LANE_DIGITAL]["started_at"] = time.time()
 
@@ -1745,7 +1747,8 @@ def always_on_worker():
                 channel, quality = load_playback_state()
                 if channel is None:
                     continue
-                ok, error, _ = feed_client.tune_digital(channel, quality)
+                ok, error, _ = feed_client.tune_digital(
+                    channel, quality, taps=recording_tap_ports(channel))
         except Exception as failure:   # noqa: BLE001 - keeper must not die
             # This thread is the only thing that brings the digital lane
             # back. If it ever raises, the lane stays down until someone
@@ -2242,6 +2245,15 @@ RECORDING_STALL_SECONDS = 30
 # still open, but not forever.
 RECORDING_MAX_ATTEMPTS = 5
 RECORDER_STOP_TIMEOUT = 8.0
+# What the feed keeps across restarts, outside the streams directory (which a
+# deploy may clean or replace): the recordings journal. /var/lib/tv-thing in
+# production (the unit's StateDirectory=).
+STATE_DIR = Path(os.environ.get("TV_THING_STATE_DIR", str(BASE_DIR / "state")))
+RECORDINGS_JOURNAL = STATE_DIR / "feed" / "recordings-journal.jsonl"
+# The feed's recorder processes (feed_node.Recorders); the timers, pieces and
+# finalizing below are control's.
+recorders = feed_node.Recorders(RECORDINGS_JOURNAL, spawn=lambda command: _spawn_recorder(command),
+                                stop_timeout=RECORDER_STOP_TIMEOUT)
 ACTIVE_OR_FINISHING = (*recorder.ACTIVE, "finishing")
 
 recording_schedule = None       # loaded on first use; guarded by `lock`
@@ -2879,21 +2891,18 @@ def _start_recorder_process(timer):
     if from_live:
         # No tap and no encoder of its own: _tend_live_copy() starts copying
         # once the lane's live stream is ready.
-        tap_port, proc = None, None
+        tap_port, recorder_id = None, None
     else:
         # A source generation on another channel may still be feeding the
         # last recording's tap; listening there would tape that channel until
         # the retune. On the same channel, reusing the port is what lets
         # back-to-back timers continue without a retune.
-        with lock:
-            same_channel = (lanes[LANE_DIGITAL]["selection"] or {}).get("id") \
-                == channel["id"]
-            busy_taps = () if same_channel \
-                else tuple(lanes[LANE_DIGITAL]["taps"])
-        tap_port = allocate_udp_port(RECORD_TAP_PORT_BASE, exclude=busy_taps)
+        digital = feed_client.lane(LANE_DIGITAL)
+        same_channel = (digital["selection"] or {}).get("id") == channel["id"]
+        busy_taps = () if same_channel else tuple(digital["taps"])
         try:
-            proc = _spawn_recorder(recorder.build_record_command(
-                tv_udp_input(tap_port), part))
+            recorder_id, tap_port = feed_client.start_recorder(
+                "tap", part, timer["end"], exclude=busy_taps)
         except OSError as error:
             release_tuner_lock({"lane": LANE_DIGITAL, "token": token})
             return f"could not start the recorder: {error}"
@@ -2902,7 +2911,9 @@ def _start_recorder_process(timer):
     current = {
         "timer_id": timer["id"],
         "channel_id": channel["id"],
-        "proc": proc,
+        # The feed's recorder process writing this piece (feed_client.recorder()).
+        "recorder": recorder_id,
+        "until": timer["end"],
         "tap_port": tap_port,
         "from_live": from_live,
         # The live stream generation a from_live copy is reading.
@@ -2914,17 +2925,13 @@ def _start_recorder_process(timer):
         "last_size": 0,
         "last_growth": time.monotonic(),
         "signal": "tuning",
-        "overruns": 0,
     }
     active_recording = current
-    if proc is not None:
-        _watch_recorder_stderr(current, proc)
 
     # Tune through the same path a person does, holding the lock's token.
     # A tap is attached because the channel now matches the recording; a
     # from_live recording has none, so a lane already on the channel is kept.
-    with lock:
-        quality = lanes[LANE_DIGITAL]["quality"] or "medium"
+    quality = feed_client.lane(LANE_DIGITAL)["quality"] or "medium"
     result, status = perform_digital_tune(channel["id"], quality, token=token)
     if status != 200:
         _stop_recorder_process(current)
@@ -3012,7 +3019,8 @@ def _start_roku_recorder(timer):
         "timer_id": timer["id"],
         "channel_id": timer["channel_id"],
         "target": target,
-        "proc": None,
+        "recorder": None,
+        "until": timer["end"],
         "tap_port": None,
         # The Roku is always taped from its live stream: _tend_live_copy()
         # starts once the target is verified on screen.
@@ -3026,7 +3034,6 @@ def _start_roku_recorder(timer):
         "last_size": 0,
         "last_growth": time.monotonic(),
         "signal": "tuning",
-        "overruns": 0,
     }
     _set_current_recording(LANE_ROKU, current)
     with lock:
@@ -3055,23 +3062,33 @@ def _next_piece(timer, stem):
     return part
 
 
+def start_recorder(kind, part, until, *, lane=None, exclude=(), start_index=0):
+    """Start one recorder process (feed side). ``kind`` "tap" records a port
+    the digital source feeds, chosen here; "live" copies ``lane``'s live HLS.
+    Returns (recorder id, tap port or None); raises OSError if ffmpeg won't start."""
+    if kind == "tap":
+        tap_port = allocate_udp_port(RECORD_TAP_PORT_BASE, exclude=exclude)
+        command = recorder.build_record_command(tv_udp_input(tap_port), part)
+    elif kind == "live":
+        tap_port = None
+        command = recorder.build_live_copy_command(lane_playlist_path(lane), part, start_index=start_index)
+    else:
+        raise ValueError(f"unknown recorder kind {kind!r}")
+    return recorders.start(command, part, until, kind=kind, lane=lane, tap_port=tap_port), tap_port
+
+
+def recorder_alive(current):
+    """Whether a recording's current recorder process runs (control side)."""
+    view = feed_client.recorder(current["recorder"]) if current.get("recorder") else None
+    return view is not None and view["alive"]
+
+
 def _spawn_recorder(cmd):
     return subprocess.Popen(
         cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE, text=True,
         preexec_fn=_recorder_preexec,
     )
-
-
-def _watch_recorder_stderr(current, proc):
-    def log_stderr():
-        for line in proc.stderr:
-            line = line.rstrip()
-            if "Circular buffer overrun" in line:
-                current["overruns"] += 1
-            print(f"recorder ffmpeg: {line}", flush=True)
-
-    threading.Thread(target=log_stderr, daemon=True).start()
 
 
 def _tend_live_copy(current):
@@ -3086,14 +3103,13 @@ def _tend_live_copy(current):
     resumes it like a crashed encoder.
     """
     lane = current.get("lane", LANE_DIGITAL)
+    state = feed_client.lane(lane)
+    generation = state["stream_id"]
     with lock:
-        state = lanes[lane]
-        generation = state["stream_id"]
         on_target = roku_on_target(current["target"]) if lane == LANE_ROKU \
             else (state["selection"] or {}).get("id") == current["channel_id"]
-        ready = generation is not None and on_target \
-            and lane_stream_ready(lane)
-    if current["proc"] is not None:
+    ready = generation is not None and on_target and state["ready"]
+    if current["recorder"] is not None:
         if generation == current["generation"]:
             return
         _stop_recorder_process(current)
@@ -3103,20 +3119,19 @@ def _tend_live_copy(current):
     if not ready:
         return
     try:
-        proc = _spawn_recorder(recorder.build_live_copy_command(
-            lane_playlist_path(lane), current["part"],
-            start_index=-3 if lane == LANE_ROKU else 0))
+        recorder_id, _ = feed_client.start_recorder(
+            "live", current["part"], current["until"], lane=lane,
+            start_index=-3 if lane == LANE_ROKU else 0)
     except OSError as error:
         print(f"VCR: could not start the live copy: {error}")
         return
-    current.update({"proc": proc, "generation": generation})
-    _watch_recorder_stderr(current, proc)
+    current.update({"recorder": recorder_id, "generation": generation})
 
 
 def _file_live_piece(current):
     """Set a stopped live copy's file aside as a piece; aim at the next."""
     part = current["part"]
-    current.update({"proc": None, "generation": None, "last_size": 0})
+    current.update({"recorder": None, "generation": None, "last_size": 0})
     try:
         taped = part.stat().st_size > 0
     except OSError:
@@ -3136,21 +3151,10 @@ def _file_live_piece(current):
 
 
 def _stop_recorder_process(current, timeout=RECORDER_STOP_TIMEOUT):
-    """Ask ffmpeg to finish its file, escalating only if it will not."""
-    proc = current["proc"]
-    if proc is None:
-        return
-    if proc.poll() is None:
-        try:
-            proc.stdin.write("q")
-            proc.stdin.flush()
-            proc.stdin.close()
-        except (OSError, ValueError):
-            pass
-        try:
-            proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            kill_process(proc, timeout=1)
+    """Ask the feed to finish this recording's file ("q"), escalating only if
+    ffmpeg will not."""
+    if current.get("recorder") is not None:
+        feed_client.stop_recorder(current["recorder"], timeout=timeout)
 
 
 def _discard_empty(part):
@@ -3399,7 +3403,7 @@ def _check_roku_recording(now):
     navigating = bool(operation and operation["active"]
                       and roku_lane.same_target(operation["target"], target))
     if not on_target and not navigating:
-        if current["proc"] is not None or current["last_size"]:
+        if current["recorder"] is not None or current["last_size"]:
             who = held["owner"] if held else "someone"
             return end("partial", f"the Roku was moved off it by {who}")
         if operation and roku_lane.same_target(operation["target"], target) \
@@ -3412,11 +3416,11 @@ def _check_roku_recording(now):
         current["signal"] = "tuning"
         return None
     _tend_live_copy(current)
-    if current["proc"] is not None and current["proc"].poll() is not None:
+    if current["recorder"] is not None and not recorder_alive(current):
         resume = timer.get("attempts", 1) < RECORDING_MAX_ATTEMPTS
+        exit_code = (feed_client.recorder(current["recorder"]) or {}).get("returncode")
         return end("partial",
-                   f"the recorder stopped unexpectedly (exit "
-                   f"{current['proc'].returncode})"
+                   f"the recorder stopped unexpectedly (exit {exit_code})"
                    + ("; resuming" if resume else ""), resume=resume)
     storage = recording_storage_status()
     if storage["free_bytes"] is not None \
@@ -3442,7 +3446,7 @@ def _check_active_recording(now):
         timer = find_timer(current["timer_id"])
         stop_requested = bool(timer and timer.get("stop_requested"))
         held = active_lock(LANE_DIGITAL)
-        tuned = (lanes[LANE_DIGITAL]["selection"] or {}).get("id")
+    tuned = (feed_client.lane(LANE_DIGITAL)["selection"] or {}).get("id")
     if timer is None:
         return _end_active_recording("partial", "the timer was removed")
     if stop_requested:
@@ -3456,12 +3460,12 @@ def _check_active_recording(now):
             "partial", f"the tuner was taken over by {owner}")
     if current.get("from_live"):
         _tend_live_copy(current)
-    if current["proc"] is not None and current["proc"].poll() is not None:
+    if current["recorder"] is not None and not recorder_alive(current):
         resume = timer.get("attempts", 1) < RECORDING_MAX_ATTEMPTS
+        exit_code = (feed_client.recorder(current["recorder"]) or {}).get("returncode")
         return _end_active_recording(
             "partial",
-            f"the recorder stopped unexpectedly (exit "
-            f"{current['proc'].returncode})"
+            f"the recorder stopped unexpectedly (exit {exit_code})"
             + ("; resuming" if resume else ""),
             resume=resume,
         )
@@ -3560,6 +3564,17 @@ def recording_worker():
             time.sleep(2)
 
 
+def recorder_keeper():
+    """The feed's own watch over its recorders: notes exits and ends each
+    recording on time, whether or not control is there to ask (feed side)."""
+    while True:
+        time.sleep(2)
+        try:
+            recorders.sweep()
+        except Exception as failure:   # noqa: BLE001 - the keeper must not die
+            print(f"Recorder keeper error: {failure!r}")
+
+
 def recover_recordings():
     """After a restart: finish the files an interrupted run left behind.
 
@@ -3604,11 +3619,12 @@ def recover_recordings():
 
 
 def shutdown_recording():
-    """On exit: close the files cleanly and leave them for recover_recordings()."""
-    for current in running_recordings():
-        # systemd kills the unit 5 s after asking; the transport stream is
-        # playable even if ffmpeg does not get to finish.
-        _stop_recorder_process(current, timeout=2)
+    """On exit: close the files cleanly and leave them for recover_recordings().
+
+    The feed's job (its recorders), done when the feed stops."""
+    # systemd kills the unit 5 s after asking; the transport stream is
+    # playable even if ffmpeg does not get to finish.
+    recorders.stop_all(timeout=2)
 
 
 def run_guide_refresh(reason="manual", progress=None, blocks=None,
@@ -4371,7 +4387,7 @@ def _lane_stream_payload(lane):
     """Describe one lane's stream in the shape API clients consume."""
     state = feed_client.lane(lane)
     active = state["running"]
-    ready = state["ready"]
+    ready = active and state["ready"]
     health = state.get("health") or {}
     failure = state.get("error") or health.get("reason")
     if health.get("ok") is False and not failure:
@@ -4787,7 +4803,8 @@ def perform_digital_tune(channel_id, quality="medium", token=None,
         else:
             tuning_lanes.add(LANE_DIGITAL)
             try:
-                ok, error, stream_reused = feed_client.tune_digital(channel, quality)
+                ok, error, stream_reused = feed_client.tune_digital(
+                    channel, quality, taps=recording_tap_ports(channel))
             finally:
                 tuning_lanes.discard(LANE_DIGITAL)
         state = feed_client.lane(LANE_DIGITAL)
@@ -6559,6 +6576,7 @@ def main():
     threading.Thread(target=guide_worker, daemon=True).start()
     threading.Thread(target=yttv_guide_worker, daemon=True).start()
     threading.Thread(target=recording_worker, daemon=True).start()
+    threading.Thread(target=recorder_keeper, daemon=True).start()
     threading.Thread(target=slides_worker, daemon=True).start()
     if ALWAYS_ON:
         always_on_wakeup.set()

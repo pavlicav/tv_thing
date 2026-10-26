@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 import secrets
+import subprocess
 import threading
 import time
 from collections import OrderedDict
@@ -248,13 +250,14 @@ class LocalFeed:
     # -- reading -------------------------------------------------------------------
     def lane(self, lane):
         """The feed's view of one lane: its state, whether its processes run, whether its
-        playlist is ready, and its revision and lifecycle. A copy: it never changes under you."""
+        current generation's playlist is ready (with or without them), and its revision and
+        lifecycle. A copy: it never changes under you."""
         ops = self.ops
         with ops.lock:
             state = copy.deepcopy(ops.lanes[lane])
             running = ops.lane_is_running(lane)
             alive = running and ops.lane_processes_alive(lane)
-        ready = running and ops.lane_stream_ready(lane)
+        ready = ops.lane_stream_ready(lane)
         return {**state, "running": running, "alive": alive, "ready": ready, **self.node.view(lane)}
 
     def running_lanes(self):
@@ -276,10 +279,12 @@ class LocalFeed:
                     if attempt == 2:
                         raise
 
-    def tune_digital(self, channel, quality):
-        """(ok, error, stream reused) for a fresh digital generation on this channel."""
+    def tune_digital(self, channel, quality, taps=()):
+        """(ok, error, stream reused) for a fresh digital generation on this channel,
+        also feeding these recording tap ports."""
         def tune():
-            ok, error, reused = self.ops.start_digital(channel, quality)
+            ok, error, reused = self.ops.start_digital(channel, quality, list(taps)) if taps \
+                else self.ops.start_digital(channel, quality)
             if not ok:
                 self.ops.lanes[self.ops.LANE_DIGITAL]["error"] = error or "Failed to tune"
             return ok, error, reused
@@ -300,3 +305,162 @@ class LocalFeed:
     def stop_all(self):
         for lane in self.node.config.lanes:
             self.stop(lane.id)
+
+    # -- recorders -----------------------------------------------------------------
+    def start_recorder(self, kind, part, until, *, lane=None, exclude=(), start_index=0):
+        """Start a recorder writing ``part`` until ``until``: from a recording tap ("tap",
+        whose port is chosen here, avoiding ``exclude``) or copying a lane's live stream
+        ("live"). Returns (recorder id, tap port or None)."""
+        return self.ops.start_recorder(kind, part, until, lane=lane, exclude=exclude, start_index=start_index)
+
+    def stop_recorder(self, rec_id, timeout=None):
+        self.ops.recorders.stop(rec_id, timeout=timeout)
+
+    def recorder(self, rec_id):
+        """{alive, returncode, ended, overruns, part, until}, or None."""
+        return self.ops.recorders.view(rec_id)
+
+
+class Recorders:
+    """The feed's recorder processes (the VCR's ffmpeg).
+
+    Each is started with the end time the feed enforces itself, so a recording never runs
+    long while control is away. Each part file has one writer: starting a second recorder
+    on a part already being written returns the first. Starts and ends, and why each
+    ended, go to a durable journal that control reconciles with its timers.
+
+    Nothing here runs a thread per recording: ``sweep()`` (the feed's keeper calls it, and
+    every ``view()`` does) notices exits and enforces end times.
+    """
+
+    def __init__(self, journal_path, spawn, *, clock=time.time, stop_timeout=8.0):
+        self.journal_path, self.spawn, self.clock = Path(journal_path), spawn, clock
+        self.stop_timeout = stop_timeout
+        self._lock = threading.RLock()
+        self._recorders = {}
+
+    def start(self, command, part, until, **info):
+        """Spawn ``command`` writing ``part`` until the epoch time ``until``. Returns its id."""
+        part = str(part)
+        with self._lock:
+            writing = next((r for r in self._recorders.values()
+                            if r["part"] == part and r["ended"] is None), None)
+            if writing is not None:
+                return writing["id"]
+            proc = self.spawn(command)          # OSError: nothing was started
+            entry = {"id": secrets.token_hex(8), "proc": proc, "part": part, "until": until,
+                     "overruns": 0, "started_at": self.clock(), "ended": None, **info}
+            self._recorders[entry["id"]] = entry
+        self._journal("start", entry)
+        if getattr(proc, "stderr", None) is not None:
+            threading.Thread(target=self._read_stderr, args=(entry,), daemon=True).start()
+        return entry["id"]
+
+    def _read_stderr(self, entry):
+        for line in entry["proc"].stderr:
+            line = line.rstrip()
+            if "Circular buffer overrun" in line:
+                entry["overruns"] += 1
+            print(f"recorder ffmpeg: {line}", flush=True)
+
+    def stop(self, rec_id, timeout=None, reason="stopped"):
+        """Ask ffmpeg to finish its file ("q"), escalating only if it will not."""
+        with self._lock:
+            entry = self._recorders.get(rec_id)
+        if entry is None or entry["ended"] is not None:
+            return
+        proc = entry["proc"]
+        if proc.poll() is None:
+            try:
+                proc.stdin.write("q")
+                proc.stdin.flush()
+                proc.stdin.close()
+            except (OSError, ValueError, AttributeError):
+                pass
+            try:
+                proc.wait(timeout=self.stop_timeout if timeout is None else timeout)
+            except subprocess.TimeoutExpired:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+        self._ended(entry, reason)
+
+    def _ended(self, entry, reason):
+        with self._lock:
+            if entry["ended"] is not None:
+                return
+            entry["ended"] = reason
+        try:
+            size = Path(entry["part"]).stat().st_size
+        except OSError:
+            size = None
+        self._journal("end", entry, reason=reason, returncode=entry["proc"].returncode, bytes=size)
+
+    def sweep(self):
+        """Note recorders that exited on their own, and stop those past their end time."""
+        now = self.clock()
+        with self._lock:
+            live = [entry for entry in self._recorders.values() if entry["ended"] is None]
+        for entry in live:
+            if entry["proc"].poll() is not None:
+                self._ended(entry, "exited")
+            elif entry["until"] is not None and now >= entry["until"]:
+                self.stop(entry["id"], reason="until")
+        with self._lock:      # forget ended ones after an hour; the journal keeps them
+            for rec_id in [r for r, e in self._recorders.items()
+                           if e["ended"] is not None and now - e["started_at"] > 3600]:
+                del self._recorders[rec_id]
+
+    def view(self, rec_id):
+        """{alive, returncode, ended, overruns, part, until}, or None for an unknown id."""
+        self.sweep()
+        with self._lock:
+            entry = self._recorders.get(rec_id)
+            if entry is None:
+                return None
+            return {"id": rec_id, "alive": entry["ended"] is None, "returncode": entry["proc"].returncode,
+                    "ended": entry["ended"], "overruns": entry["overruns"], "part": entry["part"],
+                    "until": entry["until"]}
+
+    def live(self):
+        with self._lock:
+            return [rec_id for rec_id, entry in self._recorders.items() if entry["ended"] is None]
+
+    def stop_all(self, timeout=None, reason="shutdown"):
+        for rec_id in self.live():
+            self.stop(rec_id, timeout=timeout, reason=reason)
+
+    def process(self, rec_id):
+        """The process itself (tests)."""
+        with self._lock:
+            entry = self._recorders.get(rec_id)
+        return entry["proc"] if entry else None
+
+    def _journal(self, event, entry, **extra):
+        record = {"at": self.clock(), "event": event, "id": entry["id"], "part": entry["part"],
+                  "until": entry["until"], **{k: entry.get(k) for k in ("kind", "lane", "tap_port")}, **extra}
+        try:
+            self.journal_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.journal_path, "a") as journal:
+                journal.write(json.dumps(record) + "\n")
+                journal.flush()
+                os.fsync(journal.fileno())
+        except OSError as error:
+            print(f"Could not write the recordings journal: {error}", flush=True)
+
+    def journal(self):
+        """Every journal record, oldest first (a damaged line is skipped)."""
+        try:
+            lines = self.journal_path.read_text().splitlines()
+        except OSError:
+            return []
+        records = []
+        for line in lines:
+            try:
+                records.append(json.loads(line))
+            except ValueError:
+                continue
+        return records
