@@ -177,6 +177,39 @@ def test_navigation_start_clears_the_selection_and_changes_generation(lane):
     assert lane.selection_view()["channel_id"] == "NBC"
 
 
+def successor(lane):
+    """The lane as a restarted control builds it: new in memory, on the feed's same record."""
+    return roku_lane.RokuLane(Config(), lane.controller, baseball=lane.baseball, sports=lane.sports,
+                              capture_source=lane.capture_source, record=lane.record,
+                              playing_seconds=.5, sleep=lambda _: None)
+
+
+def test_a_restart_reads_the_generation_and_selection_back_from_the_feed(lane):
+    tune(lane)
+    settle(lane)
+    verified = lane.generation()
+    again = successor(lane)
+    assert again.generation() == verified, "a control restart changes no generation"
+    assert again.selection_view()["channel_id"] == "ESPN"
+    status, result = tune(again)
+    assert status == 200 and result["reused"] is True
+    assert lane.controller.plays == ["ESPN"]
+
+
+def test_a_navigation_cut_off_by_a_crash_leaves_the_selection_unknown(lane):
+    tune(lane)
+    settle(lane)
+    verified = lane.generation()
+    lane.record.begin_navigation("the-crashed-control's")      # its keys had begun
+    again = successor(lane)
+    state = again.record.state()
+    assert not state["navigating"] and state["selection"] is None
+    assert again.generation() != verified, "a lease on the old picture fails closed"
+    status, _ = tune(again)
+    assert status == 202, "it navigates rather than trusting what the Roku shows"
+    settle(again)
+
+
 def test_capture_restart_resumes_after_the_still_playing_check(lane):
     tune(lane)
     settle(lane)

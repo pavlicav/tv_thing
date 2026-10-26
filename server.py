@@ -4455,6 +4455,8 @@ def _lane_payload(lane):
         "node": FEED_CONFIG.node,
         "frontend": frontend,
         "lifecycle": state["lifecycle"],
+        # Keys may be moving the picture: a navigation began and has not ended.
+        "navigating": state["navigating"],
         # Lanes on different front-ends run concurrently; lanes that share
         # one displace each other.
         "conflicts_with": [
@@ -6502,6 +6504,7 @@ def start_roku_lane():
     try:
         roku = roku_lane.load(ROKU_CONFIG_FILE,
                               capture_source=roku_capture_source,
+                              record=feed_node.LaneRecord(feed_client, LANE_ROKU),
                               reuse_max_age=ROKU_REUSE_MAX_AGE)
     except RokuStreamError as error:
         # A broken roku.json costs the Roku lane, never the television.

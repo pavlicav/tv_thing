@@ -5,10 +5,12 @@ process (the HD PVR's own H.264 and AAC, copied to HLS and to a private
 loopback tap). This module owns everything about *what* is on it:
 
 * the **selection** -- a verified YouTube TV channel or game, or "manual";
-* the **generation** -- ``<capture id>.<serial>``. It changes whenever the
+* the **generation** -- ``<capture id>.<revision>``. It changes whenever the
   picture stops being the verified selection (a navigation starts, a remote
   key is pressed) or the capture restarts, so a client holding a lease on
-  the lane fails closed exactly when it should;
+  the lane fails closed exactly when it should. The revision and the
+  selection are kept by the feed (``feed_node.LaneRecord``), so a restart of
+  this side reads them back and changes neither;
 * **navigation**, run by ``roku_control``'s controller in a background
   operation, with screen recognition on the lane's tap;
 * the **remote** for Manual Roku: allowlisted ECP keys, text and app launch.
@@ -26,6 +28,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import date
 
+import feed_node
 from roku_control import days
 from roku_control.errors import (ConfigError, ControlBusyError, CueCancelledError, EcpError,
                                  NavigationError, RokuStreamError, SundayTicketBlackoutError)
@@ -113,7 +116,7 @@ def same_target(left, right):
 
 class RokuLane:
     def __init__(self, config, controller, *, baseball, sports, capture_source,
-                 reuse_max_age=900.0, playing_seconds=PLAYING_SECONDS,
+                 record=None, reuse_max_age=900.0, playing_seconds=PLAYING_SECONDS,
                  clock=time.monotonic, wall_clock=time.time, sleep=time.sleep):
         self.config = config
         self.controller = controller
@@ -123,21 +126,28 @@ class RokuLane:
         self.sports = sports
         # () -> {"running", "stream_id", "tap_url", ...} from the server.
         self.capture_source = capture_source
+        # The feed's record of this lane: its revision and verified selection. On its own
+        # (tests, tools) the lane keeps a private one.
+        self.record = record or feed_node.LaneRecord.private(LANE)
         self.reuse_max_age = reuse_max_age
         self.playing_seconds = playing_seconds
         self._clock, self._wall, self._sleep = clock, wall_clock, sleep
         self._lock = threading.RLock()
         self._tune_lock = threading.Lock()
-        self.selection = None
-        self.serial = 0
         self.operation = None
         self._thread = None
         self._blackouts = {}  # target key -> (wall time, message)
         self._player = {"at": None, "data": None, "error": None}
         self._player_refreshing = False
         self._apps = {"at": None, "data": None}
-        self.on_change = None
+        # The navigations _navigate itself ends, with what it verified (per thread).
+        self._local = threading.local()
         controller.navigation_guard = self._navigation_guard
+        # A navigation left open by a predecessor that died mid-way: what the Roku shows is
+        # unknown, and stays so (its revision already moved when it began).
+        left = self.record.state()["navigation"]
+        if left is not None and left["ended_at"] is None:
+            self.record.end_navigation(left["op_id"], None)
 
     # -- identity ---------------------------------------------------------
     def capture_id(self):
@@ -145,23 +155,29 @@ class RokuLane:
 
     def generation(self):
         capture = self.capture_id()
-        with self._lock:
-            return f"{capture}.{self.serial}" if capture else None
+        return f"{capture}.{self.record.state()['revision']}" if capture else None
 
-    def _changed(self):
-        """The picture may no longer be what it was (caller holds _lock)."""
-        self.serial += 1
-        if self.on_change:
-            self.on_change()
+    @property
+    def selection(self):
+        """The verified selection as the feed keeps it (a copy), or None."""
+        return self.record.state()["selection"]
 
     @contextmanager
     def _navigation_guard(self):
         # The controller enters this around every navigation and every
         # calibration that moves the Roku: what it shows is about to change.
-        with self._lock:
-            self.selection = None
-            self._changed()
-        yield
+        # The feed forgets the selection and moves the revision before the first key.
+        op_id = uuid.uuid4().hex
+        self.record.begin_navigation(op_id)
+        mine = getattr(self._local, "navigations", None)
+        if mine is not None:
+            mine.append(op_id)      # _navigate ends it, with what it verifies
+            yield
+            return
+        try:
+            yield
+        finally:
+            self.record.end_navigation(op_id, None)
 
     # -- targets ----------------------------------------------------------
     def normalize(self, body):
@@ -226,9 +242,10 @@ class RokuLane:
     def _set_manual(self, message):
         with self._lock:
             if not (self.selection and self.selection.get("manual")):
-                self.selection = {"source_id": MANUAL, "channel_id": "manual", "manual": True,
-                                  "name": "Manual Roku", "since": self._wall(), "note": message}
-                self._changed()
+                op_id = uuid.uuid4().hex
+                self.record.begin_navigation(op_id)
+                self.record.end_navigation(op_id, {"source_id": MANUAL, "channel_id": "manual", "manual": True,
+                                                   "name": "Manual Roku", "since": self._wall(), "note": message})
 
     def tune(self, body):
         """Put target on the Roku. Returns (status, payload).
@@ -310,6 +327,7 @@ class RokuLane:
 
     def _navigate(self, operation, target, game):
         source = target["source_id"]
+        self._local.navigations = navigations = []
         try:
             if source == SUNDAY_TICKET:
                 result = self.controller.play_sunday_ticket(game)
@@ -332,10 +350,19 @@ class RokuLane:
         else:
             with self._lock:
                 self._blackouts.pop(self._key(target), None)
-                if self.operation is operation:
-                    self.selection = selection
-                    self._changed()
-            self._finish(operation, "succeeded", f"{selection['name']} is playing")
+                # Stored only if this is still the operation and nothing moved the Roku
+                # (another navigation, a capture restart) since its keys began.
+                stored = (self.operation is operation and bool(navigations)
+                          and self.record.end_navigation(navigations[-1], selection))
+            if stored:
+                self._finish(operation, "succeeded", f"{selection['name']} is playing")
+            else:
+                self._finish(operation, "failed", "The Roku changed before its selection was verified",
+                             code="navigation_failed")
+        finally:
+            for op_id in navigations:
+                self.record.end_navigation(op_id, None)
+            self._local.navigations = None
 
     def _verified(self, target, result):
         """Accept a controller result only with visual and player evidence."""
@@ -395,8 +422,9 @@ class RokuLane:
         Passing renews the verification on the current capture without any
         navigation. Never presses a key.
         """
+        state = self.record.state()
+        selection = state["selection"]
         with self._lock:
-            selection = self.selection
             running = self._running()
         if running:
             return {"playing": False, "reason": "a navigation is running"}
@@ -405,11 +433,9 @@ class RokuLane:
         why = self._not_playing(selection)
         if why is not None:
             return {"playing": False, "reason": why}
-        with self._lock:
-            if self.selection is not selection:
-                return {"playing": False, "reason": "the Roku changed during the check"}
-            selection["verified_at"] = self._wall()
-            selection["capture_id"] = self.capture_id()
+        if not self.record.renew_selection(state["selection_version"],
+                                           {"verified_at": self._wall(), "capture_id": self.capture_id()}):
+            return {"playing": False, "reason": "the Roku changed during the check"}
         return {"playing": True, "selection": self.selection_view()}
 
     def _not_playing(self, selection):
@@ -514,8 +540,7 @@ class RokuLane:
 
     # -- views ----------------------------------------------------------------
     def selection_view(self):
-        with self._lock:
-            selection = copy.deepcopy(self.selection)
+        selection = self.selection
         if selection is None:
             return None
         if not selection.get("manual"):
@@ -608,7 +633,7 @@ class RokuLane:
         return {"date": catalog["date"], "items": items}
 
 
-def load(config_path, *, capture_source, reuse_max_age=900.0, ecp=None, feedback_factory=None):
+def load(config_path, *, capture_source, record=None, reuse_max_age=900.0, ecp=None, feedback_factory=None):
     """Build the lane from roku.json, or return None when it is not configured."""
     from dataclasses import replace
     from pathlib import Path
@@ -632,5 +657,5 @@ def load(config_path, *, capture_source, reuse_max_age=900.0, ecp=None, feedback
     # YouTube TV's own (Lansing's) listings say which regional NFL games its CBS and FOX show.
     sports = SportsCatalog(config, baseball, listings=lambda: (yttv_epg.load_guide() or {}).get("channels"))
     return RokuLane(config, controller, baseball=baseball, sports=sports,
-                    capture_source=capture_source, reuse_max_age=reuse_max_age)
+                    capture_source=capture_source, record=record, reuse_max_age=reuse_max_age)
 

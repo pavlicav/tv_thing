@@ -7,7 +7,10 @@ What the hardware is and which lanes run on it (feed.json), and the state the fe
   revision moves when, and only when, what the lane outputs or its lifecycle changes;
 * the **commands** applied to a lane: each `op_id` at most once, and only at the
   `(epoch, revision)` it was issued against. A stale command is refused (`Conflict`), so a
-  retry after a crash, or one delayed past a feed restart, can never retune twice.
+  retry after a crash, or one delayed past a feed restart, can never retune twice;
+* each lane's **navigation** and **selection** (the Roku's): a navigation moves the revision
+  before its first key, and the selection it verified is stored here, so a control restart
+  reads both back and the Roku's generation, ``<capture id>.<revision>``, stays put.
 
 The processes themselves still live in server.py, which reports each change here. They move
 into the feed lane by lane (the plan's Phase 1).
@@ -143,7 +146,9 @@ class FeedNode:
         self.config, self.clock = config, clock
         self.epoch = secrets.token_hex(8)
         self._lock = threading.Lock()
-        self._lanes = {lane.id: {"revision": 0, "lifecycle": "idle", "generation": None} for lane in config.lanes}
+        self._lanes = {lane.id: {"revision": 0, "lifecycle": "idle", "generation": None,
+                                 "navigation": None, "selection": None, "selection_version": 0}
+                       for lane in config.lanes}
         # One command at a time per lane, so two commands issued against the same revision
         # cannot both pass their check before either has moved it.
         self._commanding = {lane.id: threading.Lock() for lane in config.lanes}
@@ -152,7 +157,8 @@ class FeedNode:
     def view(self, lane):
         with self._lock:
             state = self._lanes[lane]
-            return {"revision": state["revision"], "lifecycle": state["lifecycle"]}
+            return {"revision": state["revision"], "lifecycle": state["lifecycle"],
+                    "navigating": bool(state["navigation"] and state["navigation"]["ended_at"] is None)}
 
     def precondition(self, lane):
         """What a command on this lane must be issued against now: (epoch, revision)."""
@@ -228,10 +234,68 @@ class FeedNode:
                 break
             del self._ops[op_id]
 
+    # -- navigation ----------------------------------------------------------------
+    # The feed's lock is a leaf: these take nothing else, so control may call them while
+    # holding its own locks.
+    def begin_navigation(self, lane, op_id):
+        """What the lane shows is about to change (before the first key): the revision moves,
+        the stored selection is forgotten, and the lane is navigating. A retry of the same
+        op_id changes nothing. Returns the revision."""
+        if not isinstance(op_id, str) or not op_id:
+            raise ValueError("a navigation needs an op_id")
+        with self._lock:
+            state = self._lanes[lane]
+            navigation = state["navigation"]
+            if navigation is not None and navigation["op_id"] == op_id:
+                return state["revision"]
+            state["revision"] += 1
+            state["selection"] = None
+            state["selection_version"] += 1
+            state["navigation"] = {"op_id": op_id, "revision": state["revision"],
+                                   "started_at": self.clock(), "ended_at": None}
+            return state["revision"]
+
+    def end_navigation(self, lane, op_id, selection=None):
+        """Navigation op_id is over. ``selection`` is what it verified (None: nothing, and the
+        selection stays unknown). It is stored only if nothing moved the lane since the
+        navigation began: no other navigation, no capture restart. Returns whether it was."""
+        with self._lock:
+            state = self._lanes[lane]
+            navigation = state["navigation"]
+            if navigation is None or navigation["op_id"] != op_id or navigation["ended_at"] is not None:
+                return False
+            navigation["ended_at"] = self.clock()
+            if selection is None or navigation["revision"] != state["revision"]:
+                return False
+            state["selection"] = copy.deepcopy(selection)
+            state["selection_version"] += 1
+            return True
+
+    def renew_selection(self, lane, version, changes):
+        """Update fields of the stored selection (a re-verification) if it is still the one at
+        ``version``. Never moves the revision. Returns whether it was updated."""
+        with self._lock:
+            state = self._lanes[lane]
+            if state["selection"] is None or state["selection_version"] != version:
+                return False
+            state["selection"].update(copy.deepcopy(changes))
+            return True
+
+    def navigation(self, lane):
+        """{revision, selection, selection_version, navigating, navigation}: a copy."""
+        with self._lock:
+            state = self._lanes[lane]
+            navigation = state["navigation"]
+            return {"revision": state["revision"], "selection": copy.deepcopy(state["selection"]),
+                    "selection_version": state["selection_version"],
+                    "navigating": navigation is not None and navigation["ended_at"] is None,
+                    "navigation": dict(navigation) if navigation else None}
+
     def status(self):
         with self._lock:
             return {"node": self.config.node, "feed_epoch": self.epoch,
-                    "lanes": {lane: {"revision": s["revision"], "lifecycle": s["lifecycle"]}
+                    "lanes": {lane: {"revision": s["revision"], "lifecycle": s["lifecycle"],
+                                     "navigating": bool(s["navigation"] and s["navigation"]["ended_at"] is None)}
                               for lane, s in self._lanes.items()}}
 
 
@@ -319,6 +383,49 @@ class LocalFeed:
     def recorder(self, rec_id):
         """{alive, returncode, ended, overruns, part, until}, or None."""
         return self.ops.recorders.view(rec_id)
+
+    # -- navigation ----------------------------------------------------------------
+    # Never under server.py's lock: roku_lane calls these from threads that may hold its own.
+    def begin_navigation(self, lane, op_id):
+        return self.node.begin_navigation(lane, op_id)
+
+    def end_navigation(self, lane, op_id, selection=None):
+        return self.node.end_navigation(lane, op_id, selection)
+
+    def renew_selection(self, lane, version, changes):
+        return self.node.renew_selection(lane, version, changes)
+
+    def navigation(self, lane):
+        return self.node.navigation(lane)
+
+
+class LaneRecord:
+    """One lane's navigation and selection, kept by the feed: what RokuLane reads and writes
+    instead of holding them itself. ``feed`` is the feed client (or a FeedNode)."""
+
+    def __init__(self, feed, lane):
+        self.feed, self.lane = feed, lane
+
+    @classmethod
+    def private(cls, lane="roku"):
+        """A record in a feed of its own, for a RokuLane outside the server (tests, tools)."""
+        config = parse_config({
+            "node": "local", "devices": [{"id": lane, "kind": "capture", "name": lane}],
+            "lanes": [{"id": lane, "device": lane, "name": lane, "backend": "none", "playlist": f"{lane}.m3u8",
+                       "segment_prefix": f"{lane}seg", "files": [], "process": lane}]})
+        return cls(FeedNode(config), lane)
+
+    def begin_navigation(self, op_id):
+        return self.feed.begin_navigation(self.lane, op_id)
+
+    def end_navigation(self, op_id, selection=None):
+        return self.feed.end_navigation(self.lane, op_id, selection)
+
+    def renew_selection(self, version, changes):
+        return self.feed.renew_selection(self.lane, version, changes)
+
+    def state(self):
+        return self.feed.navigation(self.lane)
 
 
 class Recorders:

@@ -42,7 +42,7 @@ def test_feed_json_mistakes_are_named(change, message):
 
 def test_the_revision_moves_with_the_lifecycle_and_the_generation():
     feed = node()
-    assert feed.view("digital") == {"revision": 0, "lifecycle": "idle"}
+    assert feed.view("digital") == {"revision": 0, "lifecycle": "idle", "navigating": False}
     assert feed.transition("digital", "stopping") == 0, "stopping a stopped lane changes nothing"
     assert feed.transition("digital", "idle") == 0
     assert feed.transition("digital", "starting") == 1
@@ -155,7 +155,7 @@ def test_status():
     feed.transition("roku", "running", generation="c1")
     status = feed.status()
     assert status["node"] == "viviserv" and status["feed_epoch"] == feed.epoch
-    assert status["lanes"]["roku"] == {"revision": 1, "lifecycle": "running"}
+    assert status["lanes"]["roku"] == {"revision": 1, "lifecycle": "running", "navigating": False}
 
 
 # -- LocalFeed: control's way to the feed, in one process ---------------------------------------
@@ -336,3 +336,61 @@ def test_stop_all_and_unknown_ids(tmp_path):
     assert [p.written for p in spawned] == ["q", "q"] and feed.live() == []
     assert feed.view("nope") is None
     feed.stop("nope")      # nothing to do
+
+
+# -- navigation: the Roku's generation and selection live in the feed -----------------------
+
+def test_a_navigation_moves_the_revision_before_its_first_key():
+    feed = node()
+    feed.transition("roku", "running", generation="cap-1")
+    before = feed.navigation("roku")["revision"]
+    assert feed.begin_navigation("roku", "op-1") == before + 1
+    assert feed.begin_navigation("roku", "op-1") == before + 1, "a retry changes nothing"
+    state = feed.navigation("roku")
+    assert state["navigating"] and state["selection"] is None
+    assert feed.status()["lanes"]["roku"]["navigating"] is True
+    assert feed.end_navigation("roku", "op-1", {"channel_id": "ESPN"}) is True
+    state = feed.navigation("roku")
+    assert not state["navigating"] and state["revision"] == before + 1, "ending it moves nothing"
+    assert state["selection"] == {"channel_id": "ESPN"}
+    assert feed.end_navigation("roku", "op-1", {"channel_id": "NBC"}) is False, "it ends once"
+
+
+def test_a_selection_is_refused_once_the_lane_moved_on():
+    feed = node()
+    feed.transition("roku", "running", generation="cap-1")
+    feed.begin_navigation("roku", "op-1")
+    feed.transition("roku", "running", generation="cap-2")       # the capture restarted
+    assert feed.end_navigation("roku", "op-1", {"channel_id": "ESPN"}) is False
+    assert feed.navigation("roku")["selection"] is None
+    assert not feed.navigation("roku")["navigating"], "it is over all the same"
+    feed.begin_navigation("roku", "op-2")
+    feed.begin_navigation("roku", "op-3")                             # another began since
+    assert feed.end_navigation("roku", "op-2", {"channel_id": "NBC"}) is False
+    assert feed.navigation("roku")["navigating"], "op-3 is still running"
+
+
+def test_a_selection_survives_a_capture_restart_and_renews_only_as_itself():
+    feed = node()
+    feed.begin_navigation("roku", "op-1")
+    feed.end_navigation("roku", "op-1", {"channel_id": "ESPN", "capture_id": "cap-1"})
+    version = feed.navigation("roku")["selection_version"]
+    feed.transition("roku", "running", generation="cap-2")
+    assert feed.navigation("roku")["selection"]["channel_id"] == "ESPN"
+    revision = feed.navigation("roku")["revision"]
+    assert feed.renew_selection("roku", version, {"capture_id": "cap-2"}) is True
+    assert feed.navigation("roku")["selection"]["capture_id"] == "cap-2"
+    assert feed.navigation("roku")["revision"] == revision, "a re-verification moves nothing"
+    feed.begin_navigation("roku", "op-2")
+    assert feed.renew_selection("roku", version, {"capture_id": "cap-3"}) is False
+
+
+def test_a_lane_record_reads_the_same_state_through_the_client():
+    client, _ = local()
+    record = feed_node.LaneRecord(client, "roku")
+    record.begin_navigation("op-1")
+    record.end_navigation("op-1", {"channel_id": "ESPN"})
+    assert client.node.navigation("roku")["selection"] == {"channel_id": "ESPN"}
+    assert record.state() == client.node.navigation("roku")
+    private = feed_node.LaneRecord.private()
+    assert private.state()["revision"] == 0 and private.state()["selection"] is None
