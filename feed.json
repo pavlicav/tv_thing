@@ -1,0 +1,25 @@
+{
+  "node": "viviserv",
+  "devices": [
+    {"id": "digital", "kind": "dvb", "adapter": 0, "name": "Digital front-end",
+     "detail": "Samsung S5H1409 ATSC/QAM demodulator via /dev/dvb/adapter0"},
+    {"id": "analog", "kind": "analog", "name": "Analog front-end",
+     "detail": "CX23418 analog tuner and hardware MPEG encoder via /dev/video*"},
+    {"id": "roku", "kind": "capture", "name": "Roku capture",
+     "detail": "Source Roku through the Hauppauge HD PVR's H.264 encoder"}
+  ],
+  "lanes": [
+    {"id": "digital", "device": "digital", "name": "Digital TV",
+     "description": "ATSC digital television (S5H1409 demodulator)", "backend": "linux-dvb",
+     "playlist": "digital.m3u8", "segment_prefix": "digitalseg", "files": ["digital", "digitalseg"],
+     "process": "digital_packager", "video": true},
+    {"id": "analog", "device": "analog", "name": "Analog TV",
+     "description": "Analog NTSC cable television (CX23418 encoder)", "backend": "analog-v4l2",
+     "playlist": "analog.m3u8", "segment_prefix": "analogseg", "files": ["analog", "analogseg"],
+     "process": "analog_packager", "video": true},
+    {"id": "roku", "device": "roku", "name": "Roku",
+     "description": "Source Roku via Hauppauge HD PVR (its own H.264, copied)", "backend": "hdpvr-copy",
+     "playlist": "roku.m3u8", "segment_prefix": "rokuseg", "files": ["roku.m3u8", "rokuseg"],
+     "process": "roku_capture", "video": false}
+  ]
+}

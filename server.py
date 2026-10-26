@@ -32,6 +32,7 @@ from zoneinfo import ZoneInfo
 import analog_tuner
 import atsc_scan
 import epg
+import feed_node
 import internet_streams
 import lineup
 import recorder
@@ -268,39 +269,35 @@ TV_HEALTH_POLL_SECONDS = float(os.environ.get(
 # /stream/live.m3u8 alias: preparing the Roku for someone else must never
 # flip what the living-room Roku app is watching.
 # ---------------------------------------------------------------------------
+#
+# The devices and the lanes on them are listed in feed.json (feed_node.py),
+# which also keeps each lane's revision and lifecycle and the feed's epoch.
+# The code below still knows these three lanes by name.
+# ---------------------------------------------------------------------------
+FEED_CONFIG_FILE = Path(os.environ.get(
+    "TV_THING_FEED_CONFIG", str(BASE_DIR / "feed.json")
+))
+FEED_CONFIG = feed_node.load_config(FEED_CONFIG_FILE)
 LANE_DIGITAL = "digital"
 LANE_ANALOG = "analog"
 LANE_ROKU = "roku"
-VIDEO_LANES = (LANE_DIGITAL, LANE_ANALOG)
-ALL_LANES = (LANE_DIGITAL, LANE_ANALOG, LANE_ROKU)
+_missing_lanes = {LANE_DIGITAL, LANE_ANALOG, LANE_ROKU} - {lane.id for lane in FEED_CONFIG.lanes}
+if _missing_lanes:
+    raise feed_node.FeedConfigError(f"{FEED_CONFIG_FILE} lacks the lanes {', '.join(sorted(_missing_lanes))}")
+VIDEO_LANES = tuple(lane.id for lane in FEED_CONFIG.lanes if lane.video)
+ALL_LANES = tuple(lane.id for lane in FEED_CONFIG.lanes)
 
-FRONTEND_DIGITAL = "digital"
-FRONTEND_ANALOG = "analog"
-FRONTEND_ROKU = "roku"
-LANE_FRONTEND = {
-    LANE_DIGITAL: FRONTEND_DIGITAL,
-    LANE_ANALOG: FRONTEND_ANALOG,
-    LANE_ROKU: FRONTEND_ROKU,
-}
+FRONTEND_DIGITAL = FEED_CONFIG.lane(LANE_DIGITAL).device
+FRONTEND_ANALOG = FEED_CONFIG.lane(LANE_ANALOG).device
+FRONTEND_ROKU = FEED_CONFIG.lane(LANE_ROKU).device
+LANE_FRONTEND = {lane.id: lane.device for lane in FEED_CONFIG.lanes}
 
 # Each lane owns its own playlist and segment prefix so stopping or
 # restarting one lane never disturbs the other's files.
-LANE_PLAYLIST = {
-    LANE_DIGITAL: "digital.m3u8",
-    LANE_ANALOG: "analog.m3u8",
-    LANE_ROKU: "roku.m3u8",
-}
-LANE_SEGMENT_PREFIX = {
-    LANE_DIGITAL: "digitalseg",
-    LANE_ANALOG: "analogseg",
-    LANE_ROKU: "rokuseg",
-}
+LANE_PLAYLIST = {lane.id: lane.playlist for lane in FEED_CONFIG.lanes}
+LANE_SEGMENT_PREFIX = {lane.id: lane.segment_prefix for lane in FEED_CONFIG.lanes}
 # Files a lane owns, removed when that lane stops.
-LANE_FILES = {
-    LANE_DIGITAL: ("digital", "digitalseg"),
-    LANE_ANALOG: ("analog", "analogseg"),
-    LANE_ROKU: ("roku.m3u8", "rokuseg"),
-}
+LANE_FILES = {lane.id: lane.files for lane in FEED_CONFIG.lanes}
 # Legacy single-stream playlist. Older clients (the Roku app, cached web
 # pages) only know /stream/live.m3u8, so it is served as an alias for
 # whichever video lane was most recently tuned.
@@ -324,6 +321,9 @@ def new_lane_state():
 
 
 lanes = {name: new_lane_state() for name in ALL_LANES}
+# The feed's own record of each lane: its revision and lifecycle, this run's epoch, and
+# the commands applied (feed_node.py). Every start, stop and crash below reports to it.
+feed = feed_node.FeedNode(FEED_CONFIG)
 tuning_lanes = set()
 
 # Per-lane child processes. Keys are "<lane>_<role>".
@@ -1085,17 +1085,17 @@ def lane_stream_ready(lane):
 
 def lane_is_running(lane):
     """Whether this lane's encoder (or, for the Roku, its capture) is alive."""
-    proc = procs[{
-        LANE_DIGITAL: "digital_packager",
-        LANE_ANALOG: "analog_packager",
-        LANE_ROKU: "roku_capture",
-    }[lane]]
+    proc = procs[FEED_CONFIG.lane(lane).process]
     return proc is not None and proc.poll() is None
 
 
-def reset_lane(lane):
-    """Clear a lane's published state without touching its processes."""
+def reset_lane(lane, lifecycle="idle"):
+    """Clear a lane's published state without touching its processes.
+
+    ``lifecycle`` is what the lane is doing now: idle after a stop, error after
+    a process died on its own, starting while a new generation comes up."""
     lanes[lane] = new_lane_state()
+    feed.transition(lane, lifecycle)
 
 
 def publish_legacy_playlist(lane):
@@ -1107,6 +1107,7 @@ def publish_legacy_playlist(lane):
 
 def stop_digital():
     """Stop the digital lane and release the DVB frontend."""
+    feed.transition(LANE_DIGITAL, "stopping")
     source = procs["digital_source"]
     procs["digital_source"] = None
     kill_process(source, timeout=TV_SOURCE_STOP_TIMEOUT)
@@ -1121,6 +1122,7 @@ def stop_digital():
 
 def stop_analog():
     """Stop the analog TV lane and release the analog tuner."""
+    feed.transition(LANE_ANALOG, "stopping")
     packager = procs["analog_packager"]
     procs["analog_packager"] = None
     kill_process(packager, timeout=TV_PACKAGER_STOP_TIMEOUT)
@@ -1471,7 +1473,7 @@ def start_digital_packager(quality, stream_id, udp_port=TV_UDP_PORT):
                 source = procs["digital_source"]
                 procs["digital_source"] = None
                 kill_process(source, timeout=TV_SOURCE_STOP_TIMEOUT)
-                reset_lane(LANE_DIGITAL)
+                reset_lane(LANE_DIGITAL, "error")
                 unexpected = True
         if unexpected and encoder["hardware"]:
             # A probe can pass even when a real broadcast exposes a driver or
@@ -1509,6 +1511,7 @@ def start_digital(channel, quality="medium"):
     # process slots empty first makes their monitor threads treat this as an
     # intentional replacement rather than a crash.
     stop_digital()
+    feed.transition(LANE_DIGITAL, "starting")
     stream_id = next_stream_id()
     # A fresh port per generation. Reusing one fixed port raced with the
     # previous encoder's socket on a fast retune, and ffmpeg lost the tune
@@ -1560,6 +1563,7 @@ def start_digital(channel, quality="medium"):
         "taps": taps,
     })
     publish_legacy_playlist(LANE_DIGITAL)
+    feed.transition(LANE_DIGITAL, "running", generation=stream_id)
     # Remember what the always-on keeper should resume after a restart.
     save_playback_state(channel, quality)
 
@@ -1578,7 +1582,7 @@ def start_digital(channel, quality="medium"):
                 packager = procs["digital_packager"]
                 procs["digital_packager"] = None
                 kill_process(packager, timeout=TV_PACKAGER_STOP_TIMEOUT)
-                reset_lane(LANE_DIGITAL)
+                reset_lane(LANE_DIGITAL, "error")
                 if ALWAYS_ON:
                     always_on_wakeup.set()
 
@@ -1592,6 +1596,7 @@ def start_analog_packager(device, quality, cable_channel):
     STREAMS_DIR.mkdir(exist_ok=True)
     stop_analog()
     clear_streams(LANE_FILES[LANE_ANALOG])
+    feed.transition(LANE_ANALOG, "starting")
 
     encoder = select_video_encoder()
     stream_id = next_stream_id()
@@ -1631,6 +1636,7 @@ def start_analog_packager(device, quality, cable_channel):
         "tuner": dict(device),
     })
     publish_legacy_playlist(LANE_ANALOG)
+    feed.transition(LANE_ANALOG, "running", generation=stream_id)
 
     def monitor():
         if packager.stderr:
@@ -1648,7 +1654,7 @@ def start_analog_packager(device, quality, cable_channel):
         with lock:
             if procs["analog_packager"] is packager:
                 procs["analog_packager"] = None
-                reset_lane(LANE_ANALOG)
+                reset_lane(LANE_ANALOG, "error")
 
     threading.Thread(target=monitor, daemon=True).start()
     threading.Thread(
@@ -1869,7 +1875,7 @@ def start_roku_capture():
             return True, None
         stream_id = next_stream_id()
         clear_streams(LANE_FILES[LANE_ROKU])
-        lanes[LANE_ROKU] = new_lane_state()
+        reset_lane(LANE_ROKU, "starting")
         lanes[LANE_ROKU]["started_at"] = time.time()
     select_roku_input(device, roku.config.feedback.input_index)
     health = new_stream_health(stream_id)
@@ -1897,6 +1903,7 @@ def start_roku_capture():
         roku_capture_state = {"running": True, "stream_id": stream_id,
                               "error": None,
                               "tap_url": roku_tap_input(ROKU_TAP_PORT)}
+        feed.transition(LANE_ROKU, "running", generation=stream_id)
 
     def monitor():
         global roku_capture_state
@@ -1916,7 +1923,7 @@ def start_roku_capture():
                     "running": False, "stream_id": None,
                     "error": health.get("reason"), "tap_url": None,
                 }
-                reset_lane(LANE_ROKU)
+                reset_lane(LANE_ROKU, "error")
         roku_wakeup.set()
 
     threading.Thread(target=monitor, daemon=True).start()
@@ -1931,6 +1938,7 @@ def start_roku_capture():
 def stop_roku():
     """Stop the Roku capture. The keeper starts a fresh generation."""
     global roku_capture_state
+    feed.transition(LANE_ROKU, "stopping")
     capture = procs["roku_capture"]
     procs["roku_capture"] = None
     roku_capture_state = {"running": False, "stream_id": None,
@@ -4404,6 +4412,8 @@ def _lane_stream_payload(lane):
                                      else HLS_SEGMENT_TIME),
         "health": state["health"],
         "started_at": state["started_at"],
+        # The feed's count of this lane's changes; a command is issued against it.
+        "revision": feed.view(lane)["revision"],
     }
 
 
@@ -4416,21 +4426,15 @@ def lane_payload(lane):
 def _lane_payload(lane):
     """Full description of one lane: what it is, what it is doing."""
     state = lanes[lane]
-    frontend = LANE_FRONTEND[lane]
-    descriptions = {
-        LANE_DIGITAL: "ATSC digital television (S5H1409 demodulator)",
-        LANE_ANALOG: "Analog NTSC cable television (CX23418 encoder)",
-        LANE_ROKU: "Source Roku via Hauppauge HD PVR (its own H.264, copied)",
-    }
+    config = FEED_CONFIG.lane(lane)
+    frontend = config.device
     payload = {
         "id": lane,
-        "name": {
-            LANE_DIGITAL: "Digital TV",
-            LANE_ANALOG: "Analog TV",
-            LANE_ROKU: "Roku",
-        }[lane],
-        "description": descriptions[lane],
+        "name": config.name,
+        "description": config.description,
+        "node": FEED_CONFIG.node,
         "frontend": frontend,
+        "lifecycle": feed.view(lane)["lifecycle"],
         # Lanes on different front-ends run concurrently; lanes that share
         # one displace each other.
         "conflicts_with": [
@@ -4445,11 +4449,7 @@ def _lane_payload(lane):
                 state["video_encoder"] is not None
                 and state["video_encoder"] != "libx264"
             ),
-            "backend": {
-                LANE_DIGITAL: TV_SOURCE_BACKEND,
-                LANE_ANALOG: "analog-v4l2",
-                LANE_ROKU: "hdpvr-copy",
-            }[lane],
+            "backend": config.backend,
         },
         "tuner": state["tuner"],
         "stream": lane_stream_payload(lane),
@@ -4464,14 +4464,8 @@ def _lane_payload(lane):
 def frontend_payload():
     """Report the card's RF front-ends and who currently holds each."""
     result = []
-    for frontend, label, detail in (
-        (FRONTEND_DIGITAL, "Digital front-end",
-         "Samsung S5H1409 ATSC/QAM demodulator via /dev/dvb/adapter0"),
-        (FRONTEND_ANALOG, "Analog front-end",
-         "CX23418 analog tuner and hardware MPEG encoder via /dev/video*"),
-        (FRONTEND_ROKU, "Roku capture",
-         "Source Roku through the Hauppauge HD PVR's H.264 encoder"),
-    ):
+    for device in FEED_CONFIG.devices:
+        frontend, label, detail = device.id, device.name, device.detail
         holders = [
             lane for lane in ALL_LANES
             if LANE_FRONTEND[lane] == frontend and lane_is_running(lane)
@@ -4561,6 +4555,9 @@ def _api_v1_status_payload():
 
     return {
         "api_version": API_VERSION,
+        # Which feed this is, and which run of it: a command carries both.
+        "node": FEED_CONFIG.node,
+        "feed_epoch": feed.epoch,
         "locks": {lane: lock_view(active_lock(lane)) for lane in ALL_LANES},
         "lanes": lanes_payload,
         "active_lanes": active,

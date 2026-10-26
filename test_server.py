@@ -470,6 +470,54 @@ def test_lanes_on_separate_frontends_do_not_conflict():
         assert server.lane_payload(lane)["conflicts_with"] == []
 
 
+def test_lanes_and_front_ends_come_from_feed_json():
+    """The devices, the lanes on them and their files are listed in feed.json."""
+    assert [d["id"] for d in server.frontend_payload()] == [d.id for d in server.FEED_CONFIG.devices]
+    roku = server.lane_payload(server.LANE_ROKU)
+    assert roku["name"] == "Roku" and roku["encoder"]["backend"] == "hdpvr-copy"
+    assert roku["node"] == server.FEED_CONFIG.node
+
+
+def test_status_names_the_feed_run_and_each_lanes_revision():
+    status = server.api_v1_status_payload()
+    assert status["feed_epoch"] == server.feed.epoch and status["node"] == "viviserv"
+    for lane in server.ALL_LANES:
+        assert status["lanes"][lane]["stream"]["revision"] == server.feed.view(lane)["revision"]
+        assert status["lanes"][lane]["lifecycle"] in server.feed_node.LIFECYCLES
+
+
+def test_a_digital_tune_moves_the_lanes_revision(monkeypatch):
+    """A command is issued against a revision: a tune, a stop and a crash each move it."""
+    channel = {"id": "wusa_hd_9_1", "name": "WUSA-HD", "frequency": 189_000_000,
+               "service_id": 1, "video_pid": 49, "audio_pid": 52}
+
+    class FakeProcess:
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(server, "start_digital_packager", lambda *_a: (True, None))
+    monkeypatch.setattr(server.subprocess, "Popen", lambda *a, **k: FakeProcess())
+    monkeypatch.setattr(server.threading, "Thread",
+                        lambda *a, **k: type("T", (), {"start": lambda s: None})())
+    monkeypatch.setattr(server, "save_playback_state", lambda *_a: None)
+    monkeypatch.setattr(server, "kill_process", lambda *_a, **_k: None)
+    monkeypatch.setattr(server, "clear_streams", lambda *_a: None)
+    before = server.feed.view(server.LANE_DIGITAL)["revision"]
+    try:
+        ok, _error, _ = server.start_digital(channel, "low")
+        assert ok
+        running = server.feed.view(server.LANE_DIGITAL)
+        assert running["lifecycle"] == "running" and running["revision"] > before
+        server.stop_digital()
+        stopped = server.feed.view(server.LANE_DIGITAL)
+        assert stopped["lifecycle"] == "idle" and stopped["revision"] > running["revision"]
+        server.stop_digital()
+        assert server.feed.view(server.LANE_DIGITAL) == stopped, "stopping a stopped lane changes nothing"
+    finally:
+        server.procs["digital_source"] = server.procs["digital_packager"] = None
+        server.reset_lane(server.LANE_DIGITAL)
+
+
 def test_each_lane_publishes_its_own_playlist():
     """Separate playlists are what let both lanes stream at once."""
     paths = {
