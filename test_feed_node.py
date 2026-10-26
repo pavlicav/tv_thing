@@ -472,3 +472,16 @@ def test_a_sweep_holds_one_front_end_and_lets_go_when_closed_early(monkeypatch):
     assert scanner.open == [(0, True)] and scanner.closed == [77], "closed at once, not at GC"
     assert announced == [7, 8] and [c[1] for c in scanner.calls] == [7, 8]
     assert all(c[3] == 77 for c in scanner.calls), "every channel on the one held front-end"
+
+
+def test_the_feed_never_holds_its_lock_while_a_command_acts():
+    """Lock order: a command's side effect may read the feed (and, split, control may be
+    waiting on it), so it runs with the feed's own lock free. Held, this would deadlock."""
+    feed = node()
+    seen = []
+    worker = threading.Thread(target=lambda: feed.command(
+        "op-1", "digital", feed.precondition("digital"),
+        lambda: seen.append((feed.status()["feed_epoch"], feed.navigation("roku")["revision"]))))
+    worker.start()
+    worker.join(2)
+    assert not worker.is_alive() and seen == [(feed.epoch, 0)]
