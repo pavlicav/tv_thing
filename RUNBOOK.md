@@ -4,6 +4,20 @@
 
 This puts branch `feed-seam` live through the AGENTS.md gate. It is a core stream stack change (process supervision, the recorders, the tuners' scans), so it is gated. The plan is `~/.claude/plans/can-we-come-up-swift-hinton.md`; the rules it must keep are in `INVARIANTS.md`.
 
+**The same deploy as one script:** `scripts/deploy-feed-seam.sh`. It runs these steps in order and rolls back by itself on any failure, using `reset --keep`.
+
+```bash
+bash /home/vivian/tv_thing-feed-seam/scripts/deploy-feed-seam.sh --check
+```
+
+`--check` runs the prechecks alone: it stops nothing and needs no sudo.
+
+```bash
+sudo bash /home/vivian/tv_thing-feed-seam/scripts/deploy-feed-seam.sh
+```
+
+This is the deploy. It refuses while VizelVision has something on air or prepared. Pass `--on-air` to go ahead anyway; what was on air is put back at the end. The steps below do the same by hand.
+
 **What it costs.**
 - **VizelVision is off air for about 20–35 minutes.** The Roku navigations take most of it: up to 150 s each, six of them.
 - **TV Thing is down** from step 3 to step 7, about 10–20 minutes. Nothing records meanwhile.
