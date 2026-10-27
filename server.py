@@ -233,6 +233,18 @@ TV_MAX_DUPLICATED_FRAMES = int(os.environ.get(
 TV_MAX_UDP_OVERRUNS = int(os.environ.get(
     "TV_THING_MAX_UDP_OVERRUNS", "1"
 ))
+# Backward timestamps ffmpeg's muxer patched. RF 7 carries a stream on a second clock,
+# 6.4 h from the first (it shows ~12 s into every encoder, and ffmpeg usually copes). On
+# 2026-10-26 19:37 it set WJLA's audio chain off: 24,656 patched audio timestamps in
+# seconds, minutes of filler audio, and ~850 MiB the encoder kept afterwards. A fresh
+# encoder is clean. A healthy generation logs a few at its start.
+TV_MAX_NON_MONOTONOUS = int(os.environ.get(
+    "TV_THING_MAX_NON_MONOTONOUS", "100"
+))
+# An encoder holds about 200 MiB. Past this, whatever the cause, it is replaced.
+TV_MAX_PACKAGER_RSS_MIB = float(os.environ.get(
+    "TV_THING_MAX_PACKAGER_RSS_MIB", "400"
+))
 TV_MAX_SEGMENT_BYTES = int(os.environ.get(
     "TV_THING_MAX_SEGMENT_BYTES", str(4 * 1024 * 1024)
 ))
@@ -926,8 +938,10 @@ def new_stream_health(stream_id):
         "reason": None,
         "duplicated_frames": 0,
         "udp_overruns": 0,
+        "non_monotonous": 0,
         "max_segment_bytes": 0,
         "max_gpu_temp_c": None,
+        "max_rss_mib": None,
     }
 
 
@@ -946,6 +960,23 @@ def record_packager_warning(line, health):
         health["udp_overruns"] += 1
         if health["udp_overruns"] >= TV_MAX_UDP_OVERRUNS:
             return f"ffmpeg UDP input overran {health['udp_overruns']} time(s)"
+
+    if "Non-monotonous DTS" in line:
+        health["non_monotonous"] += 1
+        if health["non_monotonous"] >= TV_MAX_NON_MONOTONOUS:
+            return (f"ffmpeg patched {health['non_monotonous']} timestamps "
+                    "that went backwards")
+    return None
+
+
+def process_rss_mib(pid, proc_root=Path("/proc")):
+    """A process's resident memory in MiB, or None once it has gone."""
+    try:
+        for line in (proc_root / str(pid) / "status").read_text().splitlines():
+            if line.startswith("VmRSS:"):
+                return int(line.split()[1]) / 1024
+    except (OSError, ValueError, IndexError):
+        pass
     return None
 
 
@@ -998,6 +1029,17 @@ def watch_hls_packager(packager, encoder, stream_id, health,
     while packager.poll() is None:
         time.sleep(TV_HEALTH_POLL_SECONDS)
         now = time.monotonic()
+
+        rss = process_rss_mib(getattr(packager, "pid", None))
+        if rss is not None:
+            health["max_rss_mib"] = round(max(health["max_rss_mib"] or 0, rss), 1)
+            if TV_MAX_PACKAGER_RSS_MIB > 0 and rss > TV_MAX_PACKAGER_RSS_MIB:
+                trip_packager(
+                    packager, health,
+                    f"ffmpeg's memory reached {rss:.0f} MiB "
+                    f"(limit {TV_MAX_PACKAGER_RSS_MIB:g} MiB)",
+                )
+                return
 
         for segment in STREAMS_DIR.glob(pattern):
             try:

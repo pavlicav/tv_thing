@@ -12,6 +12,8 @@ bash /home/vivian/tv_thing-feed-seam/scripts/deploy-feed-seam.sh --check
 
 `--check` runs the prechecks alone: it stops nothing and needs no sudo.
 
+Run it inside `tmux` all the same. A dropped SSH session no longer stops it (it ignores the hang-up and keeps logging to the file), but tmux lets you watch it to the end.
+
 ```bash
 sudo bash /home/vivian/tv_thing-feed-seam/scripts/deploy-feed-seam.sh
 ```

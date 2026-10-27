@@ -10,10 +10,16 @@
 #   * a reaper that never touches another service.
 # RUNBOOK.md is the same deploy, by hand.
 #
+# 2026-10-26: production runs Phase 1 (c20c33a, run 3). Its production Roku gate failed on memory:
+# the antenna encoder held 866 MiB after RF 7 set off a flood of patched audio timestamps. This
+# run brings the antenna encoders' flood trip and memory ceiling (400 MiB); its gates run on
+# fresh encoders.
+#
 #   sudo bash /home/vivian/tv_thing-feed-seam/scripts/deploy-feed-seam.sh            # deploy
 #   bash /home/vivian/tv_thing-feed-seam/scripts/deploy-feed-seam.sh --check         # prechecks only
 #   sudo bash /home/vivian/tv_thing-feed-seam/scripts/deploy-feed-seam.sh --on-air   # see below
 #
+# Best run inside tmux, though a dropped SSH session no longer stops it.
 # Run it when nothing is on air. It stops VizelVision's web and master for about 20-35 minutes,
 # and TV Thing for 10-20 of them. Both web and master take TV Thing's locks: master its leases,
 # web its RokuHold and Up next. With something on air it refuses, unless you pass --on-air;
@@ -343,8 +349,12 @@ rollback() {
 precheck
 [ "$CHECK_ONLY" = 1 ] && { say "Prechecks only: nothing was stopped. Logs: $LOGDIR"; exit 0; }
 [ "$(id -u)" = 0 ] || { echo "Run with sudo (tv-thing.service and the candidate unit need root)."; exit 1; }
-exec > >(tee -a "$LOGDIR/deploy.log") 2>&1
-say "Logs in $LOGDIR"
+# A dropped SSH session must not stop a deploy halfway: on 2026-10-26 it died mid-gate,
+# promoted and never rolled back. Ignore the hang-up, and keep logging to the file once
+# the terminal has gone (tee would otherwise exit, and the next line written kill us).
+trap '' HUP PIPE
+exec > >(tee --output-error=warn -a "$LOGDIR/deploy.log") 2>&1
+say "Logs in $LOGDIR (it carries on if this terminal goes away: tail -f $LOGDIR/deploy.log)"
 
 # --- 2-3. VizelVision and production stopped --------------------------------------------------
 stop_vizelvision

@@ -635,6 +635,56 @@ def test_udp_overrun_warning_trips_stream_safety(monkeypatch):
     assert health["udp_overruns"] == 1
 
 
+def test_rf7s_second_clock_alone_trips_nothing():
+    """RF 7 shows a stream on a clock 6.4 h away ~12 s into every encoder, and ffmpeg
+    copes; tripping on it restarted WHUT's encoder every 12 s in a replay of 2026-10-26."""
+    health = server.new_stream_health("test")
+    line = "[mpegts @ 0x55e837f76000] DTS 8543674357 < 10629958630 out of order"
+    assert server.record_packager_warning(line, health) is None
+
+
+def test_a_flood_of_patched_timestamps_trips_stream_safety(monkeypatch):
+    monkeypatch.setattr(server, "TV_MAX_NON_MONOTONOUS", 100)
+    health = server.new_stream_health("test")
+    line = ("[hls @ 0x55e838047780] Non-monotonous DTS in output stream 0:1; previous: 47314560, "
+            "current: 960; changing to 47314561. This may result in incorrect timestamps in the output file.")
+    reasons = [server.record_packager_warning(line, health) for _ in range(100)]
+    assert reasons[:99] == [None] * 99, "a few at a generation's start are normal"
+    assert reasons[99] == "ffmpeg patched 100 timestamps that went backwards"
+
+
+def test_an_encoder_past_its_memory_ceiling_is_replaced(monkeypatch, tmp_path):
+    class FakePackager:
+        pid = 4242
+
+        def __init__(self):
+            self.running = True
+
+        def poll(self):
+            return None if self.running else 255
+
+        def terminate(self):
+            self.running = False
+
+    proc = tmp_path / "proc" / "4242"
+    proc.mkdir(parents=True)
+    (proc / "status").write_text("Name:\tffmpeg\nVmRSS:\t  887044 kB\nThreads:\t23\n")
+    assert round(server.process_rss_mib(4242, tmp_path / "proc")) == 866
+    assert server.process_rss_mib(9999, tmp_path / "proc") is None
+    readings = iter([180.0, 220.0, 520.0])
+    monkeypatch.setattr(server, "process_rss_mib", lambda pid: next(readings))
+    monkeypatch.setattr(server, "STREAMS_DIR", tmp_path)
+    monkeypatch.setattr(server, "TV_MAX_PACKAGER_RSS_MIB", 400)
+    monkeypatch.setattr(server, "TV_HEALTH_POLL_SECONDS", 0)
+    monkeypatch.setattr(server, "TV_SEGMENT_STARTUP_TIMEOUT", 60)
+    health = server.new_stream_health("rss")
+    packager = FakePackager()
+    server.watch_tv_packager(packager, {"codec": "libx264"}, "rss", health)
+    assert packager.running is False and health["ok"] is False
+    assert health["reason"] == "ffmpeg's memory reached 520 MiB (limit 400 MiB)"
+    assert health["max_rss_mib"] == 520.0
+
+
 def test_oversized_open_segment_terminates_packager(monkeypatch, tmp_path):
     class FakePackager:
         def __init__(self):
