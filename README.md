@@ -73,7 +73,7 @@ Antenna → DVB frontend → minimal DVB source → localhost UDP
 1. **Channel scan** — `w_scan` finds active RF frequencies. `fetch_vct.py` then tunes each active frequency and reads its PSIP Virtual Channel Table via a DVB section filter. The scan page displays each station name and virtual channel number (for example, 4.1 or 7.2) as soon as that identification tune completes.
 2. **TV tuning** — `dvb_source.py` holds the Linux DVB frontend, configures an all-PID `DMX_OUT_TS_TAP`, selects the requested program, remaps it onto stable internal video/audio PIDs with a compact PAT/PMT, and emits seven-packet (1,316-byte) datagrams to localhost UDP. This bypasses VLC's startup and termination overhead.
 3. **Bounded encoding** — a fresh `ffmpeg` process receives that UDP transport stream for each tune, deinterlaces interlaced broadcasts, encodes H.264/AAC, and writes 600 ms HLS segments with generation-specific names. Native station timing is passed through; CFR gap filling is forbidden. The server terminates a packager on duplicated-frame warnings, UDP overruns, oversized/stalled segments, or an NVIDIA temperature limit. It probes NVENC, Quick Sync, VA-API, and VideoToolbox in that order and falls back to low-latency `libx264` when a hardware backend fails safely.
-4. **Serving** — a Python HTTP server (`server.py`) serves the web UI, HLS playlist and segments, and a small JSON API.
+4. **Serving** — in production, two services behind Apache's front door on `:8080`: the feed (`feed_server.py`) holds the hardware and every `ffmpeg` and serves the HLS under `/stream/`; control (`server.py`) serves the web UI and the JSON API, and can restart without dropping a stream. `python3 server.py` alone still runs both in one process. See [Run at boot](#run-at-boot-systemd-two-services) and `INVARIANTS.md`.
 5. **Optional FM backend** — on compatible hardware, `fm_tuner.py` opens `/dev/radio0` and tunes by V4L2 ioctl while `ffmpeg` captures the card's ALSA audio into audio-only HLS. This path is retained but not exposed on `viviserv`. FM holds the analog front-end, so it stops the analog lane and leaves the digital lane running.
 
 ---
@@ -197,6 +197,11 @@ python3 server.py
 # Listening on 0.0.0.0:8080
 ```
 
+That is the one-process build: feed and control in one process, as before the
+split, and what a rollback runs. Production runs `feed_server.py` and
+`TV_THING_ROLE=control python3 server.py` as two services instead, each on
+loopback only.
+
 Set `TV_THING_BIND` when another service owns port 8080 on a different local
 interface. On `viviserv`, Tailscale Serve owns the Tailscale address, so the
 systemd unit binds TV Thing to its LAN address instead:
@@ -285,9 +290,14 @@ along with capture-card support.
 
 ### Reverse proxy
 
-Apache publishes TV Thing at `http://viviserv/tv/`. The server always binds
-`127.0.0.1` in addition to its LAN address, so the proxy targets loopback and
-is unaffected by DHCP changes or a move between interfaces:
+Apache owns `:8080`. The front door (`deploy/apache/tv-thing-front-door.conf`,
+which includes `tv-thing-routes.conf`) listens on `127.0.0.1`, `192.168.1.98`
+and `10.0.0.98`; sends `/stream/` to the feed on `127.0.0.1:8086` and
+everything else to control on `127.0.0.1:8087`; never routes `/internal/` or
+`/feed/v1/`; and answers `/api/` with a JSON 503 while control restarts.
+
+The main site publishes TV Thing at `http://viviserv/tv/` by proxying to the
+front door on loopback:
 
 ```apache
 RedirectMatch 301 ^/tv$ /tv/
@@ -304,20 +314,36 @@ The route lives in
 into `/etc/apache2/conf-available/viviserv-dashboard.conf` by
 `install-apache-proxies.sh`; edit the fragment, not the generated file.
 
-### Run at boot (systemd)
+### Run at boot (systemd): two services
 
-```bash
-sudo cp tv-thing.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now tv-thing
-```
+`scripts/deploy-feed-split.sh` installs the units in `deploy/systemd/` and the
+front door, through the AGENTS.md gate (`RUNBOOK.md` is the same by hand). The
+root `tv-thing.service` is the one-process unit, kept for `--rollback`; never
+install it over the split.
 
-The unit applies independent containment (`CPUQuota=800%`, `MemoryMax=1200M`,
-`LimitFSIZE=16M`) and sets the `viviserv` NVIDIA ceiling to 80 C. Application
-watchdogs are still required; the systemd limits are a final safety net. The
-service pins `libx264` on `viviserv`: its legacy K4200 reached the 80 C safety
-ceiling during the sustained NVENC gate. GPU auto-selection can be restored
-after the card's cooling is serviced and a full NVENC gate passes.
+| Service | Runs | Containment |
+|---|---|---|
+| `tv-thing-feed` | `feed_server.py` on `127.0.0.1:8086` | `CPUQuota=800%`, `MemoryMax=1800M`, `TasksMax=192` |
+| `tv-thing` (control) | `server.py`, `TV_THING_ROLE=control`, on `127.0.0.1:8087` | `CPUQuota=400%`, `MemoryMax=1200M`, `TasksMax=160` |
+
+Which restart is safe:
+
+- `sudo systemctl restart tv-thing` (control): no stream, recording or relay
+  moves. The API answers a JSON 503 for a few seconds, and VizelVision rides
+  out up to 45 s of that. A control that hangs instead of dying for longer
+  than that makes VizelVision drop its input and recover (`INVARIANTS.md`, A4).
+- `sudo systemctl restart tv-thing-feed`: every stream drops and every
+  recording ends (the feed's journal says why). Only for core stream stack
+  changes, under the gate.
+- `sudo apachectl graceful`: no stream request fails. A full Apache restart
+  drops every viewer.
+
+Both units also cap file size (`LimitFSIZE=16M:16G`). Application watchdogs
+are still required; the systemd limits are a final safety net. The feed pins
+`libx264` on `viviserv` (`TV_THING_VIDEO_ENCODER=cpu`): its legacy K4200
+reached the 80 C safety ceiling during the sustained NVENC gate. GPU
+auto-selection can be restored after the card's cooling is serviced and a full
+NVENC gate passes.
 
 ### Scan for channels
 
@@ -422,7 +448,8 @@ pytest test_server.py -q                     # streaming command/GPU unit tests
 pytest test_epg.py -q                        # PSIP guide parsers, no hardware
 pytest test_yttv_epg.py -q                   # YouTube TV listings parsers and map, no network
 pytest test_fm.py -q -m "not api"          # FM unit tests, no server/hardware
-pytest -q -m "not slow and not hardware"   # fast suite against the running server
+pytest -q --ignore=test_integration.py -m "not slow and not api and not hardware and not resource"  # the fast suite
+pytest test_integration.py -q              # retunes the running server: never against production
 TV_THING_URL=http://localhost:8099 pytest test_fm.py -q -m api  # target a dev instance
 TV_THING_URL=http://localhost:8080 pytest test_fm.py -q -m hardware  # includes non-silence check
 ```
