@@ -3151,7 +3151,7 @@ def _next_piece(timer, stem):
     return part
 
 
-def start_recorder(kind, part, until, *, lane=None, exclude=(), start_index=0):
+def start_recorder(kind, part, until, *, lane=None, exclude=(), start_index=0, generation=None):
     """Start one recorder process (feed side). ``kind`` "tap" records a port
     the digital source feeds, chosen here; "live" copies ``lane``'s live HLS.
     Returns (recorder id, tap port or None); raises OSError if ffmpeg won't start."""
@@ -3163,7 +3163,8 @@ def start_recorder(kind, part, until, *, lane=None, exclude=(), start_index=0):
         command = recorder.build_live_copy_command(lane_playlist_path(lane), part, start_index=start_index)
     else:
         raise ValueError(f"unknown recorder kind {kind!r}")
-    return recorders.start(command, part, until, kind=kind, lane=lane, tap_port=tap_port), tap_port
+    return recorders.start(command, part, until, kind=kind, lane=lane, tap_port=tap_port,
+                           generation=generation), tap_port
 
 
 def recorder_alive(current):
@@ -3210,7 +3211,7 @@ def _tend_live_copy(current):
     try:
         recorder_id, _ = feed_client.start_recorder(
             "live", current["part"], current["until"], lane=lane,
-            start_index=-3 if lane == LANE_ROKU else 0)
+            start_index=-3 if lane == LANE_ROKU else 0, generation=generation)
     except OSError as error:
         print(f"VCR: could not start the live copy: {error}")
         return
@@ -3366,7 +3367,10 @@ def finalize_recording(parts, stem=None):
         except OSError:
             pass
     if not pieces:
-        return []
+        # Nothing left to file: a finalize that was cut short after filing them (control
+        # restarted) finds what it filed, rather than calling the recording lost.
+        done = _filed_output(stem or (recorder.stem_of_part(parts[0]) if parts else None))
+        return [done] if done is not None else []
     stem = stem or recorder.stem_of_part(pieces[0])
     if len(pieces) > 1:
         joined = join_recording_pieces(pieces, stem)
@@ -3383,6 +3387,20 @@ def finalize_recording(parts, stem=None):
     return paths
 
 
+def _filed_output(stem):
+    """The library file a recording's stem became, if it was already filed."""
+    if stem is None:
+        return None
+    for suffix in (".mp4", ".ts"):
+        candidate = stem.with_name(stem.name + suffix)
+        try:
+            if candidate.stat().st_size > 0:
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
 def _finish_timer(timer_id, parts, status, note, stem=None):
     """Finalize the files in the background and record the outcome."""
     def run():
@@ -3396,8 +3414,11 @@ def _finish_timer(timer_id, parts, status, note, stem=None):
             if timer is None:
                 return
             for path in paths:
-                timer.setdefault("files", []).append(path.name)
+                files = timer.setdefault("files", [])
                 timer["file"] = path.name
+                if path.name in files:
+                    continue                    # filed by a finalize that was cut short
+                files.append(path.name)
                 try:
                     timer["bytes"] = (timer.get("bytes") or 0) + path.stat().st_size
                 except OSError:
@@ -3405,6 +3426,7 @@ def _finish_timer(timer_id, parts, status, note, stem=None):
             if timer["status"] != "scheduled":     # not resumed meanwhile
                 timer.pop("pieces", None)
                 timer.pop("stem", None)
+                timer.pop("finish_as", None)
                 timer["status"] = status if paths else "failed"
                 timer["note"] = note if paths or note \
                     else "nothing was recorded"
@@ -3416,17 +3438,20 @@ def _finish_timer(timer_id, parts, status, note, stem=None):
     threading.Thread(target=run, daemon=True).start()
 
 
-def _finishing(timer, part=None):
+def _finishing(timer, part=None, status=None):
     """Mark a timer as finishing. Call with `lock` held.
 
     Its pieces stay on the timer until the finalizer has filed them, so a
     restart part-way through finalizing does it again instead of stranding
-    them. Returns ``(parts, stem)`` for _finish_timer().
+    them, ending as ``status`` (kept on the timer for that) as it would have.
+    Returns ``(parts, stem)`` for _finish_timer().
     """
     pieces = timer.setdefault("pieces", [])
     if part is not None and str(part) not in pieces:
         pieces.append(str(part))
     timer["status"] = "finishing"
+    if status is not None:
+        timer["finish_as"] = status
     stem = timer.get("stem")
     return ([Path(piece) for piece in timer.get("pieces") or []],
             Path(stem) if stem else None)
@@ -3459,7 +3484,7 @@ def _end_active_recording(status, note, resume=False, lane=LANE_DIGITAL):
                 _recording_retry_at[timer["id"]] = \
                     time.monotonic() + RECORDING_RETRY_SECONDS
             else:
-                parts, stem = _finishing(timer, current["part"])
+                parts, stem = _finishing(timer, current["part"], status)
                 timer["note"] = note
             save_recording_schedule()
     print(f"VCR: stopped ({note or status})")
@@ -3608,7 +3633,7 @@ def recording_tick(now=None):
         leftovers = []
         for timer in state["timers"]:
             if timer.get("pieces") and timer["status"] not in ACTIVE_OR_FINISHING:
-                parts, stem = _finishing(timer)
+                parts, stem = _finishing(timer, status="partial")
                 leftovers.append((timer["id"], parts, stem, timer.get("note")))
                 changed = True
         if changed:
@@ -3665,38 +3690,59 @@ def recorder_keeper():
 
 
 def recover_recordings():
-    """After a restart: finish the files an interrupted run left behind.
+    """After a restart: take back what is still recording, and finish what is not.
 
     Only parts this instance's own schedule names are touched, so a staging
     server pointed at the same library can never finalize the production
-    server's recording in progress. A timer whose window is still open goes
-    back to ``scheduled``, keeps what it taped as a piece, and resumes into
-    the next one, renewing the lock it already holds rather than being
-    refused by it. Its pieces are joined into one file when it ends.
+    server's recording in progress.
+
+    * Split, a restart of control leaves the feed's recorders running: a
+      recording the feed is still writing is taken back as it is (same
+      recorder, same lock, same piece).
+    * One the feed stopped at its end while control was away is done.
+    * Any other was cut short. A timer whose window is still open goes back
+      to ``scheduled``, keeps what it taped as a piece, and resumes into the
+      next one, renewing the lock it already holds rather than being refused
+      by it; its pieces are joined into one file when it ends. A timer past
+      its window is filed as partial.
     """
     now = time.time()
     leftovers = []
     stale_tokens = []
-    writing = set()
+    adopted = []
+    writing = {}
     if ROLE == "control":
-        # Split, a restart of control leaves the feed's recorders running. Anything one is
-        # still writing is left exactly as it is (adopting it is the next step of Phase 2).
         try:
-            writing = {view["part"] for view in feed_client.live_recorders()}
+            writing = {view["part"]: view for view in feed_client.live_recorders()}
         except OSError as error:
             print(f"VCR: the feed did not say what it is recording ({error}); "
                   "leaving every recording as it is")
             return
+    try:
+        journal = feed_client.recorder_journal()
+    except OSError as error:
+        print(f"VCR: could not read the recorders' journal ({error})")
+        journal = []
+    # Why each part's last recorder ended, by the feed's own account.
+    ended = {record["part"]: record.get("reason") for record in journal if record.get("event") == "end"}
     with lock:
         for timer in recording_state()["timers"]:
             if timer["status"] not in ("recording", "finishing"):
                 continue
-            if timer.get("part") and str(timer["part"]) in writing:
-                print(f"VCR: {timer.get('title') or timer['id']} is still recording in the feed")
+            if timer["status"] == "recording" and timer.get("part") in writing:
+                adopted.append((timer, writing[timer["part"]]))
                 continue
             part = timer.pop("part", None)
             token = timer.pop("lock_token", None)
             timer.pop("stop_requested", None)
+            if timer["status"] == "recording" and part and ended.get(part) == "until":
+                # The feed ended it on time by itself: nothing was cut short.
+                parts, stem = _finishing(timer, part, "done")
+                timer["note"] = None
+                leftovers.append((timer["id"], parts, stem, "done", None))
+                if token:
+                    stale_tokens.append((recorder.timer_lane(timer), token))
+                continue
             resume = timer["status"] == "recording" \
                 and timer["end"] > now + recorder.MIN_RECORDING_SECONDS \
                 and timer.get("attempts", 0) < RECORDING_MAX_ATTEMPTS
@@ -3706,18 +3752,56 @@ def recover_recordings():
                 timer["status"] = "scheduled"
                 timer["note"] = "resumed after a server restart"
                 timer["lock_token"] = token
-            else:
+            elif timer["status"] == "finishing" and timer.get("finish_as"):
+                # A finalize cut short: do it again, ending as it was going to.
                 parts, stem = _finishing(timer, part)
-                leftovers.append((timer["id"], parts, stem))
-                timer["note"] = "interrupted by a server restart"
+                leftovers.append((timer["id"], parts, stem, timer["finish_as"], timer.get("note")))
+            else:
+                parts, stem = _finishing(timer, part, "partial")
+                note = "interrupted by a server restart"
+                leftovers.append((timer["id"], parts, stem, "partial", note))
+                timer["note"] = note
                 if token:
                     stale_tokens.append((recorder.timer_lane(timer), token))
         save_recording_schedule()
+    for timer, view in adopted:
+        _adopt_recording(timer, view)
     for lane, token in stale_tokens:
         release_tuner_lock({"lane": lane, "token": token})
-    for timer_id, parts, stem in leftovers:
-        _finish_timer(timer_id, parts, "partial",
-                      "interrupted by a server restart", stem)
+    for timer_id, parts, stem, status, note in leftovers:
+        _finish_timer(timer_id, parts, status, note, stem)
+
+
+def _adopt_recording(timer, view):
+    """Take back a recording the feed is still writing, after control restarted: the same
+    recorder, lock, piece and (for a live copy) stream generation, so nothing is cut."""
+    lane = recorder.timer_lane(timer)
+    part = Path(timer["part"])
+    try:
+        size = part.stat().st_size
+    except OSError:
+        size = 0
+    current = {
+        "timer_id": timer["id"],
+        "channel_id": timer["channel_id"],
+        "recorder": view["id"],
+        "until": timer["end"],
+        "tap_port": view.get("tap_port"),
+        "from_live": lane == LANE_ROKU or bool(timer.get("from_live")),
+        "generation": view.get("generation"),
+        "part": part,
+        "stem": Path(timer["stem"]),
+        "token": timer.get("lock_token"),
+        "started_at": view.get("started_at") or time.time(),
+        "last_size": size,
+        "last_growth": time.monotonic(),
+        "signal": "ok",
+    }
+    if lane == LANE_ROKU:
+        current.update(lane=LANE_ROKU, target=dict(timer.get("target") or {}),
+                       shared=current["token"] is None)
+    _set_current_recording(lane, current)
+    print(f"VCR: took back {recorder.describe(timer)}, still recording {part.name} in the feed")
 
 
 def shutdown_recording():

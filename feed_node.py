@@ -416,11 +416,12 @@ class LocalFeed:
             self.stop(lane.id)
 
     # -- recorders -----------------------------------------------------------------
-    def start_recorder(self, kind, part, until, *, lane=None, exclude=(), start_index=0):
+    def start_recorder(self, kind, part, until, *, lane=None, exclude=(), start_index=0, generation=None):
         """Start a recorder writing ``part`` until ``until``: from a recording tap ("tap",
         whose port is chosen here, avoiding ``exclude``) or copying a lane's live stream
-        ("live"). Returns (recorder id, tap port or None)."""
-        return self.ops.start_recorder(kind, part, until, lane=lane, exclude=exclude, start_index=start_index)
+        ("live", following its stream ``generation``). Returns (recorder id, tap port or None)."""
+        return self.ops.start_recorder(kind, part, until, lane=lane, exclude=exclude, start_index=start_index,
+                                       generation=generation)
 
     def stop_recorder(self, rec_id, timeout=None):
         self.ops.recorders.stop(rec_id, timeout=timeout)
@@ -432,6 +433,10 @@ class LocalFeed:
     def live_recorders(self):
         """The views of every recorder still writing."""
         return [view for view in map(self.ops.recorders.view, self.ops.recorders.live()) if view]
+
+    def recorder_journal(self):
+        """Every start and end the recorders' journal holds, oldest first."""
+        return self.ops.recorders.journal()
 
     # -- front-end operations --------------------------------------------------------
     # A device measured rather than streamed: a scan, the signal meter, a guide read.
@@ -621,7 +626,8 @@ class Recorders:
                 return None
             return {"id": rec_id, "alive": entry["ended"] is None, "returncode": entry["proc"].returncode,
                     "ended": entry["ended"], "overruns": entry["overruns"], "part": entry["part"],
-                    "until": entry["until"]}
+                    "until": entry["until"], "started_at": entry["started_at"],
+                    **{key: entry.get(key) for key in ("kind", "lane", "tap_port", "generation")}}
 
     def live(self):
         with self._lock:

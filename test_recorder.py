@@ -1026,3 +1026,74 @@ def test_the_feed_ends_a_tape_on_time_even_unasked(vcr):
     assert proc.written == "q"
     ends = [e for e in server.recorders.journal() if e["event"] == "end"]
     assert ends and ends[-1]["reason"] == "until" and ends[-1]["part"] == str(current["part"])
+
+
+# ---------------------------------------------------------------------------
+# Split (Phase 2): a restarted control takes back what the feed still records,
+# and a finalize cut short is finished, never called lost
+# ---------------------------------------------------------------------------
+
+REAL_FINALIZE = server.finalize_recording
+
+
+def restart_control(monkeypatch):
+    """What a control restart leaves: the feed's recorders running, control's memory gone."""
+    monkeypatch.setattr(server, "ROLE", "control")
+    monkeypatch.setattr(server, "active_recording", None)
+    monkeypatch.setattr(server, "recording_schedule", None)
+
+
+def test_a_restarted_control_takes_back_what_the_feed_is_still_recording(vcr, monkeypatch):
+    timer = schedule_now()
+    server.recording_tick()
+    rec_id, part, tap = (server.active_recording[k] for k in ("recorder", "part", "tap_port"))
+    restart_control(monkeypatch)
+
+    server.recover_recordings()
+    current = server.active_recording
+    assert current["recorder"] == rec_id and current["part"] == part and current["tap_port"] == tap
+    kept = server.find_timer(timer["id"])
+    assert kept["status"] == "recording" and not kept.get("pieces"), "not cut into a new piece"
+    assert server.recording_tap_ports(CHANNELS[0]) == [tap], "a retune keeps feeding its tap"
+
+    server.recording_tick()
+    assert server.recorders.live() == [rec_id], "no second recorder"
+    server.cancel_recording({"id": timer["id"]})
+    server.recording_tick()
+    done = server.find_timer(timer["id"])
+    assert done["status"] == "done" and len(done["files"]) == 1
+
+
+def test_one_the_feed_ended_on_time_while_control_was_away_is_done(vcr, monkeypatch):
+    timer = schedule_now()
+    server.recording_tick()
+    server.recorders.stop(server.active_recording["recorder"], reason="until")   # the feed, at the end
+    restart_control(monkeypatch)
+
+    server.recover_recordings()
+    done = server.find_timer(timer["id"])
+    assert done["status"] == "done" and done["note"] is None, done
+    assert len(done["files"]) == 1 and server.active_recording is None
+    assert server.active_lock(server.LANE_DIGITAL) is None, "its lock is let go"
+
+
+def test_a_finalize_cut_short_is_finished_as_it_was_going_to_end(vcr, monkeypatch):
+    monkeypatch.setattr(server, "finalize_recording", REAL_FINALIZE)
+    timer = schedule_now()
+    server.recording_tick()
+    part, stem = server.active_recording["part"], server.active_recording["stem"]
+    with server.lock:
+        server._finishing(server.find_timer(timer["id"]), part, "done")
+        server.save_recording_schedule()
+    filed = stem.with_name(stem.name + ".mp4")      # the remux got this far, then control died
+    filed.write_bytes(b"recorded")
+    part.unlink()
+    monkeypatch.setattr(server, "active_recording", None)
+    monkeypatch.setattr(server, "recording_schedule", None)
+
+    server.recover_recordings()
+    done = server.find_timer(timer["id"])
+    assert done["status"] == "done", "not 'failed: nothing was recorded'"
+    assert done["files"] == [filed.name] and done["file"] == filed.name
+    server._finish_timer(timer["id"], [part], "done", None, stem)                 # and once more
+    assert server.find_timer(timer["id"])["files"] == [filed.name], "filed once"

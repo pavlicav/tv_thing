@@ -122,8 +122,11 @@ class FeedAPI:
             if method == "POST":
                 rec_id, tap_port = local.start_recorder(
                     body["kind"], body["part"], body.get("until"), lane=body.get("lane"),
-                    exclude=tuple(body.get("exclude") or ()), start_index=body.get("start_index", 0))
+                    exclude=tuple(body.get("exclude") or ()), start_index=body.get("start_index", 0),
+                    generation=body.get("generation"))
                 return 200, {"id": rec_id, "tap_port": tap_port}
+        if parts == ["recorders", "journal"] and method == "GET":
+            return 200, {"records": local.recorder_journal()}
         if parts[:1] == ["recorders"] and len(parts) >= 2:
             if len(parts) == 2 and method == "GET":
                 view = local.recorder(parts[1])
@@ -386,10 +389,10 @@ class RemoteFeed:
             self.stop(lane.id)
 
     # -- recorders ---------------------------------------------------------------------------
-    def start_recorder(self, kind, part, until, *, lane=None, exclude=(), start_index=0):
+    def start_recorder(self, kind, part, until, *, lane=None, exclude=(), start_index=0, generation=None):
         # One writer per part file, in the feed: a retry returns the recorder already writing.
         body = {"kind": kind, "part": str(part), "until": until, "lane": lane,
-                "exclude": list(exclude), "start_index": start_index}
+                "exclude": list(exclude), "start_index": start_index, "generation": generation}
         try:
             payload = self._checked(*self._request("POST", "recorders", body, timeout=self.command_timeout))
         except FeedUnavailable:
@@ -407,6 +410,9 @@ class RemoteFeed:
 
     def live_recorders(self):
         return self._checked(*self._request("GET", "recorders"))["recorders"]
+
+    def recorder_journal(self):
+        return self._checked(*self._request("GET", "recorders/journal", timeout=self.command_timeout))["records"]
 
     # -- front-end operations ----------------------------------------------------------------
     def measure(self, device):

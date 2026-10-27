@@ -79,9 +79,10 @@ class Ops:
         self.running.discard(lane)
         self.node.transition(lane, "idle")
 
-    def start_recorder(self, kind, part, until, *, lane=None, exclude=(), start_index=0):
+    def start_recorder(self, kind, part, until, *, lane=None, exclude=(), start_index=0, generation=None):
         port = 18484 if kind == "tap" else None
-        return self.recorders.start(["ffmpeg"], part, until, kind=kind, lane=lane, tap_port=port), port
+        return self.recorders.start(["ffmpeg"], part, until, kind=kind, lane=lane, tap_port=port,
+                                    generation=generation), port
 
     def _scan(self, rf, adapter=0, fd=None, **options):
         if rf == 99:
@@ -248,6 +249,11 @@ def test_recorders_round_trip_one_writer_per_part(feed, tmp_path):
     feed.remote.stop_recorder(rec_id, timeout=1)
     assert feed.remote.recorder(rec_id)["alive"] is False
     assert feed.remote.recorder("nope") is None
+    live, _ = feed.remote.start_recorder("live", tmp_path / "copy.ts.part", 2_000_000_000, lane="roku",
+                                         generation="cap-1")
+    assert feed.remote.recorder(live)["generation"] == "cap-1", "an adopted copy knows what it follows"
+    events = [(r["event"], r.get("reason")) for r in feed.remote.recorder_journal()]
+    assert events[:3] == [("start", None), ("end", "stopped"), ("start", None)]
 
 
 def test_front_end_operations(feed):
