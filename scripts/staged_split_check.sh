@@ -24,7 +24,13 @@ j() { curl -s --max-time "${3:-4}" "$1" | "$PY" -c "import json,sys; d=json.load
 wait_url() { local deadline=$((SECONDS + $2)); until curl -s -o /dev/null --max-time 2 "$1"; do [ $SECONDS -ge $deadline ] && return 1; sleep 0.5; done; }
 start_feed() { (cd "$CODE" && exec env "${COMMON[@]}" PORT=18086 TV_THING_CONTROL_URL=$C "$PY" feed_server.py >> "$STAGE/feed.log" 2>&1) & FEED=$!; }
 start_control() { (cd "$CODE" && exec env "${COMMON[@]}" TV_THING_ROLE=control PORT=18087 TV_THING_FEED_URL=$F/ "$PY" server.py >> "$STAGE/control.log" 2>&1) & CONTROL=$!; }
-cleanup() { kill -CONT "${FEED:-0}" 2>/dev/null; kill "${CONTROL:-0}" "${FEED:-0}" 2>/dev/null; sleep 1; kill -9 "${CONTROL:-0}" "${FEED:-0}" 2>/dev/null; }
+APACHE_DIR=$STAGE/apache D=http://127.0.0.1:18080 T=http://127.0.0.1:18081
+apache() { /usr/sbin/apache2 -d "$APACHE_DIR" -f "$APACHE_DIR/httpd.conf" -k "$1"; }
+cleanup() {
+    [ -f "$APACHE_DIR/httpd.pid" ] && apache stop 2>/dev/null
+    kill -CONT "${FEED:-0}" 2>/dev/null; kill "${CONTROL:-0}" "${FEED:-0}" 2>/dev/null; sleep 1
+    kill -9 "${CONTROL:-0}" "${FEED:-0}" 2>/dev/null
+}
 trap cleanup EXIT
 
 start_feed; wait_url "$F/feed/v1/lanes" 30 && pass "the feed is up" || { fail "the feed did not start"; tail -20 "$STAGE/feed.log"; exit 1; }
@@ -42,9 +48,72 @@ ss -ltnH | awk '{print $4}' | grep -E ':1808[67]$' | grep -vq '^127\.0\.0\.1:' &
 relay() { curl -s --max-time 8 "$F/stream/internet/cabride/index.m3u8" | head -1; }
 [ "$(relay)" = "#EXTM3U" ] && pass "the feed relays an internet stream" || fail "relay: $(relay)"
 
+# --- the front door: a private Apache running the very routes production includes ----------
+mkdir -p "$APACHE_DIR"; M=/usr/lib/apache2/modules
+cat > "$APACHE_DIR/httpd.conf" <<CONF
+ServerRoot "$APACHE_DIR"
+DefaultRuntimeDir "$APACHE_DIR"
+PidFile "$APACHE_DIR/httpd.pid"
+ErrorLog "$APACHE_DIR/error.log"
+LogLevel warn
+LoadModule mpm_event_module $M/mod_mpm_event.so
+LoadModule authz_core_module $M/mod_authz_core.so
+LoadModule mime_module $M/mod_mime.so
+LoadModule alias_module $M/mod_alias.so
+LoadModule headers_module $M/mod_headers.so
+LoadModule proxy_module $M/mod_proxy.so
+LoadModule proxy_http_module $M/mod_proxy_http.so
+TypesConfig /etc/mime.types
+ServerName localhost
+Listen 127.0.0.1:18080
+Listen 127.0.0.1:18081
+Define TV_THING_FEED_PORT 18086
+Define TV_THING_CONTROL_PORT 18087
+<VirtualHost 127.0.0.1:18080>
+    Include "$CODE/deploy/apache/tv-thing-routes.conf"
+</VirtualHost>
+<VirtualHost 127.0.0.1:18081>
+    Include "$CODE/deploy/apache/tv-thing-tv-routes.conf"
+</VirtualHost>
+CONF
+apache start && wait_url "$D/api/v1/status" 15 && pass "the front door is up (the production routes, private Apache)" \
+    || { fail "the front door did not start"; cat "$APACHE_DIR/error.log"; exit 1; }
+[ "$(j "$D/api/v1/status" "d['feed_epoch']")" = "$epoch" ] && pass "front door: the API reaches control" || fail "front door: no API"
+[ "$(curl -s --max-time 8 "$D/stream/internet/cabride/index.m3u8" | head -1)" = "#EXTM3U" ] \
+    && pass "front door: /stream/ reaches the feed" || fail "front door: no stream"
+master=$(curl -s --max-time 8 "$D/stream/internet/cabride/index.m3u8")
+media=$master; base=$D/stream/internet/cabride
+variant=$(echo "$master" | grep -v '^#' | head -1)
+echo "$master" | grep -q 'EXT-X-STREAM-INF' && media=$(curl -s --max-time 8 "$base/$variant")
+segment=$(echo "$media" | grep -v '^#' | grep . | tail -1)
+[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$base/$segment")" = 200 ] \
+    && pass "front door: a relayed segment plays ($segment)" || fail "front door: segment $segment"
+printf '%s\n%s\n' "$master" "$media" | grep -qE ':1808[67]|127\.0\.0\.1|localhost' \
+    && fail "a playlist names a backend (D4)" || pass "no playlist names a backend (D4)"
+codes=""
+for url in "$D/internal/resolve" "$D/feed/v1/lanes" "$T/tv/internal/resolve" "$T/tv/feed/v1/lanes"; do
+    codes="$codes $(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url")"
+done
+[ "$codes" = " 404 404 404 404" ] && pass "/internal/ and /feed/v1/ are never routed (D3)" || fail "D3:$codes"
+[ "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$T/tv")" = "302 $T/tv/" ] \
+    && pass "/tv redirects to /tv/" || fail "/tv: $(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$T/tv")"
+[ "$(j "$T/tv/api/v1/status" "d['feed_epoch']")" = "$epoch" ] && [ "$(curl -s --max-time 8 "$T/tv/stream/internet/cabride/index.m3u8" | head -1)" = "#EXTM3U" ] \
+    && pass "/tv/: the API reaches control and /tv/stream/ the feed" || fail "/tv/ routes"
+( misses=0; for _ in $(seq 30); do [ "$(curl -s --max-time 5 "$D/stream/internet/cabride/index.m3u8" | head -1)" = "#EXTM3U" ] \
+      || misses=$((misses + 1)); sleep 0.1; done; echo "$misses" > "$STAGE/graceful.misses" ) &
+LOOP=$!
+sleep 0.5; apache graceful; sleep 1; apache graceful; wait "$LOOP"
+[ "$(cat "$STAGE/graceful.misses")" = 0 ] && pass "two graceful reloads mid-playback: no stream request failed (D1)" \
+    || fail "D1: $(cat "$STAGE/graceful.misses")/30 stream requests failed across graceful reloads"
+
 kill -9 "$CONTROL"; sleep 0.5
 ok=0; for _ in 1 2 3; do [ "$(relay)" = "#EXTM3U" ] && ok=$((ok + 1)); sleep 1; done
 [ $ok = 3 ] && pass "control killed: the relay keeps playing (3/3)" || fail "relay during control's death: $ok/3"
+answer=$(curl -s -o "$STAGE/d2.json" -w '%{http_code} %{content_type}' --max-time 5 "$D/api/v1/status")
+[ "$answer" = "503 application/json" ] && "$PY" -c "import json,sys; json.load(open(sys.argv[1]))" "$STAGE/d2.json" \
+    && pass "control killed: /api/ through the front door is a JSON 503 (D2)" || fail "D2: $answer $(head -c 120 "$STAGE/d2.json")"
+[ "$(curl -s --max-time 8 "$D/stream/internet/cabride/index.m3u8" | head -1)" = "#EXTM3U" ] \
+    && pass "control killed: the relay plays through the front door" || fail "front-door relay with control down"
 [ "$(j "$F/feed/v1/lanes" "d['feed_epoch']")" = "$epoch" ] && pass "control killed: the feed's epoch is unchanged" || fail "the feed restarted"
 start_control; wait_url "$C/api/v1/status" 30
 [ "$(j "$C/api/v1/status" "d['feed_epoch']")" = "$epoch" ] && pass "control back: same feed, same epoch" || fail "after control's restart the epoch moved"

@@ -1,0 +1,31 @@
+# TV Thing's feed (Phase 2): tuners, the HD PVR capture, every ffmpeg, the VCR's recorders,
+# the slide channels' video and the relays. It almost never restarts; changes to it go
+# through AGENTS.md's gate. Its API (:8086, /feed/v1/) answers this host only.
+[Unit]
+Description=TV Thing feed (tuners, captures, recorders, streams)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=vivian
+WorkingDirectory=/home/vivian/tv_thing
+Environment=TV_THING_MAX_GPU_TEMP_C=90
+Environment=TV_THING_VIDEO_ENCODER=cpu
+Environment="TV_THING_RECORDINGS_DIR=/mnt/sda1/media/TV Recordings"
+# The recorders' journal, outside the streams directory: /var/lib/tv-thing/feed/.
+StateDirectory=tv-thing
+Environment=TV_THING_STATE_DIR=/var/lib/tv-thing
+Environment=TV_THING_CONTROL_URL=http://127.0.0.1:8087
+ExecStart=/home/vivian/miniconda3/bin/python3 /home/vivian/tv_thing/feed_server.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=5
+CPUQuota=800%
+MemoryMax=1800M
+TasksMax=192
+OOMPolicy=continue
+LimitFSIZE=16M:16G
+
+[Install]
+WantedBy=multi-user.target

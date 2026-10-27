@@ -1,0 +1,31 @@
+# TV Thing's control (Phase 2): the API and pages, channel list, locks, tune decisions, Roku
+# navigation and recognition, guides, VCR timers and finalizing. It restarts freely: it never
+# stops or retunes a feed, and VizelVision rides out its restarts. Behind the front door on
+# 127.0.0.1:8087; it reaches the feed only through RemoteFeed.
+# No PartOf/BindsTo on the feed: stopping one must never stop the other.
+[Unit]
+Description=TV Thing control (API, UI, channels, Roku navigation, guides, VCR)
+Wants=network-online.target tv-thing-feed.service
+After=network-online.target tv-thing-feed.service
+
+[Service]
+Type=simple
+User=vivian
+WorkingDirectory=/home/vivian/tv_thing
+Environment=TV_THING_ROLE=control
+Environment=PORT=8087
+Environment=TV_THING_FEED_URL=http://127.0.0.1:8086/
+Environment="TV_THING_RECORDINGS_DIR=/mnt/sda1/media/TV Recordings"
+ExecStart=/home/vivian/miniconda3/bin/python3 /home/vivian/tv_thing/server.py
+Restart=always
+RestartSec=2
+TimeoutStopSec=5
+# The Roku verifier's frame decoder and the VCR's remux and join run here.
+CPUQuota=400%
+MemoryMax=1200M
+TasksMax=160
+OOMPolicy=stop
+LimitFSIZE=16M:16G
+
+[Install]
+WantedBy=multi-user.target
