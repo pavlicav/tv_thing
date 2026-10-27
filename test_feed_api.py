@@ -198,14 +198,31 @@ def test_a_feed_that_is_down_reads_unknown_and_refuses_commands(feed):
         feed.remote.measure("digital")
 
 
-def test_a_hung_feed_times_out_as_unknown():
+def test_a_hung_feed_never_hangs_control():
+    """INVARIANTS.md C2: control reports a SIGSTOPped feed's lanes unknown, and its API
+    threads don't block. One status page asks for every lane, the running list and more."""
     hung = socket.socket()
     hung.bind(("127.0.0.1", 0))
-    hung.listen(8)                                     # accepts, never answers (SIGSTOP)
+    hung.listen(64)                                    # accepts, never answers (SIGSTOP)
     remote = feed_api.RemoteFeed(f"http://127.0.0.1:{hung.getsockname()[1]}/", CONFIG, blank, timeout=0.5)
     started = time.monotonic()
     assert remote.lane("roku")["lifecycle"] == "unknown"
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < 1.5
+    started = time.monotonic()
+    for _ in range(20):                                # a status page's worth of reads, and more
+        assert remote.lane("digital")["lifecycle"] == "unknown"
+        remote.running_lanes(), remote.slides(), remote.capture_source("roku")
+    assert time.monotonic() - started < 0.2, "answered from what is known, not one timeout each"
+    results, threads = [], []
+    for _ in range(8):                                 # eight API threads at once, after the window
+        threads.append(threading.Thread(target=lambda: results.append(remote.lane("analog")["lifecycle"])))
+    time.sleep(1.1)
+    started = time.monotonic()
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(5)
+    assert results == ["unknown"] * 8 and time.monotonic() - started < 1.5, "one waits, the rest do not"
     hung.close()
 
 

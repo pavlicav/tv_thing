@@ -209,14 +209,16 @@ class RemoteFeed:
     """
 
     def __init__(self, base_url, config, blank_state, *, timeout=2.0, command_timeout=20.0,
-                 scan_timeout=90.0, cache_seconds=0.5, clock=time.monotonic, opener=urlopen,
-                 sleep=time.sleep):
+                 scan_timeout=90.0, cache_seconds=0.5, retry_seconds=1.0, clock=time.monotonic,
+                 opener=urlopen, sleep=time.sleep):
         self.base_url = base_url.rstrip("/") + PREFIX
         self.config, self.blank_state = config, blank_state
         self.timeout, self.command_timeout, self.scan_timeout = timeout, command_timeout, scan_timeout
         self.cache_seconds, self.clock, self.opener, self.sleep = cache_seconds, clock, opener, sleep
+        self.retry_seconds = retry_seconds
         self._lock = threading.Lock()
         self._snap, self._at, self.reachable = None, None, False
+        self._failed_at, self._fetching = None, False
 
     # -- transport ---------------------------------------------------------------------------
     def _request(self, method, path, body=None, timeout=None):
@@ -251,23 +253,39 @@ class RemoteFeed:
     # -- reading -----------------------------------------------------------------------------
     def snapshot(self, max_age=None):
         """The feed's snapshot: fresh within ``cache_seconds``, else fetched; when the feed
-        cannot be reached, the last one with every lane ``unknown``."""
+        cannot be reached, the last one with every lane ``unknown``.
+
+        A hung feed must not hang control's API (INVARIANTS.md C2): after a failed fetch,
+        ``unknown`` is answered at once for ``retry_seconds``, and only one thread at a time
+        waits on the feed; the others answer from what is known."""
         now = self.clock()
+        limit = self.cache_seconds if max_age is None else max_age
         with self._lock:
             snap, at = self._snap, self._at
-        limit = self.cache_seconds if max_age is None else max_age
-        if snap is not None and at is not None and now - at < limit and self.reachable:
-            return snap
+            fresh = snap is not None and at is not None and self.reachable
+            if fresh and now - at < limit:
+                return snap
+            if not self.reachable and self._failed_at is not None and now - self._failed_at < self.retry_seconds:
+                return self._unknown(snap)
+            if self._fetching:
+                # Recent enough to stand in while another thread asks; else nothing is vouched for.
+                return snap if fresh and now - at < limit + self.timeout else self._unknown(snap)
+            self._fetching = True
         try:
-            snap = self._checked(*self._request("GET", "lanes"))
+            fetched = self._checked(*self._request("GET", "lanes"))
         except (FeedUnavailable, FeedRefused):
             with self._lock:
-                self.reachable = False
+                self.reachable, self._failed_at, self._fetching = False, self.clock(), False
                 last = self._snap
             return self._unknown(last)
+        except BaseException:
+            with self._lock:
+                self._fetching = False
+            raise
         with self._lock:
-            self._snap, self._at, self.reachable = snap, self.clock(), True
-        return snap
+            self._snap, self._at, self.reachable = fetched, self.clock(), True
+            self._failed_at, self._fetching = None, False
+        return fetched
 
     def _unknown(self, last):
         lanes = {}
@@ -530,4 +548,7 @@ def _send(handler, status, payload):
     handler.send_header("Content-Type", "application/json")
     handler.send_header("Content-Length", str(len(data)))
     handler.end_headers()
-    handler.wfile.write(data)
+    try:
+        handler.wfile.write(data)
+    except (BrokenPipeError, ConnectionResetError):
+        pass                            # the caller gave up (a timeout, a restart)
