@@ -373,3 +373,76 @@ This costs **a second feed drop**, so do it off air only. In Phase 1, `tv-thing`
 ```
 
 Row A1, a restart with nothing changing, only passes after Phase 2. On Phase 1 it fails by design.
+
+## Phase 2: the cut-over to two services
+
+**Not run yet.** It is written to be rehearsed first. `scripts/staged_split_check.sh` (29 checks, no hardware) covers the roles, `RemoteFeed`, the front door's routes and the restart behaviour. What it cannot cover is the gate with real hardware, which needs production stopped like any gate.
+
+**What changes.** Today `tv-thing` is one process on `:8080`. After:
+
+| Unit | Process | Listens |
+|---|---|---|
+| `tv-thing-feed` (`deploy/systemd/tv-thing-feed.service`) | `feed_server.py` | 127.0.0.1:8086 |
+| `tv-thing` (`deploy/systemd/tv-thing.service`) | `server.py`, control | 127.0.0.1:8087 |
+| Apache (`deploy/apache/tv-thing-front-door.conf`) | the front door | 127.0.0.1, 192.168.1.98 and 10.0.0.98 on :8080, plus `/tv/` on the main site |
+
+Every client URL stays the same.
+
+**The restart budget.** One feed drop at the cut-over, and one full Apache restart for its new `Listen` lines. After that, `sudo systemctl restart tv-thing` drops nothing, and Apache only ever needs a graceful reload.
+
+### Before
+
+1. Merge `feed-split` to `master` only as part of this cut-over. The checkout is what runs.
+2. Gate the build: AGENTS.md's gate, with the candidate run as **two** processes on staging ports (feed and control) behind a private Apache, the way `staged_split_check.sh` does, but with hardware. Run the digital and Roku gates against the candidate control's API.
+3. Off air, with VizelVision's web and master stopped, as in Phase 1. No recording running or due.
+
+### The cut-over
+
+```bash
+sudo cp /etc/apache2/conf-available/viviserv-proxy.conf ~/viviserv-proxy.conf.before-split
+sudo cp ~/tv_thing/deploy/apache/tv-thing-front-door.conf /etc/apache2/sites-available/
+sudo a2enmod proxy proxy_http headers alias && sudo a2ensite tv-thing-front-door
+```
+
+Take the old `/tv/` lines out of `viviserv-proxy.conf` (`RedirectMatch ^/tv$` and the two `ProxyPass`/`ProxyPassReverse /tv/` lines). The front-door file includes their replacement.
+
+```bash
+sudo apache2ctl configtest
+sudo install -m 644 ~/tv_thing/deploy/systemd/tv-thing-feed.service /etc/systemd/system/
+sudo install -m 644 ~/tv_thing/deploy/systemd/tv-thing.service /etc/systemd/system/
+sudo install -D -m 644 ~/tv_thing/deploy/apache/apache2-front-door.conf /etc/systemd/system/apache2.service.d/tv-thing-front-door.conf
+sudo systemctl daemon-reload
+sudo systemctl stop tv-thing
+ss -ltnp 'sport = :8080'                      # only tailscale0's
+sudo systemctl enable --now tv-thing-feed
+sudo systemctl start tv-thing
+sudo systemctl restart apache2                 # the one full restart: new Listen lines
+curl -s http://127.0.0.1:8080/api/v1/status | head -c 200; curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1/tv/
+```
+
+Then bring VizelVision back and resume Up next, as in Phase 1. Its TV Thing base URL is unchanged (`:8080`).
+
+### The proof
+
+These are the drill rows that fail by design before the split, and must pass now:
+
+```bash
+~/tv_thing/scripts/restart_drill.py --command 'sudo systemctl restart tv-thing'      # A1
+~/tv_thing/scripts/restart_drill.py --command 'sudo systemctl kill -s KILL tv-thing' # A2
+```
+
+### Rollback
+
+It puts back today's single process. It reads the new state: the journal, `finish_as`, the Roku's navigation record.
+
+```bash
+sudo systemctl stop tv-thing tv-thing-feed
+sudo systemctl disable tv-thing-feed
+sudo a2dissite tv-thing-front-door
+sudo cp ~/viviserv-proxy.conf.before-split /etc/apache2/conf-available/viviserv-proxy.conf
+sudo systemctl restart apache2                 # frees :8080
+sudo cp ~/tv_thing/tv-thing.service /etc/systemd/system/tv-thing.service && sudo systemctl daemon-reload
+sudo systemctl start tv-thing                  # one process, binding :8080 itself
+```
+
+The all-in-one role (`TV_THING_ROLE` unset) keeps binding the LAN itself, as it always has, for the weeks the rollback stays possible.
