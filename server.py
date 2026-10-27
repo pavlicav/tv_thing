@@ -233,11 +233,10 @@ TV_MAX_DUPLICATED_FRAMES = int(os.environ.get(
 TV_MAX_UDP_OVERRUNS = int(os.environ.get(
     "TV_THING_MAX_UDP_OVERRUNS", "1"
 ))
-# Backward timestamps ffmpeg's muxer patched. RF 7 carries a stream on a second clock,
-# 6.4 h from the first (it shows ~12 s into every encoder, and ffmpeg usually copes). On
-# 2026-10-26 19:37 it set WJLA's audio chain off: 24,656 patched audio timestamps in
-# seconds, minutes of filler audio, and ~850 MiB the encoder kept afterwards. A fresh
-# encoder is clean. A healthy generation logs a few at its start.
+# Backward timestamps ffmpeg's muxer patched, one after another: a flood of filler audio
+# (as first_pts=0 made at every 5.1/stereo switch, below), or anything else that sends the
+# audio chain back in time. A fresh encoder is clean. A healthy generation logs a few at
+# its start.
 TV_MAX_NON_MONOTONOUS = int(os.environ.get(
     "TV_THING_MAX_NON_MONOTONOUS", "100"
 ))
@@ -1362,7 +1361,12 @@ def build_tv_packager_command(quality, encoder=None, stream_id="test",
         # unbounded number of duplicate frames.
         "-fps_mode", "passthrough",
         "-c:a", "aac", "-b:a", f"{preset['ab']}k", "-ac", "2",
-        "-af", "aresample=async=1000:first_pts=0",
+        # No first_pts: a station switching its AC-3 between 5.1 and stereo makes ffmpeg
+        # rebuild this filter, and with first_pts=0 the new one started at zero and filled
+        # the encoder's whole run with silence at once -- 24,656 patched audio timestamps
+        # and ~850 MiB kept on WJLA after 525 s (2026-10-26); reproduced offline, where
+        # without it a switch patches 1. async alone still corrects drift.
+        "-af", "aresample=async=1000",
         # A damaged/sparse AC-3 PES must not make the muxer queue video
         # indefinitely while waiting for an audio timestamp. Keep at most
         # half a second of A/V interleave skew and flush completed packets.

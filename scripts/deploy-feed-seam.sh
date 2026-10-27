@@ -11,9 +11,10 @@
 # RUNBOOK.md is the same deploy, by hand.
 #
 # 2026-10-26: production runs Phase 1 (c20c33a, run 3). Its production Roku gate failed on memory:
-# the antenna encoder held 866 MiB after RF 7 set off a flood of patched audio timestamps. This
-# run brings the antenna encoders' flood trip and memory ceiling (400 MiB); its gates run on
-# fresh encoders.
+# the antenna encoder held 866 MiB. A station switching its audio between 5.1 and stereo made
+# ffmpeg rebuild the audio filter, and with first_pts=0 it filled the encoder's whole run with
+# silence at once. This run drops first_pts from the antenna encoder, and adds a flood trip and a
+# memory ceiling (400 MiB) as backstops.
 #
 #   sudo bash /home/vivian/tv_thing-feed-seam/scripts/deploy-feed-seam.sh            # deploy
 #   bash /home/vivian/tv_thing-feed-seam/scripts/deploy-feed-seam.sh --check         # prechecks only

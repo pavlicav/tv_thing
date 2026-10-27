@@ -90,6 +90,15 @@ def test_vaapi_command_uploads_software_filtered_frames(monkeypatch):
     assert filters[-2:] == ["format=nv12", "hwupload"]
 
 
+def test_the_antenna_encoder_survives_a_5_1_to_stereo_switch():
+    """first_pts=0 made a rebuilt audio filter (ffmpeg rebuilds it when a station switches
+    AC-3 between 5.1 and stereo) start at zero and fill the encoder's whole run with silence
+    at once: 24,656 patched timestamps and ~850 MiB on WJLA, 2026-10-26."""
+    command = server.build_tv_packager_command("medium", {"codec": "libx264", "encoder_args": []})
+    assert option_value(command, "-af") == "aresample=async=1000"
+    assert "first_pts" not in " ".join(command)
+
+
 def test_direct_dvb_source_command_selects_requested_program(monkeypatch):
     monkeypatch.setattr(server, "TV_UDP_PORT", 18320)
     command = server.build_tv_source_command({
