@@ -2529,3 +2529,51 @@ def test_the_control_role_leaves_streams_to_the_feed_and_never_takes_a_silent_fe
     handler, sent = role_handler("/api/v1/tune", command="POST", body=body)
     handler.do_POST()
     assert sent["status"] == 503, handler.wfile.getvalue()
+
+
+def test_control_looks_up_internet_streams_for_the_feed_and_only_for_this_host(monkeypatch):
+    import internet_streams
+    streams = internet_streams.parse_streams({"streams": [
+        {"id": "pentulive", "name": "Pentulive", "resolver": "yle-areena", "program": "1-78104441"},
+        {"id": "gone", "name": "Gone", "resolver": "yle-areena", "program": "1-1"}]})
+    monkeypatch.setattr(server.web_streams, "streams", lambda: streams)
+
+    def resolve(stream, fetch=None):
+        if stream.id == "gone":
+            raise internet_streams.StreamUnavailable("Yle Areena will not play 1-1 here", status=403)
+        return "https://cdn.example/live/index.m3u8?hdnts=token"
+    monkeypatch.setattr(server.internet_streams, "resolve_stream", resolve)
+
+    def get(path, peer="127.0.0.1"):
+        handler, sent = role_handler(path, peer=peer)
+        handler.do_GET()
+        return sent["status"], json.loads(handler.wfile.getvalue())
+
+    monkeypatch.setattr(server, "ROLE", "control")
+    assert get("/internal/internet/pentulive/resolve") == (200, {"url": "https://cdn.example/live/index.m3u8?hdnts=token"})
+    assert get("/internal/internet/gone/resolve") == (403, {"error": "Yle Areena will not play 1-1 here"})
+    assert get("/internal/internet/nope/resolve")[0] == 404
+    assert get("/internal/elsewhere")[0] == 404
+    assert get("/internal/internet/pentulive/resolve", peer="192.168.1.50")[0] == 403, "the URL carries a token"
+    for role in ("all", "feed"):     # one process binds the LAN: it has no /internal/ at all
+        monkeypatch.setattr(server, "ROLE", role)
+        assert get("/internal/internet/pentulive/resolve")[0] == 404
+
+
+def test_the_feed_asks_control_for_a_looked_up_url_and_reads_a_fixed_one_itself(monkeypatch):
+    import internet_streams
+    streams = internet_streams.parse_streams({"streams": [
+        {"id": "pentulive", "name": "Pentulive", "resolver": "yle-areena", "program": "1-78104441"},
+        {"id": "cam", "name": "Cam", "resolver": "url", "url": "https://example.com/cam.m3u8"}]})
+    asked = []
+    monkeypatch.setattr(server.internet_streams, "resolve_through",
+                        lambda control, stream: asked.append((control, stream.id)) or "https://cdn/x")
+    monkeypatch.setattr(server, "ROLE", "feed")
+    assert server.resolve_internet_stream(streams["pentulive"]) == "https://cdn/x"
+    assert asked == [(server.CONTROL_URL, "pentulive")]
+    assert server.resolve_internet_stream(streams["cam"]) == "https://example.com/cam.m3u8"
+    assert len(asked) == 1, "a fixed URL starts with control down"
+    monkeypatch.setattr(server, "ROLE", "all")
+    monkeypatch.setattr(server.internet_streams, "resolve_stream", lambda stream: "https://in-process")
+    assert server.resolve_internet_stream(streams["pentulive"]) == "https://in-process"
+    assert len(asked) == 1

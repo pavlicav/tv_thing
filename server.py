@@ -751,9 +751,33 @@ channel_lineup = lineup.Lineup(LINEUP_FILE, LINEUP_STATE_FILE)
 
 
 def resolve_internet_stream(stream):
-    """Control's side of the internet relay: the playlist URL a stream plays now. The relay
-    (the feed's) asks for it here; split, it asks GET /internal/internet/<id>/resolve."""
+    """The playlist URL a stream plays now, for the relay (the feed's). Finding it is control's:
+    in one process it is found here; the feed role asks control's
+    GET /internal/internet/<id>/resolve (internal_resolve). A fixed URL is in the file the feed
+    reads itself, so it is never asked for: a fixed stream starts while control is down."""
+    if ROLE == "feed" and not internet_streams.RESOLVERS[stream.resolver].fixed:
+        return internet_streams.resolve_through(CONTROL_URL, stream)
     return internet_streams.resolve_stream(stream)
+
+
+def internal_resolve(stream_id):
+    """``(payload, status)`` for control's GET /internal/internet/<id>/resolve: the URL the
+    stream plays now (internet_streams.resolve_stream). The URL carries the CDN's token, so
+    this is never routed by Apache and answers this host only."""
+    try:
+        stream = web_streams.streams().get(stream_id)
+    except internet_streams.StreamConfigError as error:
+        return {"error": str(error)}, 500
+    if stream is None:
+        return {"error": f"No internet stream {stream_id!r}"}, 404
+    try:
+        return {"url": internet_streams.resolve_stream(stream)}, 200
+    except internet_streams.StreamUnavailable as error:
+        return {"error": str(error)}, error.status
+    except HTTPError as error:
+        return {"error": f"{stream.name}'s look-up answered {error.code}"}, 502
+    except (URLError, OSError, TimeoutError, ValueError) as error:
+        return {"error": f"{stream.name}'s look-up failed: {error}"}, 502
 
 
 web_streams = internet_streams.InternetStreams(
@@ -5307,9 +5331,22 @@ class TVHandler(SimpleHTTPRequestHandler):
     def _for_this_role(self):
         """Answer what this process does not serve; True when it was answered.
 
-        The feed serves /stream/ and, to this host only, /feed/v1/. Control serves the rest;
-        its /stream/ is the feed's (Apache routes it there)."""
+        The feed serves /stream/ and, to this host only, /feed/v1/. Control serves the rest,
+        and /internal/ to this host only; its /stream/ is the feed's (Apache routes it there)."""
         path = urlparse(self.path).path
+        if path.startswith("/internal/"):
+            # Control's, to the feed on this host (internal_resolve). One process binds the
+            # LAN and asks no one, so it has none.
+            if ROLE != "control":
+                self.send_json({"error": "Not found", "code": "control_only"}, 404)
+            elif not feed_api.loopback(self.client_address[0]):
+                self.send_json({"error": "Control's /internal/ answers only this host"}, 403)
+            else:
+                match = re.fullmatch(r"/internal/internet/([a-z0-9][a-z0-9-]*)/resolve", path)
+                payload, status = (internal_resolve(match.group(1)) if match and self.command == "GET"
+                                   else ({"error": "Not found"}, 404))
+                self.send_json(payload, status)
+            return True
         if ROLE == "feed":
             if path.startswith(feed_api.PREFIX):
                 feed_api.answer(self, feed_http)

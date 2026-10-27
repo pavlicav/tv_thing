@@ -11,9 +11,12 @@
 
 Finding the URL is the control plane's (``resolve_stream``, by ``RESOLVERS``);
 relaying it is the feed's (``InternetStreams``, which asks through its
-``resolver``). A resolver that fails while a good URL is in hand leaves that
-URL playing and is asked again a little later, so a relay keeps going while
-the resolving side is down or restarting.
+``resolver``). Split, the feed asks control's ``GET /internal/internet/<id>/resolve``
+(``resolve_through``); a fixed URL it reads from the file itself. A resolver that
+fails while a good URL is in hand leaves that URL playing and is asked again a
+little later, so a relay keeps going while the resolving side is down or
+restarting. A stream no one has played since the feed started cannot start
+until control answers.
 
 TV Thing relays the stream at ``/stream/internet/<id>/index.m3u8``: the
 master's renditions become ``0.m3u8``, ``1.m3u8``, ... and their segments
@@ -48,6 +51,7 @@ MAX_SEGMENT_BYTES = 64 * 1024 * 1024
 TIMEOUT_SECONDS = 5
 RESOLVE_SECONDS = 30 * 60      # How long a resolved URL is used before asking again.
 RESOLVE_RETRY_SECONDS = 30     # How long a URL kept past a failed look-up waits for the next.
+RESOLVE_THROUGH_SECONDS = 10   # How long the feed waits for control's look-up (Yle's is 5 s).
 MASTER_SECONDS = 5 * 60        # How long a master playlist is reused.
 LISTINGS_SECONDS = 60          # How long a stream's guide listings are reused.
 LISTINGS_STALE_SECONDS = 15 * 60   # How long the last good listings stand in when the URL fails.
@@ -198,6 +202,29 @@ def resolve_stream(stream, fetch=_fetch):
     """The playlist URL ``stream`` plays now, by its resolver: the control plane's side of
     the relay. Raises StreamUnavailable, or HTTPError/URLError/OSError from the lookup."""
     return RESOLVERS[stream.resolver].find(stream.params, fetch)
+
+
+def resolve_through(control_url, stream, timeout=RESOLVE_THROUGH_SECONDS):
+    """The playlist URL ``stream`` plays now, as control's resolve_stream finds it: the feed's
+    side of the relay when split. Raises StreamUnavailable, with control's status when it
+    refuses and 503 when it does not answer."""
+    url = f"{control_url.rstrip('/')}/internal/internet/{quote(stream.id, safe='')}/resolve"
+    request = Request(url, headers={"Accept": "application/json"})
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read(64 * 1024))["url"]
+    except HTTPError as error:
+        try:
+            message = json.loads(error.read(64 * 1024)).get("error")
+        except (OSError, ValueError, AttributeError):
+            message = None
+        raise StreamUnavailable(message or f"TV Thing's control answered {error.code} for "
+                                f"{stream.name}'s URL", status=error.code) from None
+    except (URLError, OSError, TimeoutError) as error:
+        raise StreamUnavailable(f"TV Thing's control is not answering, so {stream.name}'s URL "
+                                f"cannot be looked up: {error}", status=503) from None
+    except (KeyError, TypeError, ValueError):
+        raise StreamUnavailable(f"TV Thing's control gave no URL for {stream.name}") from None
 
 
 def _is_media(text):

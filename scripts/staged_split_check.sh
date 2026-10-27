@@ -47,6 +47,19 @@ ss -ltnH | awk '{print $4}' | grep -E ':1808[67]$' | grep -vq '^127\.0\.0\.1:' &
 
 relay() { curl -s --max-time 8 "$F/stream/internet/cabride/index.m3u8" | head -1; }
 [ "$(relay)" = "#EXTM3U" ] && pass "the feed relays an internet stream" || fail "relay: $(relay)"
+# A stream whose URL is looked up (Yle Areena): the feed asks control's /internal/ for it.
+# Skipped, not failed, when Yle has nothing live.
+yle() { curl -s --max-time 20 "$F/stream/internet/pentulive/index.m3u8" | head -1; }
+asked() { grep -c 'GET /internal/internet/pentulive/resolve' "$STAGE/control.log"; }
+YLE=0
+if [ "$(curl -s -o "$STAGE/resolve.json" -w '%{http_code}' --max-time 15 "$C/internal/internet/pentulive/resolve")" = 200 ]; then
+    YLE=1; before=$(asked)
+    [ "$(yle)" = "#EXTM3U" ] && [ "$(asked)" -gt "$before" ] \
+        && pass "the feed relays a looked-up stream, asking control's /internal/ for its URL" \
+        || fail "pentulive: $(yle), control asked $(asked) time(s)"
+else
+    echo "SKIP  pentulive: Yle Areena answered $(head -c 120 "$STAGE/resolve.json")"
+fi
 
 # --- the front door: a private Apache running the very routes production includes ----------
 mkdir -p "$APACHE_DIR"; M=/usr/lib/apache2/modules
@@ -91,7 +104,7 @@ segment=$(echo "$media" | grep -v '^#' | grep . | tail -1)
 printf '%s\n%s\n' "$master" "$media" | grep -qE ':1808[67]|127\.0\.0\.1|localhost' \
     && fail "a playlist names a backend (D4)" || pass "no playlist names a backend (D4)"
 codes=""
-for url in "$D/internal/resolve" "$D/feed/v1/lanes" "$T/tv/internal/resolve" "$T/tv/feed/v1/lanes"; do
+for url in "$D/internal/internet/pentulive/resolve" "$D/feed/v1/lanes" "$T/tv/internal/internet/pentulive/resolve" "$T/tv/feed/v1/lanes"; do
     codes="$codes $(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url")"
 done
 [ "$codes" = " 404 404 404 404" ] && pass "/internal/ and /feed/v1/ are never routed (D3)" || fail "D3:$codes"
@@ -109,6 +122,8 @@ sleep 0.5; apache graceful; sleep 1; apache graceful; wait "$LOOP"
 kill -9 "$CONTROL"; sleep 0.5
 ok=0; for _ in 1 2 3; do [ "$(relay)" = "#EXTM3U" ] && ok=$((ok + 1)); sleep 1; done
 [ $ok = 3 ] && pass "control killed: the relay keeps playing (3/3)" || fail "relay during control's death: $ok/3"
+[ "$YLE" = 1 ] && { [ "$(yle)" = "#EXTM3U" ] && pass "control killed: the looked-up stream plays on the URL in hand" \
+    || fail "control killed: pentulive $(yle)"; }
 answer=$(curl -s -o "$STAGE/d2.json" -w '%{http_code} %{content_type}' --max-time 5 "$D/api/v1/status")
 [ "$answer" = "503 application/json" ] && "$PY" -c "import json,sys; json.load(open(sys.argv[1]))" "$STAGE/d2.json" \
     && pass "control killed: /api/ through the front door is a JSON 503 (D2)" || fail "D2: $answer $(head -c 120 "$STAGE/d2.json")"

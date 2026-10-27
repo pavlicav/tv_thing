@@ -1,6 +1,8 @@
 """Internet streams: the config, the Yle Areena resolver and the relay."""
 import io
 import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError
 
 import pytest
@@ -274,3 +276,57 @@ def test_segment_paths_stay_below_their_playlist(relay):
 
 def test_no_config_file_means_no_streams(tmp_path):
     assert InternetStreams(tmp_path / "absent.json").streams() == {}
+
+
+def test_the_feed_reaches_controls_resolver_over_http(tmp_path):
+    """resolve_through: control's answer, its refusal with its status, and a control that does
+    not answer, which a relay with a URL in hand rides out."""
+    answers = {"pentulive": (200, {"url": "https://cdn.example/index.m3u8?hdnts=1"}),
+               "gone": (403, {"error": "Yle Areena will not play 1-1 here"}),
+               "odd": (200, {"nothing": True})}
+    paths = []
+
+    class Control(BaseHTTPRequestHandler):
+        def do_GET(self):
+            paths.append(self.path)
+            status, body = answers[self.path.split("/")[3]]
+            data = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Control)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    control = f"http://127.0.0.1:{httpd.server_address[1]}"
+    streams = parse_streams({"streams": [
+        {"id": name, "name": name.title(), "resolver": "yle-areena", "program": "1-1"}
+        for name in ("pentulive", "gone", "odd")]})
+    try:
+        assert internet_streams.resolve_through(control, streams["pentulive"]) == answers["pentulive"][1]["url"]
+        assert paths == ["/internal/internet/pentulive/resolve"]
+        with pytest.raises(StreamUnavailable, match="will not play") as refused:
+            internet_streams.resolve_through(control, streams["gone"])
+        assert refused.value.status == 403
+        with pytest.raises(StreamUnavailable, match="no URL"):
+            internet_streams.resolve_through(control, streams["odd"])
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+    with pytest.raises(StreamUnavailable, match="not answering") as down:
+        internet_streams.resolve_through(control, streams["pentulive"], timeout=1)
+    assert down.value.status == 503
+
+    # A relay that already holds a URL keeps it through control's absence.
+    config = tmp_path / "internet_streams.json"
+    config.write_text(json.dumps({"streams": [
+        {"id": "pentulive", "name": "Pentulive", "resolver": "yle-areena", "program": "1-1"}]}))
+    clock = [0.0]
+    relay = InternetStreams(config, clock=lambda: clock[0],
+                            resolver=lambda stream: internet_streams.resolve_through(control, stream, timeout=1))
+    relay._resolved["pentulive"] = ("https://cdn.example/index.m3u8?hdnts=1", 0.0, None)
+    clock[0] += internet_streams.RESOLVE_SECONDS + 1
+    assert relay._resolve(relay.streams()["pentulive"]) == "https://cdn.example/index.m3u8?hdnts=1"

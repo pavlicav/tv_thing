@@ -8,7 +8,9 @@ fields may appear; clients must ignore fields they do not understand.
 ## Addressing and streams
 
 Configure an application base ending in `/`: `http://viviserv/tv/` through
-Apache, or `http://127.0.0.1:8080/` directly. Resolve `stream.playback[].url`
+Apache, or `http://127.0.0.1:8080/` directly. Two prefixes are private to the host and
+answer **404** through either base: `/feed/v1/`, the feed's API to control, and
+`/internal/`, control's to the feed. Resolve `stream.playback[].url`
 against that base, **not against the API endpoint**. Legacy `playlist_path`
 remains root-relative for old direct clients. Never hard-code MediaMTX ports
 or manufacture a playlist URL from a channel identifier.
@@ -107,6 +109,13 @@ no lock and no encoder, and any number of players (VizelVision included) may
 use it. Errors are JSON: **404** for an unknown stream or rendition, **503** when
 the programme is not live, **502** when upstream fails, **403** when Yle
 refuses to play it here.
+
+When TV Thing runs as two services (the feed and control, INVARIANTS.md), the feed
+relays and control looks up the URL. The feed asks control's
+`GET /internal/internet/{id}/resolve` (`{"url": ...}`, or control's error and
+status) and keeps the last good URL while control is down. A stream no one has
+played since the feed started answers **503** until control is back. A fixed
+`url` stream is read from the file and never asked for.
 
 A stream may name a listings URL as `guide`: JSON `{"events": [{"start", "duration",
 "title", "description"}]}` (Unix seconds). TV Thing reads it at most once a minute
