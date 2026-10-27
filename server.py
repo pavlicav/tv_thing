@@ -33,6 +33,7 @@ from zoneinfo import ZoneInfo
 import analog_tuner
 import atsc_scan
 import epg
+import feed_api
 import feed_node
 import internet_streams
 import lineup
@@ -286,6 +287,14 @@ TV_HEALTH_POLL_SECONDS = float(os.environ.get(
 # which also keeps each lane's revision and lifecycle and the feed's epoch.
 # The code below still knows these three lanes by name.
 # ---------------------------------------------------------------------------
+# Which process this is (Phase 2 of the split, INVARIANTS.md). "all" runs everything in one
+# process, as before the split. "feed" (feed_server.py) holds the hardware and the streams and
+# serves /stream/ and /feed/v1/. "control" runs the API, the UI and the policy, and reaches
+# the feed only through RemoteFeed.
+ROLE = os.environ.get("TV_THING_ROLE", "all")
+if ROLE not in ("all", "feed", "control"):
+    raise SystemExit(f"TV_THING_ROLE must be all, feed or control, not {ROLE!r}")
+FEED_URL = os.environ.get("TV_THING_FEED_URL", "http://127.0.0.1:8086/")
 FEED_CONFIG_FILE = Path(os.environ.get(
     "TV_THING_FEED_CONFIG", str(BASE_DIR / "feed.json")
 ))
@@ -338,7 +347,10 @@ lanes = {name: new_lane_state() for name in ALL_LANES}
 feed = feed_node.FeedNode(FEED_CONFIG)
 # The control plane's only way to the feed: its lanes' state, and every change to them.
 # In one process it calls the functions below; split, it speaks HTTP (see INVARIANTS.md).
-feed_client = feed_node.LocalFeed(feed, sys.modules[__name__])
+feed_client = (feed_api.RemoteFeed(FEED_URL, FEED_CONFIG, new_lane_state) if ROLE == "control"
+               else feed_node.LocalFeed(feed, sys.modules[__name__]))
+# The feed's /feed/v1/, which RemoteFeed asks (the feed role only).
+feed_http = feed_api.FeedAPI(feed_client) if ROLE == "feed" else None
 tuning_lanes = set()
 
 # Per-lane child processes. Keys are "<lane>_<role>".
@@ -1861,8 +1873,10 @@ ROKU_RESTART_BACKOFF = (2, 5, 10, 30)
 # A capture that has run this long is steady: its failures are forgotten.
 ROKU_STEADY_SECONDS = 60
 
-# Built in main() from roku.json; None when the lane is not configured.
+# Built in main() from roku.json; None when the lane is not configured. The capture needs only
+# roku.json's feedback section (the HD PVR, its input), which the feed role loads on its own.
 roku = None
+roku_feedback = None
 roku_wakeup = threading.Event()
 # Replaced wholesale, never mutated, so roku_lane can read it without the
 # server mutex (it calls back from threads that may already hold its own).
@@ -1888,7 +1902,7 @@ def roku_capture_source():
 
 
 def roku_device():
-    return roku.config.feedback.device if roku is not None else None
+    return roku_feedback.device if roku_feedback is not None else None
 
 
 def build_roku_capture_command(device, stream_id, tap_port=ROKU_TAP_PORT):
@@ -1938,7 +1952,7 @@ def select_roku_input(device, input_index):
 def start_roku_capture():
     """Start a fresh capture generation. Returns (ok, error)."""
     global roku_capture_state
-    if roku is None:
+    if roku_feedback is None:
         return False, "The Roku lane is not configured"
     if shutting_down.is_set():
         return False, "The server is shutting down"
@@ -1951,7 +1965,7 @@ def start_roku_capture():
         clear_streams(LANE_FILES[LANE_ROKU])
         reset_lane(LANE_ROKU, "starting")
         lanes[LANE_ROKU]["started_at"] = time.time()
-    select_roku_input(device, roku.config.feedback.input_index)
+    select_roku_input(device, roku_feedback.input_index)
     health = new_stream_health(stream_id)
     try:
         capture = subprocess.Popen(
@@ -1972,7 +1986,7 @@ def start_roku_capture():
             "health": health,
             "video_encoder": "copy",
             "tuner": {"device": device,
-                      "name": roku.config.feedback.source_name},
+                      "name": roku_feedback.source_name},
         })
         roku_capture_state = {"running": True, "stream_id": stream_id,
                               "error": None,
@@ -2035,7 +2049,7 @@ def roku_keeper():
         roku_wakeup.clear()
         if shutting_down.is_set():
             return
-        if roku is None:
+        if roku_feedback is None:
             continue
         try:
             if lane_is_running(LANE_ROKU):
@@ -3663,9 +3677,22 @@ def recover_recordings():
     now = time.time()
     leftovers = []
     stale_tokens = []
+    writing = set()
+    if ROLE == "control":
+        # Split, a restart of control leaves the feed's recorders running. Anything one is
+        # still writing is left exactly as it is (adopting it is the next step of Phase 2).
+        try:
+            writing = {view["part"] for view in feed_client.live_recorders()}
+        except OSError as error:
+            print(f"VCR: the feed did not say what it is recording ({error}); "
+                  "leaving every recording as it is")
+            return
     with lock:
         for timer in recording_state()["timers"]:
             if timer["status"] not in ("recording", "finishing"):
+                continue
+            if timer.get("part") and str(timer["part"]) in writing:
+                print(f"VCR: {timer.get('title') or timer['id']} is still recording in the feed")
                 continue
             part = timer.pop("part", None)
             token = timer.pop("lock_token", None)
@@ -4105,7 +4132,11 @@ SLIDE_PAGES = {"sports-guide": {"page_path": "sports-guide.html", "data_path": "
 # for its playlist until SLIDES_IDLE_SECONDS after the last. Measured on
 # viviserv (2026-10-19): about 11% of a core to draw, 33% to encode, 0.6 Mbit/s;
 # with the music (2026-10-21, outside the server) 12% and 45%.
-HTTP_PORT = int(os.environ.get("PORT", 8080))
+HTTP_PORT = int(os.environ.get("PORT", {"feed": 8086, "control": 8087}.get(ROLE, 8080)))
+# Where the Sports Guide renderer reads its slides: control's API (the feed role's renderer
+# asks across the split).
+CONTROL_URL = os.environ.get("TV_THING_CONTROL_URL",
+                             f"http://127.0.0.1:{8087 if ROLE == 'feed' else HTTP_PORT}")
 SLIDES_IDLE_SECONDS = float(os.environ.get("TV_THING_SLIDES_IDLE_SECONDS", "60"))
 SLIDES_START_TIMEOUT = float(os.environ.get("TV_THING_SLIDES_START_TIMEOUT", "8"))
 SLIDE_FPS = 30
@@ -4174,7 +4205,7 @@ def build_sports_guide_command(generation, directory, now=None):
 
 def sports_guide_renderer_command():
     return [sys.executable, str(BASE_DIR / "sports_guide_video.py"),
-            "--url", f"http://127.0.0.1:{HTTP_PORT}/api/v1/sports-guide",
+            "--url", f"{CONTROL_URL}/api/v1/sports-guide",
             "--fps", str(SLIDE_FPS)]
 
 
@@ -5176,6 +5207,46 @@ def api_v1_stop(body):
 
 class TVHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
+        if not self._for_this_role():
+            try:
+                self._get()
+            except feed_api.FeedUnavailable as error:
+                self._feed_unavailable(error)
+
+    def do_POST(self):
+        if not self._for_this_role():
+            try:
+                self._post()
+            except feed_api.FeedUnavailable as error:
+                self._feed_unavailable(error)
+
+    def _for_this_role(self):
+        """Answer what this process does not serve; True when it was answered.
+
+        The feed serves /stream/ and, to this host only, /feed/v1/. Control serves the rest;
+        its /stream/ is the feed's (Apache routes it there)."""
+        path = urlparse(self.path).path
+        if ROLE == "feed":
+            if path.startswith(feed_api.PREFIX):
+                feed_api.answer(self, feed_http)
+                return True
+            if not path.startswith("/stream/"):
+                self.send_json({"error": "This is TV Thing's feed; the API is control's",
+                                "code": "feed_only"}, 404)
+                return True
+        elif ROLE == "control" and path.startswith("/stream/"):
+            self.send_json({"error": "Streams are served by TV Thing's feed", "code": "control_only"}, 404)
+            return True
+        return False
+
+    def _feed_unavailable(self, error):
+        payload, status = api_v1_error(f"TV Thing's feed is not answering: {error}", 503, "feed_unavailable")
+        try:
+            self.send_json(payload, status)
+        except OSError:
+            pass
+
+    def _get(self):
         parsed = urlparse(self.path)
         path = parsed.path
 
@@ -5672,7 +5743,7 @@ class TVHandler(SimpleHTTPRequestHandler):
 
         self.send_error(404)
 
-    def do_POST(self):
+    def _post(self):
         parsed = urlparse(self.path)
 
         if parsed.path == "/api/v1/tune":
@@ -6319,6 +6390,8 @@ class TVHandler(SimpleHTTPRequestHandler):
             pass
 
     def log_message(self, format, *args):
+        if args and feed_api.PREFIX in str(args[0]):
+            return                      # RemoteFeed asks twice a second
         print(f"[HTTP] {args[0]}" if args else "")
 
 
@@ -6582,11 +6655,14 @@ def watch_host(server_factory, servers, bound, preferred, include_loopback,
 
 
 def start_roku_lane():
-    """Build the Roku lane from roku.json and keep its capture running."""
-    global roku
+    """Build the Roku lane from roku.json and, in one process, keep its capture running.
+    Split, control navigates (its capture is the feed's, read through the feed client)."""
+    global roku, roku_feedback
+    capture_source = (roku_capture_source if ROLE == "all"
+                      else lambda: feed_client.capture_source(LANE_ROKU))
     try:
         roku = roku_lane.load(ROKU_CONFIG_FILE,
-                              capture_source=roku_capture_source,
+                              capture_source=capture_source,
                               record=feed_node.LaneRecord(feed_client, LANE_ROKU),
                               reuse_max_age=ROKU_REUSE_MAX_AGE)
     except RokuStreamError as error:
@@ -6596,7 +6672,26 @@ def start_roku_lane():
     if roku is None:
         print(f"Roku lane not configured ({ROKU_CONFIG_FILE})")
         return
+    roku_feedback = roku.config.feedback
     print(f"Roku lane: {roku.ecp.base_url} via {roku_device()}")
+    if ROLE == "all":
+        threading.Thread(target=roku_keeper, daemon=True).start()
+        roku_wakeup.set()
+
+
+def start_roku_capture_lane():
+    """The feed role's half of the Roku lane: keep the HD PVR's capture running."""
+    global roku_feedback
+    from roku_control.config import load_config
+    if not ROKU_CONFIG_FILE.is_file():
+        print(f"Roku capture not configured ({ROKU_CONFIG_FILE})")
+        return
+    try:
+        roku_feedback = load_config(ROKU_CONFIG_FILE).feedback
+    except RokuStreamError as error:
+        print(f"Roku capture disabled: {error}")
+        return
+    print(f"Roku capture: {roku_device()}")
     threading.Thread(target=roku_keeper, daemon=True).start()
     roku_wakeup.set()
 
@@ -6615,13 +6710,17 @@ def main():
     # a killed server as a successful run and never brought it back.
     signal.signal(signal.SIGTERM, request_shutdown)
     signal.signal(signal.SIGINT, request_shutdown)
-    reap_orphaned_children()
+    # Only a process that holds the hardware reaps, clears the streams, and stops them on the
+    # way out. Control does none of it: its restart must leave every feed as it is.
+    owns_feed = ROLE in ("all", "feed")
     STREAMS_DIR.mkdir(exist_ok=True)
-    for lane_files in LANE_FILES.values():
-        clear_streams(lane_files)
-    clear_streams((LEGACY_PLAYLIST.split(".")[0],))
-    for stream in SLIDE_STREAMS.values():
-        stream.clear()
+    if owns_feed:
+        reap_orphaned_children()
+        for lane_files in LANE_FILES.values():
+            clear_streams(lane_files)
+        clear_streams((LEGACY_PLAYLIST.split(".")[0],))
+        for stream in SLIDE_STREAMS.values():
+            stream.clear()
 
     class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
         daemon_threads = True
@@ -6629,14 +6728,15 @@ def main():
 
     preferred = os.environ.get("TV_THING_BIND", "")
     include_loopback = os.environ.get("TV_THING_BIND_LOOPBACK", "1") != "0"
-    port = int(os.environ.get("PORT", 8080))
+    port = HTTP_PORT
 
     def server_factory(address):
         return ThreadedHTTPServer(address, TVHandler)
 
-    servers, bound, failures = open_listeners(
-        server_factory, bind_candidates(preferred, include_loopback), port,
-    )
+    # Split, both processes listen on loopback only, and never pick up the LAN: the front
+    # door (Apache) owns :8080, and /feed/v1/ must never be reachable from the LAN.
+    candidates = bind_candidates(preferred, include_loopback) if ROLE == "all" else [LOOPBACK]
+    servers, bound, failures = open_listeners(server_factory, candidates, port)
     if not servers:
         for failure in failures:
             print(f"Could not bind {failure}", file=sys.stderr)
@@ -6644,27 +6744,32 @@ def main():
     for failure in failures:
         print(f"Skipped {failure}", file=sys.stderr)
     print(
-        "TV Thing server running on "
+        f"TV Thing {'server' if ROLE == 'all' else ROLE} running on "
         + ", ".join(f"http://{address}:{port}" for address in bound)
+        + (f" (feed at {FEED_URL})" if ROLE == "control" else "")
     )
 
-    channels = load_channels()
-    print(f"Loaded {len(channels)} channels")
+    if ROLE != "feed":
+        channels = load_channels()
+        print(f"Loaded {len(channels)} channels")
 
-    tuner_locks.update(load_tuner_locks())
-    for _lane, _entry in tuner_locks.items():
-        print(f"Restored {_lane} tuner lock held by {_entry['owner']}, "
-              f"{max(0, round(_entry['expires_at'] - time.time()) // 60)} "
-              "minutes left")
-    recover_recordings()
-    start_roku_lane()
-    threading.Thread(target=always_on_worker, daemon=True).start()
-    threading.Thread(target=guide_worker, daemon=True).start()
-    threading.Thread(target=yttv_guide_worker, daemon=True).start()
-    threading.Thread(target=recording_worker, daemon=True).start()
-    threading.Thread(target=recorder_keeper, daemon=True).start()
-    threading.Thread(target=slides_worker, daemon=True).start()
-    if ALWAYS_ON:
+        tuner_locks.update(load_tuner_locks())
+        for _lane, _entry in tuner_locks.items():
+            print(f"Restored {_lane} tuner lock held by {_entry['owner']}, "
+                  f"{max(0, round(_entry['expires_at'] - time.time()) // 60)} "
+                  "minutes left")
+        recover_recordings()
+        start_roku_lane()
+        threading.Thread(target=always_on_worker, daemon=True).start()
+        threading.Thread(target=guide_worker, daemon=True).start()
+        threading.Thread(target=yttv_guide_worker, daemon=True).start()
+        threading.Thread(target=recording_worker, daemon=True).start()
+    if owns_feed:
+        if ROLE == "feed":
+            start_roku_capture_lane()
+        threading.Thread(target=recorder_keeper, daemon=True).start()
+        threading.Thread(target=slides_worker, daemon=True).start()
+    if ALWAYS_ON and ROLE != "feed":
         always_on_wakeup.set()
 
     # Every extra listener runs in its own thread; the first stays on the
@@ -6672,12 +6777,13 @@ def main():
     for extra in servers[1:]:
         threading.Thread(target=extra.serve_forever, daemon=True).start()
     host_watch_stopping = threading.Event()
-    threading.Thread(
-        target=watch_host,
-        args=(server_factory, servers, bound, preferred, include_loopback,
-              port, host_watch_stopping, failures),
-        daemon=True,
-    ).start()
+    if ROLE == "all":
+        threading.Thread(
+            target=watch_host,
+            args=(server_factory, servers, bound, preferred, include_loopback,
+                  port, host_watch_stopping, failures),
+            daemon=True,
+        ).start()
 
     try:
         servers[0].serve_forever()
@@ -6686,10 +6792,11 @@ def main():
     finally:
         host_watch_stopping.set()
         shutting_down.set()
-        shutdown_recording()
-        stop_all()
-        for stream in SLIDE_STREAMS.values():
-            stream.stop("server shutting down")
+        if owns_feed:
+            shutdown_recording()
+            stop_all()
+            for stream in SLIDE_STREAMS.values():
+                stream.stop("server shutting down")
         if roku is not None:
             roku.feedback.close()
         for server in list(servers):

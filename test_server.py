@@ -2274,6 +2274,8 @@ def test_roku_capture_source_is_read_without_the_server_mutex(monkeypatch):
 def test_a_stopping_server_never_restarts_the_roku_capture(monkeypatch):
     started = []
     monkeypatch.setattr(server, "roku", object())
+    monkeypatch.setattr(server, "roku_feedback", __import__("types").SimpleNamespace(
+        device="/dev/null", input_index=None, source_name="Roku"))
     monkeypatch.setattr(server.subprocess, "Popen",
                         lambda *a, **k: started.append(a) or (_ for _ in ()).throw(OSError("no")))
     monkeypatch.setattr(server, "shutting_down", __import__("threading").Event())
@@ -2309,6 +2311,8 @@ def test_the_roku_keeper_backs_off_captures_that_die_young(monkeypatch, lifecycl
         return True, None
 
     monkeypatch.setattr(server, "roku", object())
+    monkeypatch.setattr(server, "roku_feedback", __import__("types").SimpleNamespace(
+        device="/dev/null", input_index=None, source_name="Roku"))
     monkeypatch.setattr(server, "roku_wakeup", Awake())
     monkeypatch.setattr(server, "shutting_down", stopping)
     monkeypatch.setattr(server, "lane_is_running", lambda lane: False)
@@ -2473,3 +2477,55 @@ def test_the_reaper_kills_orphans_but_never_another_services(tmp_path):
     killed = []
     assert sorted(server.reap_orphaned_children(proc, kill=lambda pid, sig: killed.append(pid))) == [101, 102]
     assert sorted(killed) == [101, 102]
+
+
+# -- the roles of the split (Phase 2): feed_server.py and control ------------------------------
+
+def role_handler(path, command="GET", peer="127.0.0.1", body=b""):
+    handler = server.TVHandler.__new__(server.TVHandler)
+    handler.path, handler.command, handler.client_address = path, command, (peer, 5555)
+    handler.headers = {"Content-Length": str(len(body)), "Content-Type": "application/json"}
+    handler.rfile, handler.wfile = BytesIO(body), BytesIO()
+    sent = {}
+    handler.send_response = lambda status, *a: sent.setdefault("status", status)
+    handler.send_header = lambda *a: None
+    handler.end_headers = lambda: None
+    return handler, sent
+
+
+def test_the_feed_role_serves_its_api_to_this_host_and_nothing_of_controls(monkeypatch):
+    import feed_api
+    monkeypatch.setattr(server, "ROLE", "feed")
+    monkeypatch.setattr(server, "feed_http", feed_api.FeedAPI(server.feed_client))
+    handler, sent = role_handler("/feed/v1/lanes")
+    handler.do_GET()
+    snapshot = json.loads(handler.wfile.getvalue())
+    assert sent["status"] == 200 and snapshot["feed_epoch"] == server.feed.epoch
+    assert set(snapshot["lanes"]) == {"digital", "analog", "roku"}
+    handler, sent = role_handler("/feed/v1/lanes", peer="10.0.0.50")
+    handler.do_GET()
+    assert sent["status"] == 403, "never to the LAN"
+    handler, sent = role_handler("/api/v1/status")
+    handler.do_GET()
+    assert sent["status"] == 404 and b"feed_only" in handler.wfile.getvalue()
+
+
+def test_the_control_role_leaves_streams_to_the_feed_and_never_takes_a_silent_feed_for_free(monkeypatch):
+    import feed_api
+    monkeypatch.setattr(server, "ROLE", "control")
+    handler, sent = role_handler("/stream/digital.m3u8")
+    handler.do_GET()
+    assert sent["status"] == 404 and b"control_only" in handler.wfile.getvalue()
+    silent = feed_api.RemoteFeed("http://127.0.0.1:9/", server.FEED_CONFIG, server.new_lane_state, timeout=0.3)
+    monkeypatch.setattr(server, "feed_client", silent)
+    handler, sent = role_handler("/api/v1/status")
+    handler.do_GET()
+    status = json.loads(handler.wfile.getvalue())
+    assert sent["status"] == 200
+    assert all(lane["lifecycle"] == "unknown" for lane in status["lanes"].values())
+    assert all(front["busy"] for front in status["frontends"]), "a silent feed's tuners are never free"
+    channel = server.load_channels()[0]["id"]
+    body = json.dumps({"source": "digital", "channel_id": channel}).encode()
+    handler, sent = role_handler("/api/v1/tune", command="POST", body=body)
+    handler.do_POST()
+    assert sent["status"] == 503, handler.wfile.getvalue()

@@ -276,6 +276,7 @@ class RemoteFeed:
             lanes[lane.id] = {**self.blank_state(), **copy.deepcopy(known),
                               # Never free: a lane the feed cannot vouch for is busy and broken.
                               "running": True, "alive": False, "ready": False, "lifecycle": "unknown",
+                              "revision": known.get("revision"),
                               "navigating": bool(known.get("navigating")), "unknown": True,
                               "error": "the feed is not answering"}
         return {"node": (last or {}).get("node", self.config.node), "feed_epoch": (last or {}).get("feed_epoch"),
