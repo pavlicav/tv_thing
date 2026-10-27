@@ -351,12 +351,36 @@ class LocalFeed:
     def primary_video_lane(self):
         return self.ops.primary_video_lane
 
+    def capture_source(self, lane):
+        """{running, stream_id, error, tap_url} of a lane's capture (the Roku's), lock-free."""
+        source = getattr(self.ops, "roku_capture_source", None)
+        return source() if source is not None and lane == getattr(self.ops, "LANE_ROKU", "roku") \
+            else {"running": False, "stream_id": None, "error": None, "tap_url": None}
+
+    def snapshot(self):
+        """Everything control reads, in one document (GET /feed/v1/lanes)."""
+        status = self.node.status()
+        return {"node": status["node"], "feed_epoch": status["feed_epoch"],
+                "lanes": {lane.id: self.lane(lane.id) for lane in self.node.config.lanes},
+                "running": self.running_lanes(), "primary_video_lane": self.primary_video_lane(),
+                "slides": self.slides() if hasattr(self.ops, "SLIDE_STREAMS") else {},
+                "capture": {"roku": self.capture_source("roku")},
+                "navigation": {lane.id: self.node.navigation(lane.id) for lane in self.node.config.lanes}}
+
     # -- commands ------------------------------------------------------------------
-    def _command(self, lane, action):
+    def _command(self, lane, action, op_id=None, expected=None):
         """Run one change to a lane as a feed command. Under server.py's lock first, then
-        the feed's: one lock order everywhere. A Conflict (the lane moved on between the
-        read and the command) is re-read and tried once more, with a new op_id."""
+        the feed's: one lock order everywhere.
+
+        With an ``op_id`` (from RemoteFeed), it runs once, at ``expected`` (epoch, revision)
+        or at the lane's current state if none was given; a retry of the same op_id gets the
+        first answer, and a stale ``expected`` is a Conflict for the caller. Without one, a
+        Conflict (the lane moved on between the read and the command) is re-read and tried
+        once more, with a new op_id."""
         with self.ops.lock:
+            if op_id is not None:
+                return self.node.command(op_id, lane, tuple(expected) if expected else
+                                         self.node.precondition(lane), action)
             for attempt in (1, 2):
                 try:
                     return self.node.command(secrets.token_hex(8), lane, self.node.precondition(lane), action)
@@ -364,7 +388,7 @@ class LocalFeed:
                     if attempt == 2:
                         raise
 
-    def tune_digital(self, channel, quality, taps=()):
+    def tune_digital(self, channel, quality, taps=(), op_id=None, expected=None):
         """(ok, error, stream reused) for a fresh digital generation on this channel,
         also feeding these recording tap ports."""
         def tune():
@@ -373,19 +397,19 @@ class LocalFeed:
             if not ok:
                 self.ops.lanes[self.ops.LANE_DIGITAL]["error"] = error or "Failed to tune"
             return ok, error, reused
-        return self._command(self.ops.LANE_DIGITAL, tune)
+        return self._command(self.ops.LANE_DIGITAL, tune, op_id, expected)
 
-    def tune_analog(self, channel, quality):
+    def tune_analog(self, channel, quality, op_id=None, expected=None):
         """(ok, error, tuner) for a fresh analog generation on this cable channel."""
         def tune():
             ok, error, tuner = self.ops.start_analog(channel, quality)
             if not ok:
                 self.ops.lanes[self.ops.LANE_ANALOG]["error"] = error or "Failed to tune"
             return ok, error, tuner
-        return self._command(self.ops.LANE_ANALOG, tune)
+        return self._command(self.ops.LANE_ANALOG, tune, op_id, expected)
 
-    def stop(self, lane):
-        return self._command(lane, lambda: self.ops.stop_lane(lane))
+    def stop(self, lane, op_id=None, expected=None):
+        return self._command(lane, lambda: self.ops.stop_lane(lane), op_id, expected)
 
     def stop_all(self):
         for lane in self.node.config.lanes:
@@ -404,6 +428,10 @@ class LocalFeed:
     def recorder(self, rec_id):
         """{alive, returncode, ended, overruns, part, until}, or None."""
         return self.ops.recorders.view(rec_id)
+
+    def live_recorders(self):
+        """The views of every recorder still writing."""
+        return [view for view in map(self.ops.recorders.view, self.ops.recorders.live()) if view]
 
     # -- front-end operations --------------------------------------------------------
     # A device measured rather than streamed: a scan, the signal meter, a guide read.
