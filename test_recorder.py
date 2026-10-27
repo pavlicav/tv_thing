@@ -3,7 +3,9 @@ lifecycle with simulated processes. Nothing here touches the tuner."""
 
 import json
 import shutil
+import signal
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -179,6 +181,32 @@ def test_a_live_copy_only_copies_and_stops_through_stdin():
     assert "-vf" not in command and "-c:v" not in command
     assert command[-3:] == ["-f", "mpegts", "/x/a.ts.part"]
 
+
+def test_a_recorder_outlives_the_thread_that_asked_for_it():
+    # Split, the feed starts a recorder from the thread answering control's request, and
+    # that thread ends at once. The recorder's death signal follows the thread that forks
+    # it, so one forked there died within the second (the 2026-10-27 candidate gate).
+    def from_a_passing_thread(spawn):
+        started = []
+        asker = threading.Thread(target=lambda: started.append(spawn(["sleep", "30"])))
+        asker.start()
+        asker.join()
+        return started[0]
+
+    forked_there = from_a_passing_thread(
+        lambda command: subprocess.Popen(command, preexec_fn=server._recorder_preexec))
+    spawned = from_a_passing_thread(server._spawn_recorder)
+    try:
+        assert forked_there.wait(timeout=5) == -signal.SIGTERM, "the death signal follows the thread"
+        time.sleep(0.3)
+        assert spawned.poll() is None, "the spawner's recorder lives on"
+    finally:
+        for proc in (spawned, forked_there):
+            if proc.poll() is None:
+                proc.kill()
+            proc.communicate()
+    with pytest.raises(OSError):
+        server._spawn_recorder(["/nonexistent/ffmpeg"])
 
 def test_broadcast_decoders_refuse_impossible_picture_sizes():
     # A corrupt MPEG-2 sequence header once claimed a ~16k x 16k picture and

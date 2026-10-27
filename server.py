@@ -9,6 +9,7 @@ import resource
 import shutil
 import json
 import os
+import queue
 import re
 import secrets
 import select
@@ -2327,7 +2328,8 @@ def roku_calibrate(body):
 # port that a dedicated ffmpeg encodes into the DLNA library. Live viewers
 # keep watching -- they simply see what is being taped.
 #
-# One thread, recording_worker(), starts and stops every recorder process.
+# One thread, recording_worker(), starts and stops every recorder process
+# (split, it asks the feed, whose _recorder_spawner() starts each one).
 # HTTP handlers only edit the schedule and wake it, so nothing that can block
 # (tuning, preempting a guide refresh, remuxing) ever runs while a request
 # holds the server mutex. See recorder.py for how the file is encoded.
@@ -2502,9 +2504,10 @@ def _recorder_preexec():
     16 MB soft cap. And ties it to the server's life: ffmpeg reading a UDP
     tap waits forever for packets, so a recorder orphaned by a crashed or
     killed server outside systemd -- a staging gate, say -- would otherwise
-    run unbounded. The death signal follows the spawning *thread*; recorders
-    are only started from recording_worker(), which lives as long as the
-    process, and the remux runs synchronously in its own thread.
+    run unbounded. The death signal follows the spawning *thread*, not the
+    process, so recorders are only started from _recorder_spawner(), which
+    lives as long as the process; the remux runs synchronously in its
+    caller's thread, which outlives it.
     """
     _soft, hard = resource.getrlimit(resource.RLIMIT_FSIZE)
     ceiling = RECORDING_MAX_BYTES if hard == resource.RLIM_INFINITY \
@@ -3197,12 +3200,43 @@ def recorder_alive(current):
     return view is not None and view["alive"]
 
 
+_spawn_requests = None           # _recorder_spawner()'s queue, made on first use
+_spawn_requests_lock = threading.Lock()
+
+
 def _spawn_recorder(cmd):
-    return subprocess.Popen(
-        cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE, text=True,
-        preexec_fn=_recorder_preexec,
-    )
+    """Start a recorder process from _recorder_spawner() and return it.
+
+    Whichever thread asks may end at once -- in the split, the feed starts a
+    recorder from the thread answering control's /feed/v1/ request -- and the
+    recorder's death signal (_recorder_preexec) would end it with that thread.
+    """
+    global _spawn_requests
+    with _spawn_requests_lock:
+        if _spawn_requests is None:
+            _spawn_requests = queue.Queue()
+            threading.Thread(target=_recorder_spawner, args=(_spawn_requests,),
+                             name="recorder-spawner", daemon=True).start()
+    reply = queue.Queue(maxsize=1)
+    _spawn_requests.put((cmd, reply))
+    proc, error = reply.get()
+    if error is not None:
+        raise error
+    return proc
+
+
+def _recorder_spawner(requests):
+    """The one thread that starts recorders; it lives as long as the process."""
+    while True:
+        cmd, reply = requests.get()
+        try:
+            reply.put((subprocess.Popen(
+                cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE, text=True,
+                preexec_fn=_recorder_preexec,
+            ), None))
+        except Exception as error:   # noqa: BLE001 - the caller raises it
+            reply.put((None, error))
 
 
 def _tend_live_copy(current):

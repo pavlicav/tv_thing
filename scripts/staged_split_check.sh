@@ -47,6 +47,19 @@ ss -ltnH | awk '{print $4}' | grep -E ':1808[67]$' | grep -vq '^127\.0\.0\.1:' &
 
 relay() { curl -s --max-time 8 "$F/stream/internet/cabride/index.m3u8" | head -1; }
 [ "$(relay)" = "#EXTM3U" ] && pass "the feed relays an internet stream" || fail "relay: $(relay)"
+# The VCR's recorder, started the way control starts one: through /feed/v1/, from the thread
+# answering that request. It must outlive the request (its death signal once followed that
+# thread). Its UDP tap gets no packets, so ffmpeg only waits; the feed ends it at `until`.
+until=$(( $(date +%s) + 20 ))
+rec=$(curl -s --max-time 8 -X POST -H 'Content-Type: application/json' \
+    -d "{\"kind\": \"tap\", \"part\": \"$STAGE/recordings/staged.ts.part\", \"until\": $until}" \
+    "$F/feed/v1/recorders" | "$PY" -c "import json,sys; print(json.load(sys.stdin)['id'])" 2>/dev/null)
+sleep 3
+[ -n "$rec" ] && [ "$(j "$F/feed/v1/recorders/$rec" "d['alive']")" = True ] \
+    && pass "a recorder started through /feed/v1/ outlives the request that started it" \
+    || fail "the recorder 3 s on: $(j "$F/feed/v1/recorders/${rec:-none}" "d.get('ended'), d.get('returncode')")"
+[ -n "$rec" ] && curl -s -o /dev/null --max-time 8 -X POST -H 'Content-Type: application/json' \
+    -d '{"timeout": 2}' "$F/feed/v1/recorders/$rec/stop"
 # A stream whose URL is looked up (Yle Areena): the feed asks control's /internal/ for it.
 # Skipped, not failed, when Yle has nothing live.
 yle() { curl -s --max-time 20 "$F/stream/internet/pentulive/index.m3u8" | head -1; }
