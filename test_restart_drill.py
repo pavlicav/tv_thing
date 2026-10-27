@@ -57,6 +57,15 @@ class AdvanceTests(unittest.TestCase):
         self.assertFalse(tracker.update(7, (11, 4.0, 5)))         # moving again
         self.assertAlmostEqual(tracker.worst, 6.1)
 
+    def test_a_new_streams_growing_list_is_advancing(self):
+        # A fresh encoder's playlist stays at sequence 0 while it fills to its list size.
+        tracker = drill.Advance(0)
+        for second, segments in enumerate(range(3, 20)):
+            self.assertFalse(tracker.update(second, (0, 1.0, segments)))
+        self.assertFalse(tracker.update(17, (1, 1.0, 20)))         # full: the sequence moves
+        self.assertLess(tracker.worst, 1.5)
+        self.assertTrue(tracker.update(20.1, (1, 1.0, 20)))        # then nothing new: stalled
+
     def test_an_unreadable_playlist_counts_as_still(self):
         tracker = drill.Advance(0)
         tracker.update(0, (10, 4.0, 5))

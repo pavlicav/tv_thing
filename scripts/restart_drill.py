@@ -84,8 +84,12 @@ def running_lanes(status):
 
 
 class Advance:
-    """Whether a playlist keeps advancing: stalled once its media sequence (or segment list)
-    has not moved, or it could not be read, for its target duration plus STALL_SLACK."""
+    """Whether a playlist keeps advancing: stalled once its newest segment has not moved, or
+    it could not be read, for its target duration plus STALL_SLACK.
+
+    The newest segment's number is the media sequence plus the segments listed: a full list
+    moves its sequence, and a new stream's list grows at sequence 0 until it is full (12 s of
+    0.6 s segments), which once read as a stall right after a retune (2026-10-27)."""
 
     def __init__(self, now):
         self.moved_at, self.last, self.target = now, None, 6.0
@@ -93,9 +97,10 @@ class Advance:
 
     def update(self, now, parsed):
         if parsed is not None:
-            sequence, self.target, _ = parsed
-            if self.last is None or sequence != self.last:
-                self.last, self.moved_at = sequence, now
+            sequence, self.target, segments = parsed
+            newest = sequence + segments
+            if self.last is None or newest != self.last:
+                self.last, self.moved_at = newest, now
         still = now - self.moved_at
         self.worst = max(self.worst, still)
         return still > self.target + STALL_SLACK
