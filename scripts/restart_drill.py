@@ -282,7 +282,8 @@ class Drill:
                 next_recordings = now + 5
                 answer = get(self.tv + "api/v1/recordings")
                 sizes = active_recordings(answer)
-                for rid, tracker in list(growth.items()):
+                # Control down or frozen (A2-A4): a size is unknown, not stalled. Judged on its return.
+                for rid, tracker in list(growth.items()) if answer is not None else []:
                     if answer is not None and rid not in sizes:
                         recording_gone(rid, recordings[rid][1], time.time(), verdict)
                         del growth[rid]
