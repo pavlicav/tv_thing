@@ -4,7 +4,8 @@
 This is what failed on 2026-10-13: the digital packager, a VCR recording and
 the Roku verifier together reached the unit's TasksMax, the kernel refused
 three threads, and each refusal failed a Roku tune. Passes when the
-navigation is verified and the unit's cgroup refused nothing.
+navigation is verified and the unit's cgroup refused nothing. Split, pass
+--cgroup for each service (the feed records, control's verifier decodes).
 
     task_headroom_check.py --url http://127.0.0.1:8098 \
         --cgroup /sys/fs/cgroup/system.slice/tv-thing-candidate-X.service
@@ -29,19 +30,19 @@ def refusals(cgroup):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--url", required=True)
-    parser.add_argument("--cgroup", type=Path, required=True)
+    parser.add_argument("--cgroup", type=Path, action="append", required=True)
     parser.add_argument("--target", default="youtube-tv:NBC")
     # The owner's YouTube TV navigation cap for the Roku lane.
     parser.add_argument("--max-navigation-seconds", type=float, default=150)
     args = parser.parse_args()
 
-    before = refusals(args.cgroup)
-    limit = (args.cgroup / "pids.max").read_text().strip()
+    before = {cgroup: refusals(cgroup) for cgroup in args.cgroup}
+    limits = {cgroup: (cgroup / "pids.max").read_text().strip() for cgroup in args.cgroup}
     token = claim_lane(args.url, "roku", "task headroom check",
                        "Roku navigation during a VCR recording", 600)
     recording = None
     failures = []
-    peak = 0
+    peaks = dict.fromkeys(args.cgroup, 0)
     try:
         wait_roku_idle(args.url, token)
         recording = http_json(args.url, "/api/v1/recordings", method="POST",
@@ -57,7 +58,8 @@ def main():
         started = time.monotonic()
         state = None
         while not failures and time.monotonic() - started < args.max_navigation_seconds:
-            peak = max(peak, int((args.cgroup / "pids.current").read_text()))
+            for cgroup in args.cgroup:
+                peaks[cgroup] = max(peaks[cgroup], int((cgroup / "pids.current").read_text()))
             lane = http_json(args.url, "/api/v1/status", timeout=3)["lanes"]["roku"]
             operation = (lane.get("roku") or {}).get("operation") or {}
             state = operation.get("state")
@@ -77,8 +79,9 @@ def main():
                       payload={"id": recording})
         http_json(args.url, "/api/v1/tuner/lock/release", method="POST",
                   payload={"lane": "roku", "token": token})
-    refused = refusals(args.cgroup) - before
-    print(f"Tasks: peak {peak} of {limit}; TasksMax refused {refused}")
+    refused = sum(refusals(cgroup) - before[cgroup] for cgroup in args.cgroup)
+    print("Tasks: " + "; ".join(f"{cgroup.name} peak {peaks[cgroup]} of {limits[cgroup]}"
+                                for cgroup in args.cgroup) + f"; TasksMax refused {refused}")
     if refused:
         failures.append(f"TasksMax refused {refused} thread(s) or process(es)")
     for failure in failures:

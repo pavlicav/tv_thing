@@ -13,9 +13,8 @@ WorkingDirectory=/home/vivian/tv_thing
 Environment=TV_THING_MAX_GPU_TEMP_C=90
 Environment=TV_THING_VIDEO_ENCODER=cpu
 Environment="TV_THING_RECORDINGS_DIR=/mnt/sda1/media/TV Recordings"
-# The recorders' journal, outside the streams directory: /var/lib/tv-thing/feed/.
-StateDirectory=tv-thing
-Environment=TV_THING_STATE_DIR=/var/lib/tv-thing
+# The recorders' journal stays in ~/tv_thing/state/feed/, where one process keeps it, so a
+# rollback to tv-thing.service (the one process) reads what the feed wrote.
 Environment=TV_THING_CONTROL_URL=http://127.0.0.1:8087
 ExecStart=/home/vivian/miniconda3/bin/python3 /home/vivian/tv_thing/feed_server.py
 Restart=always

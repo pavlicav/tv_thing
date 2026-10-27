@@ -32,7 +32,7 @@ This is the deploy. It refuses while VizelVision has something on air or prepare
   - New files: `feed.json`, `feed_node.py`.
   - Changed: `server.py`, `roku_lane.py`, `internet_streams.py`, `conftest.py`, `.gitignore`, the tests, `INVARIANTS.md`.
   - `tv-thing.service` is unchanged, so no `daemon-reload`.
-- **A new state file:** `~/tv_thing/state/feed/recordings-journal.jsonl`, the recorders' journal. Phase 2 moves it to `/var/lib/tv-thing` with `StateDirectory=`; Phase 1 keeps it in the checkout. `state/` is git-ignored.
+- **A new state file:** `~/tv_thing/state/feed/recordings-journal.jsonl`, the recorders' journal. The split keeps it there too, so a rollback reads what the feed wrote. `state/` is git-ignored.
 - **The API:** `/api/v1/status` gains `node`, `feed_epoch`, and per lane `lifecycle`, `navigating` and `stream.revision`. Nothing is removed or renamed, and `test_api_contract.py` is unchanged.
 - **The Roku generation** becomes `<capture id>.<revision>`, where the old form was `<capture id>.<serial>`. VizelVision only compares it for equality, and the restart changes the capture id anyway.
 
@@ -376,7 +376,7 @@ Row A1, a restart with nothing changing, only passes after Phase 2. On Phase 1 i
 
 ## Phase 2: the cut-over to two services
 
-**Not run yet.** It is written to be rehearsed first. `scripts/staged_split_check.sh` (29 checks, no hardware) covers the roles, `RemoteFeed`, the front door's routes and the restart behaviour. What it cannot cover is the gate with real hardware, which needs production stopped like any gate.
+`scripts/deploy-feed-split.sh` runs all of this, gated: `--check` first (no sudo, nothing stopped), then `sudo bash …/deploy-feed-split.sh`, then `--rollback` if it is ever needed. The steps by hand are below. `scripts/staged_split_check.sh` (31 checks, no hardware) covers the roles, `RemoteFeed`, `/internal/`, the front door's routes and the restart behaviour. What only the deploy can cover is the gate with real hardware, which needs production stopped, like any gate.
 
 **What changes.** Today `tv-thing` is one process on `:8080`. After:
 
@@ -384,64 +384,63 @@ Row A1, a restart with nothing changing, only passes after Phase 2. On Phase 1 i
 |---|---|---|
 | `tv-thing-feed` (`deploy/systemd/tv-thing-feed.service`) | `feed_server.py` | 127.0.0.1:8086 |
 | `tv-thing` (`deploy/systemd/tv-thing.service`) | `server.py`, control | 127.0.0.1:8087 |
-| Apache (`deploy/apache/tv-thing-front-door.conf`) | the front door | 127.0.0.1, 192.168.1.98 and 10.0.0.98 on :8080, plus `/tv/` on the main site |
+| Apache (`deploy/apache/tv-thing-front-door.conf`) | the front door | 127.0.0.1, 192.168.1.98 and 10.0.0.98 on :8080 |
 
-Every client URL stays the same.
+- Every client URL stays the same.
+- `viviserv-proxy.conf` is not touched: its `/tv/` already proxies to `127.0.0.1:8080`, which becomes the front door.
+- The recorders' journal stays in `state/feed/`, so either build reads what the other wrote.
+- The repo's root `tv-thing.service` stays the one-process unit, the rollback's. The installed `tv-thing.service` becomes control's (`deploy/systemd/`), so an older deploy script that copies the root unit would undo the split.
 
-**The restart budget.** One feed drop at the cut-over, and one full Apache restart for its new `Listen` lines. After that, `sudo systemctl restart tv-thing` drops nothing, and Apache only ever needs a graceful reload.
+**The restart budget.** One feed drop at the cut-over, and one full Apache restart for its new `Listen` lines (a second or two for backup-thing and the other sites). After that, `sudo systemctl restart tv-thing` drops nothing, and Apache only ever needs a graceful reload.
 
 ### Before
 
 1. Merge `feed-split` to `master` only as part of this cut-over. The checkout is what runs.
-2. Gate the build: AGENTS.md's gate, with the candidate run as **two** processes on staging ports (feed and control) behind a private Apache, the way `staged_split_check.sh` does, but with hardware. Run the digital and Roku gates against the candidate control's API.
+2. Gate the build: AGENTS.md's gate, with the candidate run as **two** units (feed on :8091, control on :8092) behind a private Apache on :8098 running the production routes. The gates run through that front door. They measure both services' process trees as one (`--server-pid` twice), and watch both cgroups' TasksMax. The drill restarts, then kills, the candidate's control.
 3. Off air, with VizelVision's web and master stopped, as in Phase 1. No recording running or due.
 
 ### The cut-over
 
 ```bash
-sudo cp /etc/apache2/conf-available/viviserv-proxy.conf ~/viviserv-proxy.conf.before-split
-sudo cp ~/tv_thing/deploy/apache/tv-thing-front-door.conf /etc/apache2/sites-available/
-sudo a2enmod proxy proxy_http headers alias && sudo a2ensite tv-thing-front-door
-```
-
-Take the old `/tv/` lines out of `viviserv-proxy.conf` (`RedirectMatch ^/tv$` and the two `ProxyPass`/`ProxyPassReverse /tv/` lines). The front-door file includes their replacement.
-
-```bash
-sudo apache2ctl configtest
-sudo install -m 644 ~/tv_thing/deploy/systemd/tv-thing-feed.service /etc/systemd/system/
-sudo install -m 644 ~/tv_thing/deploy/systemd/tv-thing.service /etc/systemd/system/
+sudo install -m 644 ~/tv_thing/deploy/systemd/tv-thing-feed.service ~/tv_thing/deploy/systemd/tv-thing.service /etc/systemd/system/
 sudo install -D -m 644 ~/tv_thing/deploy/apache/apache2-front-door.conf /etc/systemd/system/apache2.service.d/tv-thing-front-door.conf
+sudo install -m 644 ~/tv_thing/deploy/apache/tv-thing-front-door.conf /etc/apache2/sites-available/
+sudo a2ensite tv-thing-front-door
+sudo apache2ctl configtest
 sudo systemctl daemon-reload
 sudo systemctl stop tv-thing
-ss -ltnp 'sport = :8080'                      # only tailscale0's
+ss -ltn 'sport = :8080'                        # only tailscale0's
 sudo systemctl enable --now tv-thing-feed
 sudo systemctl start tv-thing
 sudo systemctl restart apache2                 # the one full restart: new Listen lines
 curl -s http://127.0.0.1:8080/api/v1/status | head -c 200; curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1/tv/
 ```
 
-Then bring VizelVision back and resume Up next, as in Phase 1. Its TV Thing base URL is unchanged (`:8080`).
+Then gate production through `:8080` (`--server-pid` for `tv-thing-feed` and for `tv-thing`), bring VizelVision back and resume Up next, as in Phase 1.
 
 ### The proof
 
-These are the drill rows that fail by design before the split, and must pass now:
+These are the drill rows that fail by design before the split, and must pass now, with VizelVision on air:
 
 ```bash
-~/tv_thing/scripts/restart_drill.py --command 'sudo systemctl restart tv-thing'      # A1
-~/tv_thing/scripts/restart_drill.py --command 'sudo systemctl kill -s KILL tv-thing' # A2
+sudo ~/tv_thing/scripts/restart_drill.py --command 'systemctl restart tv-thing'      # A1
+sudo ~/tv_thing/scripts/restart_drill.py --command 'systemctl kill -s KILL tv-thing' # A2
 ```
+
+The script does not roll back on a failed proof. By then the split has passed its gates, and one process fails the drill by design. It says what failed.
 
 ### Rollback
 
-It puts back today's single process. It reads the new state: the journal, `finish_as`, the Roku's navigation record.
+`sudo bash ~/tv_thing/scripts/deploy-feed-split.sh --rollback` puts back the one process on the code that is checked out, which reads the journal, `finish_as` and the Roku's navigation record. Every stream drops once. By hand:
 
 ```bash
 sudo systemctl stop tv-thing tv-thing-feed
 sudo systemctl disable tv-thing-feed
 sudo a2dissite tv-thing-front-door
-sudo cp ~/viviserv-proxy.conf.before-split /etc/apache2/conf-available/viviserv-proxy.conf
-sudo systemctl restart apache2                 # frees :8080
-sudo cp ~/tv_thing/tv-thing.service /etc/systemd/system/tv-thing.service && sudo systemctl daemon-reload
+sudo rm /etc/apache2/sites-available/tv-thing-front-door.conf /etc/systemd/system/apache2.service.d/tv-thing-front-door.conf /etc/systemd/system/tv-thing-feed.service
+sudo install -m 644 ~/tv_thing/tv-thing.service /etc/systemd/system/tv-thing.service
+sudo systemctl daemon-reload
+sudo apache2ctl configtest && sudo systemctl restart apache2    # frees :8080
 sudo systemctl start tv-thing                  # one process, binding :8080 itself
 ```
 

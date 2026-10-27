@@ -63,7 +63,7 @@ Exactly one writer process per file.
 | File | Writer |
 |---|---|
 | `recordings.json`, `tuner_locks.json`, `playback_state.json` (always-on intent), `channels.json` (scan results), `epg.json`, `yttv_epg.json`, `lineup_state.json`, `roku_state/` | control |
-| `/var/lib/tv-thing/feed/recordings-journal.jsonl` (via `StateDirectory=`), lane playlists and segments in `streams/` | feed |
+| `state/feed/recordings-journal.jsonl` (git-ignored; one place for both builds, so a rollback reads it), lane playlists and segments in `streams/` | feed |
 
 ## The failure matrix
 

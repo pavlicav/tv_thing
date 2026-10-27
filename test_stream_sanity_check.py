@@ -158,6 +158,20 @@ class CpuAccountingTests(unittest.TestCase):
                 results.append(gate.process_group_sample(self.SERVER))
             return results
 
+    def test_the_split_services_are_measured_as_one_tree(self):
+        # The feed's capture and control's verifier: one ffmpeg each, one count and one RSS.
+        listing = "\n".join(["10 1 1024 python3 feed_server.py", "11 10 2048 ffmpeg -i /dev/video0",
+                              "20 1 1024 python3 server.py", "21 20 2048 ffmpeg -i udp://x",
+                              "30 1 4096 ffmpeg -i elsewhere"])
+        ticks = {10: (100, 5), 11: (200, 5), 20: (100, 5), 21: (200, 5)}
+        with mock.patch.object(gate.subprocess, "run", return_value=mock.Mock(stdout=listing)), \
+                mock.patch.object(gate, "system_uptime", side_effect=[99.0, 100.0]), \
+                mock.patch.object(gate, "process_cpu_ticks", side_effect=ticks.__getitem__), \
+                mock.patch.dict(gate._cpu_baselines, clear=True):
+            sample = gate.process_group_sample([10, 20])
+        self.assertEqual(sample["ffmpeg_count"], 2)
+        self.assertEqual(sample["rss_mib"], 6.0)
+
     def test_samples_report_the_rate_since_the_previous_one(self):
         first = {self.SERVER: (100, 50), self.ENCODER: (200, 9000)}
         second = {self.SERVER: (100, 50), self.ENCODER: (200, 9000 + int(1.8 * self.HZ))}

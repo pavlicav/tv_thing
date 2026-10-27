@@ -63,6 +63,10 @@ fi
 
 # --- the front door: a private Apache running the very routes production includes ----------
 mkdir -p "$APACHE_DIR"; M=/usr/lib/apache2/modules
+# /tv/ as the main site has it: viviserv-proxy.conf's own lines, aimed at this front door.
+grep -E '^(RedirectMatch \^/tv\$|ProxyPass(Reverse)? +/tv/ )' "${VIVISERV_PROXY:-/etc/apache2/conf-available/viviserv-proxy.conf}" \
+    > "$APACHE_DIR/tv-lines.conf"
+[ "$(wc -l < "$APACHE_DIR/tv-lines.conf")" = 3 ] || { fail "viviserv-proxy.conf's three /tv lines not found"; exit 1; }
 cat > "$APACHE_DIR/httpd.conf" <<CONF
 ServerRoot "$APACHE_DIR"
 DefaultRuntimeDir "$APACHE_DIR"
@@ -86,7 +90,8 @@ Define TV_THING_CONTROL_PORT 18087
     Include "$CODE/deploy/apache/tv-thing-routes.conf"
 </VirtualHost>
 <VirtualHost 127.0.0.1:18081>
-    Include "$CODE/deploy/apache/tv-thing-tv-routes.conf"
+    ProxyPreserveHost On
+$(sed 's/:8080/:18080/' "$APACHE_DIR/tv-lines.conf")
 </VirtualHost>
 CONF
 apache start && wait_url "$D/api/v1/status" 15 && pass "the front door is up (the production routes, private Apache)" \
@@ -111,7 +116,7 @@ done
 [ "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$T/tv")" = "302 $T/tv/" ] \
     && pass "/tv redirects to /tv/" || fail "/tv: $(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$T/tv")"
 [ "$(j "$T/tv/api/v1/status" "d['feed_epoch']")" = "$epoch" ] && [ "$(curl -s --max-time 8 "$T/tv/stream/internet/cabride/index.m3u8" | head -1)" = "#EXTM3U" ] \
-    && pass "/tv/: the API reaches control and /tv/stream/ the feed" || fail "/tv/ routes"
+    && pass "/tv/ (the main site's own lines): the API reaches control and /tv/stream/ the feed" || fail "/tv/ routes"
 ( misses=0; for _ in $(seq 30); do [ "$(curl -s --max-time 5 "$D/stream/internet/cabride/index.m3u8" | head -1)" = "#EXTM3U" ] \
       || misses=$((misses + 1)); sleep 0.1; done; echo "$misses" > "$STAGE/graceful.misses" ) &
 LOOP=$!

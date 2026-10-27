@@ -2360,8 +2360,8 @@ RECORDING_STALL_SECONDS = 30
 RECORDING_MAX_ATTEMPTS = 5
 RECORDER_STOP_TIMEOUT = 8.0
 # What the feed keeps across restarts, outside the streams directory (which a
-# deploy may clean or replace): the recordings journal. /var/lib/tv-thing in
-# production (the unit's StateDirectory=).
+# deploy may clean or replace): the recordings journal. The checkout's state/ (git-ignored)
+# in production, split or not, so either build reads what the other wrote.
 STATE_DIR = Path(os.environ.get("TV_THING_STATE_DIR", str(BASE_DIR / "state")))
 RECORDINGS_JOURNAL = STATE_DIR / "feed" / "recordings-journal.jsonl"
 # The feed's recorder processes (feed_node.Recorders); the timers, pieces and

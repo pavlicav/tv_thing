@@ -138,7 +138,7 @@ CLOCK_TICKS = os.sysconf("SC_CLK_TCK")
 # Shorter intervals are mostly tick rounding; a sample that comes sooner
 # reports no CPU and the next one measures from the same baseline.
 MIN_CPU_INTERVAL = 0.5
-_cpu_baselines = {}  # root pid -> (listed_at, read_at, {pid: (start, ticks)})
+_cpu_baselines = {}  # root pids -> (listed_at, read_at, {pid: (start, ticks)})
 
 
 def system_uptime():
@@ -175,7 +175,10 @@ def cpu_ticks_used(before, after, listed_before):
     return max(used, 0)
 
 
-def process_group_sample(root_pid):
+def process_group_sample(root_pids):
+    """CPU, RSS and processes of the server's tree: one pid, or several whose trees count as
+    one (the feed/control split's two services, under the same limits as one process)."""
+    roots = [root_pids] if isinstance(root_pids, int) else list(root_pids)
     listed_at = system_uptime()
     result = subprocess.run(
         ["ps", "-eo", "pid=,ppid=,rss=,args="],
@@ -196,8 +199,8 @@ def process_group_sample(root_pid):
             continue
         processes[pid] = {"ppid": ppid, "rss_kib": rss_kib, "args": fields[3]}
 
-    descendants = {root_pid}
-    order = [root_pid]  # parents before their children
+    descendants = set(roots)
+    order = list(roots)  # parents before their children
     changed = True
     while changed:
         changed = False
@@ -219,13 +222,14 @@ def process_group_sample(root_pid):
                 pass  # exited since ps listed it
     read_at = system_uptime()
     cpu_percent = None
-    baseline = _cpu_baselines.get(root_pid)
+    key = tuple(roots)
+    baseline = _cpu_baselines.get(key)
     if baseline is None:
-        _cpu_baselines[root_pid] = (listed_at, read_at, ticks)
+        _cpu_baselines[key] = (listed_at, read_at, ticks)
     elif read_at - baseline[1] >= MIN_CPU_INTERVAL:
         used = cpu_ticks_used(baseline[2], ticks, baseline[0])
         cpu_percent = 100 * used / CLOCK_TICKS / (read_at - baseline[1])
-        _cpu_baselines[root_pid] = (listed_at, read_at, ticks)
+        _cpu_baselines[key] = (listed_at, read_at, ticks)
     return {
         "cpu_percent": cpu_percent,
         "rss_mib": sum(item["rss_kib"] for item in selected) / 1024,
@@ -591,7 +595,8 @@ def decode_generation(stream_id, seen_segments, segment_prefix="segment",
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:8099")
-    parser.add_argument("--server-pid", type=int, required=True)
+    # Split, the feed and control: both trees are measured as one against every limit.
+    parser.add_argument("--server-pid", type=int, action="append", required=True)
     parser.add_argument(
         "--api-version", choices=("v1", "legacy"), default="v1",
         help="tuning/status API exercised by the gate (default: v1)",
