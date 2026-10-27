@@ -1587,6 +1587,38 @@ def test_always_on_stands_down_while_the_tuner_is_held(monkeypatch):
     assert server.busy_reason() is None
 
 
+def test_the_always_on_keeper_leaves_a_lane_it_cannot_see_alone(monkeypatch):
+    """2026-10-27, drill A3: control woke from a 30 s freeze, read the digital lane
+    `unknown` (alive False) while another thread refetched the feed's snapshot, and
+    retuned a healthy lane. Unknown is not dead; a lane the feed reports dead is retuned."""
+    import threading
+
+    for unknown, expected in ((True, []), (False, ["wusa_hd_9_1"])):
+        tuned, stopping = [], threading.Event()
+
+        class Feed:
+            def lane(self, lane, unknown=unknown):
+                stopping.set()                       # one pass, then the worker returns
+                server.always_on_wakeup.set()
+                return {"alive": False, "unknown": unknown, "selection": None}
+
+            def tune_digital(self, channel, quality, taps=()):
+                tuned.append(channel["id"])
+                return True, None, False
+
+        monkeypatch.setattr(server, "feed_client", Feed())
+        monkeypatch.setattr(server, "shutting_down", stopping)
+        monkeypatch.setattr(server, "ALWAYS_ON", True)
+        monkeypatch.setattr(server, "scanning", False)
+        monkeypatch.setattr(server, "guide_refreshing", False)
+        monkeypatch.setattr(server, "load_playback_state",
+                            lambda: ({"id": "wusa_hd_9_1"}, "medium"))
+        monkeypatch.setattr(server, "recording_tap_ports", lambda channel: [])
+        server.always_on_wakeup.set()
+        server.always_on_worker()
+        assert tuned == expected, f"unknown={unknown}"
+
+
 def test_coverage_is_reported_against_the_clock_not_the_refresh(monkeypatch):
     """A stored guide overstates its coverage by exactly its own age."""
     now = 1_800_000_000

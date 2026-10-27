@@ -1840,12 +1840,16 @@ def always_on_worker():
         ok, error = True, None
         try:
             with lock:
-                healthy = feed_client.lane(LANE_DIGITAL)["alive"]
+                digital = feed_client.lane(LANE_DIGITAL)
+                # An unknown lane is one the feed could not vouch for just now,
+                # not a dead one: control waking from a freeze reads unknown
+                # while another thread refetches, and retuning on that
+                # restarted a healthy lane (drill A3, 2026-10-27).
                 # busy_reason() rather than the scanning flag: anything
                 # holding the digital front-end -- a band scan, a guide
                 # refresh -- means restarting the lane can only fail with
                 # EBUSY, once every wakeup, for as long as it lasts.
-                if healthy or busy_reason():
+                if digital["alive"] or digital.get("unknown") or busy_reason():
                     continue
 
                 channel, quality = load_playback_state()
