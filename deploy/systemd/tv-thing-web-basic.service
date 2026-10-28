@@ -1,0 +1,28 @@
+# TV Thing's web-basic service (web_basic.py): the simple web streams. The station's slide
+# channels as video (the Sports Guide, Cairo Radio) and the simple web relays (pen2live),
+# each made only while watched. Its own limits, so a web stream never takes the tuners'
+# share; restarting it drops only its own streams. Changes are checked by
+# scripts/web_stream_check.py (AGENTS.md's web streams stack), not the tuners' gate.
+[Unit]
+Description=TV Thing web-basic (slide channels' video, simple web relays)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=vivian
+WorkingDirectory=/home/vivian/tv_thing
+Environment=TV_THING_CONTROL_URL=http://127.0.0.1:8087
+ExecStart=/home/vivian/miniconda3/bin/python3 /home/vivian/tv_thing/web_basic.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=5
+# The Sports Guide measured 12% to draw and 45% to encode (2026-10-21); Cairo Radio's
+# one frame a second, a few. Two cores is room for both at once and a start's spike.
+CPUQuota=200%
+MemoryMax=768M
+TasksMax=96
+LimitFSIZE=16M:2G
+
+[Install]
+WantedBy=multi-user.target

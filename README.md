@@ -316,7 +316,7 @@ The route lives in
 into `/etc/apache2/conf-available/viviserv-dashboard.conf` by
 `install-apache-proxies.sh`; edit the fragment, not the generated file.
 
-### Run at boot (systemd): two services
+### Run at boot (systemd): three services
 
 `scripts/deploy-feed-split.sh` installs the units in `deploy/systemd/` and the
 front door, through the AGENTS.md gate (`RUNBOOK.md` is the same by hand). The
@@ -327,6 +327,11 @@ install it over the split.
 |---|---|---|
 | `tv-thing-feed` | `feed_server.py` on `127.0.0.1:8086` | `CPUQuota=800%`, `MemoryMax=1800M`, `TasksMax=192` |
 | `tv-thing` (control) | `server.py`, `TV_THING_ROLE=control`, on `127.0.0.1:8087` | `CPUQuota=400%`, `MemoryMax=1200M`, `TasksMax=160` |
+| `tv-thing-web-basic` | `web_basic.py` on `127.0.0.1:8085`: the slide channels' video (the Sports Guide, Cairo Radio) and the simple web relays (pen2live) | `CPUQuota=200%`, `MemoryMax=768M`, `TasksMax=96` |
+
+`tv-thing-web-basic` is installed by hand (`deploy/systemd/`, then `systemctl
+enable --now`); Apache's front door sends it its streams' paths and the rest of
+`/stream/` to the feed.
 
 Which restart is safe:
 
@@ -337,6 +342,9 @@ Which restart is safe:
 - `sudo systemctl restart tv-thing-feed`: every stream drops and every
   recording ends (the feed's journal says why). Only for core stream stack
   changes, under the gate.
+- `sudo systemctl restart tv-thing-web-basic`: the slide channels' video and
+  pen2live drop and start again at their next request; nothing else moves.
+  For web streams stack changes, checked with `scripts/web_stream_check.py`.
 - `sudo apachectl graceful`: no stream request fails. A full Apache restart
   drops every viewer.
 
@@ -1046,10 +1054,10 @@ or click starts it. `?mute` keeps it quiet. Rebuild it with
 A game is listed only when it can be watched here, and shows where:
 
 * **On a national broadcaster in the lineup**, by that channel's name and
-  number: TBS 31, ESPN 33. A network game is on its DC station over the
-  antenna (ABC 7, FOX 5, CBS 9, NBC 4, CW 8). Sunday afternoon's CBS and FOX
-  NFL games are regional: a Commanders or Ravens game is on CBS 9 or FOX 5,
-  and the game YouTube TV's listings name on Lansing's CBS 19 or FOX 17 is
+  number: TBS 40, ESPN 42. A network game is on its DC station over the
+  antenna (ABC 17, FOX 15, CBS 19, NBC 14, CW 18). Sunday afternoon's CBS and FOX
+  NFL games are regional: a Commanders or Ravens game is on CBS 19 or FOX 15,
+  and the game YouTube TV's listings name on Lansing's CBS 26 or FOX 32 is
   there.
 * **On a Roku game source**, by its Live Sports number and the service:
   Sunday Ticket for any other Sunday-afternoon CBS or FOX game, Prime Video
@@ -1073,7 +1081,7 @@ PIL and numpy (no browser) and pipes raw 1280x720 frames at 30 fps into one
 `ffmpeg`: libx264 `superfast` with `stillimage,zerolatency` on two threads,
 BT.709, the music looped from the wall clock's place in it as AAC at 96 kbit/s
 (silence from `/dev/zero` if the file is missing: some players insist on a
-sound track), 2 s HLS segments in `streams/sports-guide/`. The playlist answers once two
+sound track), 2 s HLS segments in `streams-web/sports-guide/`. The playlist answers once two
 segments exist, about 2 s after the request. [`slide_stream.py`](slide_stream.py)
 supervises the pair: it stops both 60 s after the last request
 (`TV_THING_SLIDES_IDLE_SECONDS`), restarts a pair that dies or stalls while
@@ -1081,9 +1089,26 @@ watched (three times a minute at most, then it rests a minute), and empties the
 folder. The renderer leaves when its parent does, and a startup reaps any
 orphan. Measured on viviserv: about 10% of a core to draw and 35% to encode
 (45% with the music, measured outside the server on 2026-10-21),
-about 110 MiB each, 0.4-0.6 Mbit/s. It is core stream stack: gate it with
-`stream_sanity_check.py --slides sports-guide`, which starts it cold three
-times, checks every segment, and requires it to stop once nobody watches.
+about 110 MiB each, 0.4-0.6 Mbit/s. The web-basic service makes it
+([`web_basic.py`](web_basic.py), its own unit and limits), so it is the web
+streams stack's: check a change with `scripts/web_stream_check.py sports-guide`,
+which watches it for ten minutes and requires its CPU to stay in bounds, its
+memory not to grow, and the video to stop once nobody watches.
+
+### Cairo Radio (channel 197)
+
+hazel's Cairo Radio, under a title card: the station's name, the show on now
+and what is playing, as VizelVision's off-air card words them, and the time.
+[`cairo_radio_video.py`](cairo_radio_video.py) draws the card on the Sports
+Guide's dusk once a second, reading the station's master control (`/radio/api/state`,
+the show from its log or weekly grid) every five seconds; `web_basic.py` lays
+the station's audio (`http://127.0.0.1:1615/cairo.mp3`) under it in one
+`ffmpeg` (libx264 `stillimage` on one thread, AAC at 128 kbit/s, 2 s
+segments), made only while someone watches and stopped 60 s after. The page,
+[`static/cairo-radio.html`](static/cairo-radio.html), plays that video. When
+the station stops answering, the card says only that it is on the air; when
+its audio stops, the encoder ends and the pair starts again. It is the web
+streams stack's: `scripts/web_stream_check.py cairo-radio`.
 
 The About page offers the lineup as a printable card,
 `static/lineup-card.pdf`, typeset in LaTeX from

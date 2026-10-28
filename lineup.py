@@ -40,7 +40,7 @@ HOUSE = "vizelvision"
 ANTENNA = "digital"
 ANY_SOURCE = "*"
 # The station's slide channels: channel id -> name. server.py knows the pages that play them.
-SLIDES = {"sports-guide": "VizelVision Sports Guide"}
+SLIDES = {"sports-guide": "VizelVision Sports Guide", "cairo-radio": "Cairo Radio"}
 
 
 class LineupError(ValueError):

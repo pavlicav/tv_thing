@@ -2379,50 +2379,6 @@ def test_a_stopping_server_starts_no_tuner_lane(monkeypatch):
 # The Sports Guide as video (slide_stream.py, sports_guide_video.py)
 # ---------------------------------------------------------------------------
 
-def test_the_sports_guide_encoder_is_one_bounded_libx264_writing_hls_in_its_folder(tmp_path, monkeypatch):
-    monkeypatch.setattr(server, "SPORTS_GUIDE_MUSIC", tmp_path / "no-music.m4a")
-    cmd = server.build_sports_guide_command("gen1", tmp_path)
-    joined = " ".join(cmd)
-    assert cmd[0] == "ffmpeg" and "-nostdin" in cmd
-    # Raw frames from the renderer, silence from /dev/zero (no lavfi filter graph).
-    assert "-f rawvideo -pix_fmt rgb24 -video_size 1280x720 -framerate 30" in joined
-    assert "pipe:0" in cmd and "/dev/zero" in cmd and "lavfi" not in cmd and "-shortest" in cmd
-    assert cmd[cmd.index("-c:v") + 1] == "libx264" and cmd[cmd.index("-threads") + 1] == "2"
-    assert cmd[cmd.index("-filter_threads") + 1] == "1"
-    assert "zerolatency" in cmd[cmd.index("-tune") + 1]
-    assert cmd[cmd.index("-colorspace") + 1] == "bt709"
-    assert cmd[cmd.index("-hls_time") + 1] == "2" and cmd[cmd.index("-g") + 1] == "60"
-    assert "delete_segments" in cmd[cmd.index("-hls_flags") + 1]
-    assert cmd[cmd.index("-hls_segment_filename") + 1] == str(tmp_path / "sportsguide_gen1_%05d.ts")
-    assert cmd[-1] == str(tmp_path / "index.m3u8")
-    renderer = server.sports_guide_renderer_command()
-    assert renderer[1].endswith("sports_guide_video.py")
-    assert renderer[renderer.index("--url") + 1] == f"http://127.0.0.1:{server.HTTP_PORT}/api/v1/sports-guide"
-    env = server.SLIDE_STREAMS["sports-guide"].env
-    assert env["OMP_NUM_THREADS"] == env["MKL_NUM_THREADS"] == "1"
-
-
-def test_the_sports_guide_plays_its_music_from_the_wall_clocks_place_in_it(tmp_path, monkeypatch):
-    music = tmp_path / "sports-guide-music.m4a"
-    monkeypatch.setattr(server, "SPORTS_GUIDE_MUSIC", music)
-    # No file, or no length beside it: silence, as before.
-    assert server.sports_guide_music() is None
-    music.write_bytes(b"aac")
-    assert server.sports_guide_music() is None
-    music.with_suffix(".json").write_text('{"seconds": 300.0}')
-    assert server.sports_guide_music(now=1_000_000_123.5) == (music, 1_000_000_123.5 % 300)
-    cmd = server.build_sports_guide_command("gen1", tmp_path, now=1_000_000_123.5)
-    joined = " ".join(cmd)
-    # Looped, sought to where a channel that never stopped would be; no /dev/zero.
-    assert f"-stream_loop -1 -ss {(1_000_000_123.5 % 300):.3f} -thread_queue_size 8 -i {music}" in joined
-    assert "/dev/zero" not in cmd and "-shortest" in cmd and "lavfi" not in cmd
-    assert cmd[cmd.index("-map") + 1] == "0:v:0" and "1:a:0" in cmd
-    assert cmd[cmd.index("-b:a") + 1] == "96k"
-    # The music that ships with it.
-    shipped = server.BASE_DIR / "static" / "sports-guide-music.m4a"
-    assert shipped.is_file() and float(json.loads(shipped.with_suffix(".json").read_text())["seconds"]) > 200
-
-
 class _FakeSlides:
     def __init__(self, directory, ready=True):
         self.directory, self.ready, self.demanded, self.touched = directory, ready, [], 0

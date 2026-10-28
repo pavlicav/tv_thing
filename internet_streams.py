@@ -74,6 +74,11 @@ _SEGMENT_PATH = re.compile(r"(?!.*(?:^|/)\.\.?(?:/|$))[A-Za-z0-9_~%=,+.-][A-Za-z
 TOP_LEVEL = "media"     # The segment directory of a stream whose URL is itself a media playlist.
 
 
+# Who relays a stream: the feed (beside the tuners), or web-basic, the simple web streams'
+# own service (web_basic.py), so a feed restart leaves it playing.
+SERVICES = ("feed", "web-basic")
+
+
 class StreamConfigError(ValueError):
     """internet_streams.json does not describe usable streams."""
 
@@ -94,6 +99,7 @@ class Stream:
     params: dict = field(default_factory=dict)
     note: str | None = None
     guide: str | None = None   # a listings URL for TV Thing's guide (see parse_listings)
+    service: str = "feed"      # which service relays it: the feed, or web-basic (web_basic.py)
 
 
 @dataclass(frozen=True)
@@ -136,8 +142,11 @@ def parse_streams(document):
         guide = raw.get("guide") or None
         if guide is not None and not str(guide).startswith(("http://", "https://")):
             raise StreamConfigError(f"{where}: guide must be http or https")
+        service = raw.get("service", "feed")
+        if service not in SERVICES:
+            raise StreamConfigError(f"{where}: service is one of {', '.join(SERVICES)}")
         streams[stream_id] = Stream(stream_id, str(raw.get("name") or stream_id), resolver,
-                                    params, raw.get("note") or None, guide and str(guide))
+                                    params, raw.get("note") or None, guide and str(guide), service)
     return streams
 
 

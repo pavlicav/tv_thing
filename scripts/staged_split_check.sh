@@ -11,7 +11,7 @@ PY=${PY:-/home/vivian/miniconda3/bin/python3}
 STAGE=${STAGE:-$(mktemp -d /tmp/tv-thing-split.XXXXXX)}
 mkdir -p "$STAGE/streams" "$STAGE/state" "$STAGE/recordings"
 echo "Staging in $STAGE"
-F=http://127.0.0.1:18086 C=http://127.0.0.1:18087
+F=http://127.0.0.1:18086 C=http://127.0.0.1:18087 W=http://127.0.0.1:18085
 COMMON=(TV_THING_STREAMS_DIR="$STAGE/streams" TV_THING_STATE_DIR="$STAGE/state"
         TV_THING_RECORDINGS_DIR="$STAGE/recordings" TV_THING_ROKU_CONFIG="$STAGE/no-roku.json"
         TV_THING_EPG=0 TV_THING_YTTV_GUIDE=0 TV_THING_ALWAYS_ON=0 TV_THING_RECORD_MIN_FREE_GB=1
@@ -23,19 +23,24 @@ fail() { echo "FAIL  $*"; fails=$((fails + 1)); }
 j() { curl -s --max-time "${3:-4}" "$1" | "$PY" -c "import json,sys; d=json.load(sys.stdin); print($2)" 2>/dev/null; }
 wait_url() { local deadline=$((SECONDS + $2)); until curl -s -o /dev/null --max-time 2 "$1"; do [ $SECONDS -ge $deadline ] && return 1; sleep 0.5; done; }
 start_feed() { (cd "$CODE" && exec env "${COMMON[@]}" PORT=18086 TV_THING_CONTROL_URL=$C "$PY" feed_server.py >> "$STAGE/feed.log" 2>&1) & FEED=$!; }
-start_control() { (cd "$CODE" && exec env "${COMMON[@]}" TV_THING_ROLE=control PORT=18087 TV_THING_FEED_URL=$F/ "$PY" server.py >> "$STAGE/control.log" 2>&1) & CONTROL=$!; }
+start_control() { (cd "$CODE" && exec env "${COMMON[@]}" TV_THING_ROLE=control PORT=18087 TV_THING_FEED_URL=$F/ TV_THING_WEB_BASIC_URL=$W "$PY" server.py >> "$STAGE/control.log" 2>&1) & CONTROL=$!; }
+# web-basic, which makes no video until asked: only its relay and status are checked here.
+start_web_basic() { (cd "$CODE" && exec env PORT=18085 TV_THING_WEB_STREAMS_DIR="$STAGE/streams-web" TV_THING_CONTROL_URL=$C "$PY" web_basic.py >> "$STAGE/web-basic.log" 2>&1) & WEB=$!; }
 APACHE_DIR=$STAGE/apache D=http://127.0.0.1:18080 T=http://127.0.0.1:18081
 apache() { /usr/sbin/apache2 -d "$APACHE_DIR" -f "$APACHE_DIR/httpd.conf" -k "$1"; }
 cleanup() {
     [ -f "$APACHE_DIR/httpd.pid" ] && apache stop 2>/dev/null
-    kill -CONT "${FEED:-0}" 2>/dev/null; kill "${CONTROL:-0}" "${FEED:-0}" 2>/dev/null; sleep 1
-    kill -9 "${CONTROL:-0}" "${FEED:-0}" 2>/dev/null
+    kill -CONT "${FEED:-0}" 2>/dev/null; kill "${CONTROL:-0}" "${FEED:-0}" "${WEB:-0}" 2>/dev/null; sleep 1
+    kill -9 "${CONTROL:-0}" "${FEED:-0}" "${WEB:-0}" 2>/dev/null
 }
 trap cleanup EXIT
 
 start_feed; wait_url "$F/feed/v1/lanes" 30 && pass "the feed is up" || { fail "the feed did not start"; tail -20 "$STAGE/feed.log"; exit 1; }
 FPID=$FEED
 start_control; wait_url "$C/api/v1/status" 30 && pass "control is up" || { fail "control did not start"; tail -20 "$STAGE/control.log"; exit 1; }
+start_web_basic; wait_url "$W/web/v1/status" 15 && pass "web-basic is up" || { fail "web-basic did not start"; tail -20 "$STAGE/web-basic.log"; exit 1; }
+[ "$(j "$C/api/v1/status" "sorted(d['slides'])" 6)" = "['cairo-radio', 'sports-guide']" ] \
+    && pass "control reads the slide channels' video from web-basic" || fail "control's slides: $(j "$C/api/v1/status" "d['slides']" 6)"
 
 epoch=$(j "$F/feed/v1/lanes" "d['feed_epoch']")
 [ "$(j "$C/api/v1/status" "d['feed_epoch']")" = "$epoch" ] && pass "control reports the feed's epoch $epoch" || fail "epoch mismatch"
@@ -99,6 +104,7 @@ Listen 127.0.0.1:18080
 Listen 127.0.0.1:18081
 Define TV_THING_FEED_PORT 18086
 Define TV_THING_CONTROL_PORT 18087
+Define TV_THING_WEB_BASIC_PORT 18085
 <VirtualHost 127.0.0.1:18080>
     Include "$CODE/deploy/apache/tv-thing-routes.conf"
 </VirtualHost>
@@ -119,7 +125,15 @@ echo "$master" | grep -q 'EXT-X-STREAM-INF' && media=$(curl -s --max-time 8 "$ba
 segment=$(echo "$media" | grep -v '^#' | grep . | tail -1)
 [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$base/$segment")" = 200 ] \
     && pass "front door: a relayed segment plays ($segment)" || fail "front door: segment $segment"
-printf '%s\n%s\n' "$master" "$media" | grep -qE ':1808[67]|127\.0\.0\.1|localhost' \
+# The feed logs every request it serves (it was asked for pen2live itself above); web-basic,
+# which serves this one, does not.
+fed=$(grep -c '/stream/internet/pentulive' "$STAGE/feed.log")
+pups=$(curl -s --max-time 10 "$D/stream/internet/pentulive/index.m3u8")
+[ "$(echo "$pups" | head -1)" = "#EXTM3U" ] && [ "$(grep -c '/stream/internet/pentulive' "$STAGE/feed.log")" = "$fed" ] \
+    && pass "front door: pen2live's relay is web-basic's" || fail "front door: pen2live $(echo "$pups" | head -c 160)"
+[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 "$D/web/v1/status")" = 404 ] \
+    && pass "web-basic's status is not routed" || fail "web-basic's status answers through the front door"
+printf '%s\n%s\n%s\n' "$master" "$media" "$pups" | grep -qE ':1808[5-7]|127\.0\.0\.1|localhost' \
     && fail "a playlist names a backend (D4)" || pass "no playlist names a backend (D4)"
 codes=""
 for url in "$D/internal/internet/pentulive/resolve" "$D/feed/v1/lanes" "$T/tv/internal/internet/pentulive/resolve" "$T/tv/feed/v1/lanes"; do

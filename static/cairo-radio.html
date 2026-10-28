@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cairo Radio</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  /* Channel 197: hazel's Cairo Radio under its title card. The card is drawn
+     into the video (cairo_radio_video.py, made by web_basic.py), so this page
+     only plays it, filling the window. */
+  html, body { margin: 0; height: 100%; background: #232e5c; overflow: hidden; }
+  video { width: 100%; height: 100%; object-fit: contain; background: #232e5c; display: block; }
+</style>
+</head>
+<body>
+<video id="radio" playsinline autoplay></video>
+<script src="hls.min.js"></script>
+<script>
+  (() => {
+    // Relative, so it plays through the front door's /tv/ as well as on :8080.
+    const source = "stream/cairo-radio/index.m3u8";
+    const video = document.getElementById("radio");
+    // The first request starts the video and answers once it has segments; while it
+    // starts it answers 503, so keep asking.
+    if (window.Hls && Hls.isSupported()) {
+      const hls = new Hls({ manifestLoadingMaxRetry: 10, manifestLoadingRetryDelay: 2000,
+                            liveSyncDurationCount: 2 });
+      hls.loadSource(source);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (data.fatal && data.type === Hls.ErrorTypes.NETWORK_ERROR) setTimeout(() => hls.startLoad(), 2000);
+        else if (data.fatal) hls.recoverMediaError();
+      });
+    } else {
+      video.src = source;
+    }
+    // Where autoplay with sound is refused, the first key or click starts it.
+    const armed = () => {
+      removeEventListener("keydown", armed); removeEventListener("pointerdown", armed);
+      video.play().catch(() => {});
+    };
+    video.addEventListener("canplay", () => {
+      const started = video.play();
+      if (started) started.catch(() => { addEventListener("keydown", armed); addEventListener("pointerdown", armed); });
+    }, { once: true });
+  })();
+</script>
+</body>
+</html>

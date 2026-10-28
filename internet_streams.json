@@ -5,11 +5,14 @@
     "'url' with a fixed 'url', or 'yle-areena' with the Areena 'program' id (areena.yle.fi/<program>).",
     "Give it a number in lineup.json; otherwise it takes the first free one in New internet streams.",
     "'note' shows under its name in the Watch list. 'guide' (optional) is a listings URL",
-    "({\"events\": [{\"start\", \"duration\", \"title\", \"description\"}]}) that puts the stream in the guide."
+    "({\"events\": [{\"start\", \"duration\", \"title\", \"description\"}]}) that puts the stream in the guide.",
+    "'service' says who relays it: 'feed' (the default) or 'web-basic', the simple web streams' own service",
+    "(web_basic.py), which a feed restart leaves playing. A web-basic stream's path needs Apache's route too",
+    "(deploy/apache/tv-thing-routes.conf). Trains (cabride) stays the feed's."
   ],
   "streams": [
     {"id": "pentulive", "name": "Pentulive", "resolver": "yle-areena", "program": "1-78104441",
-     "note": "Yle's puppy cam, 24/7 through early December 2026"},
+     "service": "web-basic", "note": "Yle's puppy cam, 24/7 through early December 2026"},
     {"id": "cabride", "name": "Cab Ride", "resolver": "url", "url": "http://127.0.0.1:8791/cab/index.m3u8",
      "guide": "http://127.0.0.1:8791/guide.json",
      "note": "Train cab rides from Japan, Europe and the US, all day"}

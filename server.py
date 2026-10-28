@@ -41,7 +41,7 @@ import internet_streams
 import lineup
 import recorder
 import roku_lane
-import slide_stream
+import web_basic
 import sports_guide
 import yttv_epg
 from roku_control.errors import (BaseballScheduleError, ChannelNotFoundError,
@@ -4285,15 +4285,12 @@ SPORTS_GUIDE_LATE_HOURS = 3
 SPORTS_GUIDE_CACHE_SECONDS = 60
 _sports_guide_cache = {"day": None, "at": 0.0, "payload": None}
 # The pages that play the station's slide channels (lineup.SLIDES), their data,
-# and the video a Roku plays instead (see SLIDE_STREAMS).
+# and the video a Roku plays instead (web_basic.py makes it). Cairo Radio's page plays
+# that video: its card is drawn for the video, and it has no listings of its own.
 SLIDE_PAGES = {"sports-guide": {"page_path": "sports-guide.html", "data_path": "/api/v1/sports-guide",
-                                "stream_path": "/stream/sports-guide/index.m3u8"}}
-# The Sports Guide as video (slide_stream.py): sports_guide_video.py draws the
-# slides at 30 fps 1280x720 into one libx264 on two threads, 2 s segments with
-# a key frame each. It runs only while someone watches, from the first request
-# for its playlist until SLIDES_IDLE_SECONDS after the last. Measured on
-# viviserv (2026-10-19): about 11% of a core to draw, 33% to encode, 0.6 Mbit/s;
-# with the music (2026-10-21, outside the server) 12% and 45%.
+                                "stream_path": "/stream/sports-guide/index.m3u8"},
+               "cairo-radio": {"page_path": "cairo-radio.html", "data_path": None,
+                               "stream_path": "/stream/cairo-radio/index.m3u8"}}
 HTTP_PORT = int(os.environ.get("PORT", {"feed": 8086, "control": 8087}.get(ROLE, 8080)))
 # Where the Sports Guide renderer reads its slides: control's API (the feed role's renderer
 # asks across the split).
@@ -4301,87 +4298,13 @@ CONTROL_URL = os.environ.get("TV_THING_CONTROL_URL",
                              f"http://127.0.0.1:{8087 if ROLE == 'feed' else HTTP_PORT}")
 SLIDES_IDLE_SECONDS = float(os.environ.get("TV_THING_SLIDES_IDLE_SECONDS", "60"))
 SLIDES_START_TIMEOUT = float(os.environ.get("TV_THING_SLIDES_START_TIMEOUT", "8"))
-SLIDE_FPS = 30
-SLIDE_SEGMENT_SECONDS = 2
-SLIDE_THREADS = "2"
-# The Sports Guide's music (sports_guide_music.py makes it): smooth jazz, as a
-# listings channel had. Its length is in the .json beside it. Without it, silence.
-SPORTS_GUIDE_MUSIC = BASE_DIR / "static" / "sports-guide-music.m4a"
-
-
-def sports_guide_music(now=None):
-    """``(path, seconds in)`` for the guide's music, or None when it is missing.
-
-    It plays from wherever the wall clock says a channel that never stopped would
-    be, so tuning in lands mid-tune, as on cable (the page does the same)."""
-    try:
-        seconds = float(json.loads(SPORTS_GUIDE_MUSIC.with_suffix(".json").read_text())["seconds"])
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-    if seconds <= 0 or not SPORTS_GUIDE_MUSIC.is_file():
-        return None
-    return SPORTS_GUIDE_MUSIC, (time.time() if now is None else now) % seconds
-
-
-def build_sports_guide_command(generation, directory, now=None):
-    """The Sports Guide's encoder: raw frames on stdin to HLS in ``directory``."""
-    directory = Path(directory)
-    music = sports_guide_music(now)
-    if music:
-        # The music, looped, from the wall clock's place in it.
-        sound = ["-stream_loop", "-1", "-ss", f"{music[1]:.3f}", "-thread_queue_size", "8",
-                 "-i", str(music[0])]
-    else:
-        # Silence, as raw zeros: some players refuse a stream with no sound
-        # track. (lavfi's anullsrc ran a filter graph of 28 threads.)
-        sound = ["-f", "s16le", "-ar", "48000", "-ac", "2", "-thread_queue_size", "8", "-i", "/dev/zero"]
-    return [
-        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "warning",
-        "-filter_threads", "1",
-        "-f", "rawvideo", "-pix_fmt", "rgb24", "-video_size", "1280x720",
-        # Eight queued frames: each is 2.7 MB, and the renderer runs ahead.
-        "-framerate", str(SLIDE_FPS), "-thread_queue_size", "8", "-i", "pipe:0",
-        *sound,
-        "-map", "0:v:0", "-map", "1:a:0", "-shortest",
-        # HD is BT.709; say so, or a player may assume it of untagged 601.
-        "-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
-        "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
-        "-color_range", "tv",
-        # zerolatency drops the lookahead: 125 MB rather than 205 for veryfast's.
-        "-c:v", "libx264", "-preset", "superfast", "-tune", "stillimage,zerolatency",
-        "-profile:v", "high", "-level:v", "4.0", "-threads", SLIDE_THREADS,
-        # Still pages cost almost nothing; a transition is capped.
-        "-crf", "23", "-maxrate", "2000k", "-bufsize", "4000k",
-        "-g", str(SLIDE_FPS * SLIDE_SEGMENT_SECONDS),
-        "-keyint_min", str(SLIDE_FPS * SLIDE_SEGMENT_SECONDS), "-sc_threshold", "0",
-        "-force_key_frames", f"expr:gte(t,n_forced*{SLIDE_SEGMENT_SECONDS})",
-        "-c:a", "aac", "-b:a", "96k" if music else "48k", "-ac", "2", "-ar", "48000",
-        "-max_interleave_delta", "500000", "-flush_packets", "1",
-        "-f", "hls", "-hls_time", str(SLIDE_SEGMENT_SECONDS), "-hls_list_size", "8",
-        "-hls_allow_cache", "0",
-        "-hls_flags", "delete_segments+omit_endlist+independent_segments+temp_file",
-        "-hls_segment_filename", str(directory / f"sportsguide_{generation}_%05d.ts"),
-        str(directory / slide_stream.PLAYLIST),
-    ]
-
-
-def sports_guide_renderer_command():
-    return [sys.executable, str(BASE_DIR / "sports_guide_video.py"),
-            "--url", f"{CONTROL_URL}/api/v1/sports-guide",
-            "--fps", str(SLIDE_FPS)]
-
-
-SLIDE_STREAMS = {
-    "sports-guide": slide_stream.SlideStream(
-        "sports-guide", STREAMS_DIR / "sports-guide",
-        sports_guide_renderer_command, build_sports_guide_command,
-        idle_seconds=SLIDES_IDLE_SECONDS,
-        # One thread each for numpy's libraries (see sports_guide_video.py),
-        # and frame-sized buffers handed back when freed: glibc otherwise raises
-        # its mmap threshold after the first and keeps ~50 MB it no longer uses.
-        env={**os.environ, "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
-             "OPENBLAS_NUM_THREADS": "1", "MALLOC_MMAP_THRESHOLD_": "131072"}),
-}
+# The slide channels' video is web-basic's (web_basic.py, its own service and limits). Split,
+# Apache sends their paths there, and these are never asked for; the one process (the
+# rollback) makes them itself, in STREAMS_DIR.
+SLIDE_STREAMS = web_basic.slide_streams(STREAMS_DIR, CONTROL_URL, SLIDES_IDLE_SECONDS)
+# Split, control reads the slide channels' video from web-basic (its /web/v1/status).
+web_basic_status = web_basic.StatusClient(
+    os.environ.get("TV_THING_WEB_BASIC_URL", "http://127.0.0.1:8085"), lineup.SLIDES)
 
 
 def slides_worker():
@@ -4414,7 +4337,7 @@ def api_v1_sports_guide(now=None):
             and time.monotonic() - cache["at"] < SPORTS_GUIDE_CACHE_SECONDS):
         return cache["payload"]
     payload = {"api_version": API_VERSION, "date": today, "generated_at": clock,
-               "channel": next(iter(slide_views()), None)}
+               "channel": next((view for view in slide_views() if view["channel_id"] == "sports-guide"), None)}
     if roku is None:
         return {**payload, "available": False, "games": 0, "sports": [], "errors": [
             {"message": "The Roku lane is not configured, so TV Thing has no schedules."}]}
@@ -4758,7 +4681,7 @@ def _api_v1_status_payload():
         "scanning": {"channels": scanning},
         "recording": recording_summary(),
         # The station's slide channels as video, made only while watched.
-        "slides": feed_client.slides(),
+        "slides": web_basic_status.slides() if ROLE == "control" else feed_client.slides(),
         # --- compatibility view: the primary video lane, flat ---
         "source": {
             "id": primary,
@@ -6257,40 +6180,9 @@ class TVHandler(SimpleHTTPRequestHandler):
                 pass
 
     def send_slide_media(self, name, filename):
-        """A slide channel's video. The playlist starts it and waits for its
-        first segments; a segment keeps it running."""
-        stream = SLIDE_STREAMS[name]
-        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:m3u8|ts)", filename):
-            self.send_json({"error": "Invalid slide media path"}, status=400)
-            return
-        if filename.endswith(".m3u8"):
-            if not stream.demand(wait=SLIDES_START_TIMEOUT):
-                self.send_response(503)
-                self.send_header("Retry-After", "2")
-                self.send_header("Content-Type", "application/json")
-                body = json.dumps({"error": f"The {name} video is starting"}).encode()
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-                return
-        else:
-            stream.touch()
-        try:
-            content = (stream.directory / filename).read_bytes()
-        except OSError:
-            self.send_error(404)
-            return
-        self.send_response(200)
-        self.send_header("Content-Type", "application/vnd.apple.mpegurl"
-                         if filename.endswith(".m3u8") else "video/mp2t")
-        self.send_header("Content-Length", str(len(content)))
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        try:
-            self.wfile.write(content)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+        """A slide channel's video (web_basic.send_slide): the playlist starts it and waits
+        for its first segments; a segment keeps it running."""
+        web_basic.send_slide(self, name, SLIDE_STREAMS[name], filename, SLIDES_START_TIMEOUT)
 
     def send_vizelvision_media(self, parsed):
         """Relay the existing station HLS, without taking any tuner or encoder.
@@ -6337,61 +6229,9 @@ class TVHandler(SimpleHTTPRequestHandler):
             pass
 
     def send_internet_stream(self, parsed):
-        """Relay an internet stream (internet_streams.py): its playlists, and
-        its segments as they stream in. No tuner, lock or encoder."""
-        parts = parsed.path.removeprefix("/stream/internet/").split("/", 2)
-        if len(parts) < 2 or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", parts[0]):
-            self.send_json({"error": "Invalid internet stream path"}, status=400)
-            return
-        try:
-            if len(parts) == 2:
-                content = web_streams.playlist(*parts).encode()
-                response = None
-            else:
-                response = web_streams.segment(parts[0], parts[1], parts[2], parsed.query)
-        except internet_streams.StreamConfigError as error:
-            self.send_json({"error": str(error)}, status=500)
-            return
-        except internet_streams.StreamUnavailable as error:
-            self.send_json({"error": str(error)}, status=error.status)
-            return
-        if response is None:
-            self.send_response(200)
-            self.send_header("Content-Type", "application/vnd.apple.mpegurl")
-            self.send_header("Content-Length", str(len(content)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            try:
-                self.wfile.write(content)
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-            return
-        with response:
-            length = response.headers.get("Content-Length")
-            if length and int(length) > internet_streams.MAX_SEGMENT_BYTES:
-                self.send_json({"error": "Segment too large"}, status=502)
-                return
-            self.send_response(200)
-            self.send_header("Content-Type", response.headers.get("Content-Type")
-                             or "application/octet-stream")
-            if length:
-                self.send_header("Content-Length", length)
-            else:
-                self.close_connection = True
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            sent = 0
-            try:
-                while sent <= internet_streams.MAX_SEGMENT_BYTES:
-                    chunk = response.read(64 * 1024)
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
-                    sent += len(chunk)
-            except (BrokenPipeError, ConnectionResetError, OSError, TimeoutError):
-                self.close_connection = True
+        """Relay an internet stream (web_basic.send_relay): its playlists, and its segments
+        as they stream in. No tuner, lock or encoder."""
+        web_basic.send_relay(self, web_streams, parsed)
 
     def send_roku_preview(self):
         """What the Roku verifier sees, as an MJPEG stream (engineering)."""
