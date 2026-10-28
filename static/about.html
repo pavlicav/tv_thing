@@ -7,89 +7,167 @@
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="app.css">
   <style>
-    body { min-height: 100vh; background: var(--bg); }
-    .page { width: min(920px, calc(100% - 32px)); margin: 0 auto; padding: 46px 0 72px; }
-    .eyebrow {
-      color: var(--accent); font-size: 11px; font-weight: 700;
-      letter-spacing: .16em; text-transform: uppercase;
+    /* About TV Thing as the cable company's corporate site would have had it in 2001:
+       under the site's own top bar, a fixed 780-pixel page on a tiled background,
+       Verdana at 11 pixels, bevelled buttons and a news ticker. */
+    :root {
+      --navy: #0b2a5b; --blue: #2a5699; --sky: #6f93c9; --pale: #dfe8f5; --row: #eef3fa;
+      --rule: #9fb2d3; --orange: #f39a1d; --link: #0033cc; --visited: #663399; --ink: #1a1a1a;
     }
-    h1 { margin: 10px 0 12px; font-size: clamp(32px, 6vw, 54px); line-height: 1; }
-    .lede { max-width: 700px; color: var(--text-mute); font-size: 16px; line-height: 1.65; }
-    .flow {
-      display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px;
-      margin: 0 0 34px; overflow: hidden; border: 1px solid var(--border);
-      border-radius: 10px; background: var(--border);
+    body { background: #c9d5e6 repeating-linear-gradient(45deg, rgba(255,255,255,.22) 0 2px, transparent 2px 7px); }
+    #wrap {
+      width: 780px; margin: 14px auto 28px; color: var(--ink); color-scheme: light;
+      font: 11px/1.5 Verdana, Geneva, Tahoma, Arial, sans-serif;
+      background: #fff; border: 1px solid #5d77a6; box-shadow: 3px 3px 0 rgba(11,42,91,.25);
     }
-    .flow-step { min-height: 108px; padding: 16px; background: var(--surface); }
-    .flow-num { color: var(--accent); font: 600 11px/1 var(--mono); }
-    .flow-name { margin-top: 15px; font-weight: 650; }
-    .flow-sub { margin-top: 5px; color: var(--text-mute); font-size: 11px; line-height: 1.45; }
-    .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
-    .card { padding: 22px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
-    .card h2 { margin: 0 0 10px; font-size: 15px; }
-    .card p, .card li { color: var(--text-mute); font-size: 13px; line-height: 1.65; }
-    .card p:last-child { margin-bottom: 0; }
-    .card ul { margin: 8px 0 0; padding-left: 18px; }
-    .tag {
-      display: inline-block; margin: 2px 4px 2px 0; padding: 3px 7px;
-      border: 1px solid var(--border); border-radius: 999px;
-      color: var(--text-mute); font: 600 10px/1.4 var(--mono);
+    #wrap a { color: var(--link); }
+    #wrap a:visited { color: var(--visited); }
+    #wrap a:hover { color: #cc3300; }
+    #wrap code { font: 11px "Courier New", Courier, monospace; color: #003300; }
+
+    /* Utility bar, masthead, tabs, ticker */
+    #utility {
+      display: flex; justify-content: space-between; align-items: center; padding: 3px 10px;
+      background: #f2f5fa; border-bottom: 1px solid var(--rule); font-size: 10px; color: #555;
     }
-    code { color: var(--text); font-family: var(--mono); font-size: .92em; }
-    .lineup-dl {
-      display: flex; align-items: center; gap: 16px;
-      margin: 28px 0 0; padding: 16px 18px 16px 16px;
-      border: 1px solid var(--accent-line); border-radius: 10px;
-      background: var(--accent-soft);
+    #wrap #utility a { color: #335; text-decoration: none; }
+    #utility a:hover { text-decoration: underline; }
+    #masthead {
+      position: relative; height: 92px; overflow: hidden; color: #fff;
+      background: linear-gradient(180deg, #2a5699 0%, #163d7a 55%, #0b2a5b 100%);
     }
-    /* The printed card's rust, orange and mustard stripe, stood on end. */
-    .lineup-dl-stripe {
-      flex-shrink: 0; align-self: stretch; width: 12px; border-radius: 2px;
-      background: linear-gradient(90deg, #b5441c 0 30%, transparent 30% 35%,
-                  #db7525 35% 65%, transparent 65% 70%, #dca42e 70%);
+    #masthead .swoosh { position: absolute; left: 0; top: 0; }
+    #masthead .logo {
+      position: absolute; left: 22px; top: 16px; font: italic 900 38px/1 "Trebuchet MS", Arial, sans-serif;
+      letter-spacing: -1px; text-shadow: 2px 2px 0 #061a3a;
     }
-    .lineup-dl-text { flex: 1; min-width: 0; }
-    .lineup-dl-text strong { display: block; color: var(--accent); font-size: 14px; }
-    .lineup-dl-text span { display: block; margin-top: 4px; color: var(--text-dim); font-size: 12px; line-height: 1.55; }
-    .lineup-dl-actions { display: flex; flex-shrink: 0; gap: 8px; }
-    /* Two classes deep, to outrank app.css's .page a. */
-    .lineup-dl .lineup-dl-action {
-      padding: 8px 13px; border: 1px solid var(--accent); border-radius: var(--r-md);
-      background: var(--accent); color: var(--bg); font-size: 12px; font-weight: 700;
+    #masthead .logo small { font-size: 15px; font-style: normal; letter-spacing: 3px; color: var(--orange); margin-left: 4px; }
+    #masthead .tagline { position: absolute; left: 26px; top: 62px; font: bold 10px Verdana, sans-serif; letter-spacing: 2px; color: #cfe0ff; }
+    .burst {
+      position: absolute; right: 26px; top: 10px; width: 96px; height: 96px; display: grid; place-items: center;
+      text-align: center; color: #7a1500; font: bold 10px/1.15 Verdana, sans-serif; transform: rotate(12deg);
+      background: #ffe14a;
+      clip-path: polygon(50% 0, 59% 13%, 75% 6%, 76% 23%, 93% 25%, 86% 40%, 100% 50%, 86% 60%, 93% 75%, 76% 77%,
+                         75% 94%, 59% 87%, 50% 100%, 41% 87%, 25% 94%, 24% 77%, 7% 75%, 14% 60%, 0 50%, 14% 40%,
+                         7% 25%, 24% 23%, 25% 6%, 41% 13%);
+    }
+    .burst b { display: block; font-size: 15px; color: #c00; }
+    #tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px 8px 0; background: var(--navy); }
+    #wrap #tabs a {
+      padding: 4px 9px 3px; border: 1px solid #5d77a6; border-bottom: none; border-radius: 6px 6px 0 0;
+      background: linear-gradient(#e9eff8, #b9c9e2); color: var(--navy); font: bold 10px Verdana, sans-serif;
+      text-decoration: none;
+    }
+    #wrap #tabs a:hover { background: linear-gradient(#fff, #d6e1f1); }
+    #wrap #tabs a.here { background: #fff; color: #cc3300; padding-bottom: 5px; margin-bottom: -1px; }
+    #ticker {
+      display: flex; overflow: hidden; border-top: 1px solid #fff; border-bottom: 1px solid var(--rule);
+      background: #fff8dc; font: bold 10px Verdana, sans-serif; white-space: nowrap;
+    }
+    #ticker .label { flex-shrink: 0; padding: 3px 8px; background: #cc3300; color: #fff; }
+    #ticker .track { display: inline-block; padding: 3px 0 3px 100%; color: #7a1500; animation: ticker 38s linear infinite; }
+    @keyframes ticker { to { transform: translateX(-100%); } }
+    @media (prefers-reduced-motion: reduce) { #ticker .track { animation: none; padding-left: 10px; } }
+
+    /* Body: a left column and the content */
+    #body { display: flex; }
+    #side { flex: 0 0 168px; padding: 12px 10px 16px; background: var(--pale); border-right: 1px solid var(--rule); }
+    #content { flex: 1; min-width: 0; padding: 12px 18px 20px; }
+    .side-title { margin: 0 0 4px; padding: 3px 6px; background: var(--blue); color: #fff; font: bold 10px Verdana, sans-serif; letter-spacing: 1px; text-transform: uppercase; }
+    .side-nav { margin: 0 0 14px; padding: 0; list-style: none; }
+    #wrap .side-nav a {
+      display: block; margin-bottom: 3px; padding: 3px 6px; border: 2px outset #e8eef8; background: #f6f9fd;
+      color: var(--navy); font-weight: bold; text-decoration: none;
+    }
+    .side-nav a::before { content: "» "; color: var(--orange); }
+    #wrap .side-nav a:hover { background: #fffbe6; }
+    .side-nav a:active { border-style: inset; }
+    .care { padding: 7px; border: 1px solid var(--rule); background: #fff; }
+    .care strong { display: block; color: #cc3300; }
+    .care .big { font: bold 20px/1.2 "Trebuchet MS", Arial, sans-serif; color: var(--navy); }
+    .badge {
+      display: block; margin-top: 12px; padding: 4px; border: 1px solid #8a8a8a; background: #f4f4f4;
+      font: 9px/1.3 Verdana, sans-serif; color: #444; text-align: center;
+    }
+    .badge b { display: block; color: #fff; background: #555; margin: -4px -4px 4px; padding: 2px; letter-spacing: 1px; }
+
+    .crumbs { margin: 0 0 6px; font-size: 10px; color: #666; }
+    h1 {
+      margin: 0 0 10px; padding-bottom: 4px; color: var(--navy); font: bold 20px Arial, Helvetica, sans-serif;
+      border-bottom: 3px solid; border-image: linear-gradient(90deg, var(--orange), var(--blue) 45%, transparent) 1;
+    }
+    h2 {
+      margin: 22px 0 8px; padding: 3px 8px; color: #fff; font: bold 12px Arial, Helvetica, sans-serif;
+      background: linear-gradient(90deg, var(--navy), var(--sky));
+    }
+    h3 { margin: 0 0 4px; color: var(--navy); font: bold 12px Arial, Helvetica, sans-serif; }
+    p { margin: 0 0 9px; }
+    .intro { font-size: 12px; }
+    .intro::first-letter { float: left; margin: 3px 4px 0 0; color: var(--blue); font: bold 34px/0.8 Georgia, serif; }
+
+    .pdf { display: flex; align-items: center; gap: 12px; padding: 8px; border: 1px dashed var(--orange); background: #fffbea; }
+    .pdf-icon {
+      flex-shrink: 0; width: 30px; height: 38px; display: grid; place-items: end center; padding-bottom: 3px;
+      background: linear-gradient(135deg, #fff 70%, #ddd 70%); border: 1px solid #999; color: #fff;
+      font: bold 8px Verdana, sans-serif; box-sizing: border-box;
+    }
+    .pdf-icon span { background: #c00; padding: 0 3px; }
+    .pdf-text { flex: 1; }
+    .pdf-text strong { color: #cc3300; }
+    #wrap .button {
+      display: inline-block; margin: 2px 4px 2px 0; padding: 3px 10px; border: 2px outset #f6c780;
+      background: linear-gradient(#ffd27f, #f39a1d); color: #3a1d00 !important; font: bold 10px Verdana, sans-serif;
       text-decoration: none; white-space: nowrap;
     }
-    .lineup-dl .lineup-dl-action:hover { filter: brightness(1.1); }
-    .lineup-dl .lineup-dl-action.secondary { background: transparent; color: var(--accent); }
-    .lineup-dl .lineup-dl-action.secondary:hover { background: var(--accent-soft); filter: none; }
-    .section-title {
-      margin: 40px 0 6px; color: var(--text-dim); font-size: 11px; font-weight: 700;
-      letter-spacing: .16em; text-transform: uppercase;
-    }
-    .section-lede { max-width: 700px; margin: 0 0 14px; color: var(--text-mute); font-size: 13px; line-height: 1.65; }
-    /* The dial: one cell per block of numbers, like the lineup card's headings. */
-    .dial {
-      display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; margin: 0;
-      overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--border);
-    }
-    .dial > div { display: flex; gap: 14px; padding: 14px 16px; background: var(--surface); }
-    .dial dt { flex: 0 0 62px; color: var(--accent); font: 600 12px/1.6 var(--mono); }
-    .dial dd { margin: 0; min-width: 0; }
-    .dial strong { display: block; font-size: 13px; }
-    .dial span { display: block; margin-top: 3px; color: var(--text-mute); font-size: 12px; line-height: 1.55; }
-    .flow.services { grid-template-columns: repeat(4, 1fr); margin-top: 0; }
-    .note { margin-top: 14px; padding: 18px 20px; border-left: 2px solid var(--accent); background: var(--surface); }
-    .note strong { display: block; margin-bottom: 5px; font-size: 13px; }
-    .note span { color: var(--text-mute); font-size: 12px; line-height: 1.55; }
-    .note ul { margin: 0; padding-left: 18px; }
-    .note li { color: var(--text-mute); font-size: 12px; line-height: 1.65; }
-    @media (max-width: 760px) {
-      .flow { grid-template-columns: 1fr; }
-      .flow-step { min-height: 0; }
-      .grid { grid-template-columns: 1fr; }
-      .dial, .flow.services { grid-template-columns: 1fr; }
-      .lineup-dl { flex-direction: column; align-items: stretch; gap: 14px; }
-      .lineup-dl-stripe { display: none; }
-      .lineup-dl-actions .lineup-dl-action { flex: 1; text-align: center; }
+    #wrap .button.plain { border-color: #d6dfee; background: linear-gradient(#fff, #d6dfee); color: var(--navy) !important; }
+    .button:active { border-style: inset; }
+
+    table.grid { width: 100%; border-collapse: collapse; border: 1px solid var(--rule); }
+    table.grid th { padding: 4px 6px; background: var(--blue); color: #fff; font: bold 10px Verdana, sans-serif; text-align: left; }
+    table.grid td { padding: 5px 6px; border-top: 1px solid #c9d5e9; vertical-align: top; }
+    table.grid tr:nth-child(even) td { background: var(--row); }
+    table.grid td.ch { width: 64px; color: #cc3300; font: bold 11px "Courier New", monospace; white-space: nowrap; }
+    table.grid td b { color: var(--navy); }
+    #wrap .scroll { overflow-x: auto; overflow-y: visible; max-height: none; }
+
+    .steps { display: flex; align-items: stretch; gap: 0; }
+    .step { flex: 1; padding: 6px; border: 1px solid var(--rule); background: linear-gradient(#fff, var(--pale)); }
+    .step .n { display: inline-block; width: 18px; height: 18px; margin-bottom: 3px; border-radius: 50%; background: var(--orange); color: #fff; font: bold 10px/18px Verdana, sans-serif; text-align: center; }
+    .step b { display: block; color: var(--navy); }
+    .arrow { flex: 0 0 14px; display: grid; place-items: center; color: var(--orange); font-size: 12px; }
+
+    .boxes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .box { border: 1px solid var(--rule); }
+    .box h3 { margin: 0; padding: 3px 7px; background: var(--pale); border-bottom: 1px solid var(--rule); }
+    .box h3::before { content: "■ "; color: var(--orange); }
+    .box .in { padding: 7px; }
+    .box ul, .standards { margin: 0; padding-left: 16px; }
+    .box li, .standards li { margin-bottom: 3px; }
+    .standards { list-style: square; }
+    .standards li::marker { color: var(--orange); }
+    .tag { display: inline-block; margin: 1px 3px 1px 0; padding: 0 5px; border: 1px solid var(--rule); background: var(--row); font: 10px "Courier New", monospace; }
+
+    .top { display: block; margin-top: 4px; text-align: right; font-size: 10px; }
+    #footer { padding: 10px 12px 12px; border-top: 3px solid var(--orange); background: var(--navy); color: #c8d6ee; font-size: 10px; text-align: center; }
+    #wrap #footer a { color: #fff; }
+    #footer .fine { margin-top: 6px; color: #8fa6c8; }
+    .counter { display: inline-flex; gap: 1px; margin: 8px 0 2px; padding: 2px; background: #000; border: 2px inset #888; }
+    .counter span { width: 9px; background: #111; color: #3f3; font: bold 12px/16px "Courier New", monospace; }
+
+    @media (max-width: 800px) {
+      #wrap { width: auto; margin: 0; border: none; box-shadow: none; }
+      #body { flex-direction: column; }
+      #side { flex: none; border-right: none; border-bottom: 1px solid var(--rule); padding: 10px 16px; }
+      .side-nav { display: flex; flex-wrap: wrap; gap: 4px; }
+      .side-nav a { margin: 0; }
+      .care, .badge { display: none; }
+      #content { padding: 12px 16px 18px; }
+      .burst { display: none; }
+      .steps { flex-direction: column; }
+      .arrow { transform: rotate(90deg); padding: 2px 0; }
+      .boxes { grid-template-columns: 1fr; }
+      #utility .where { display: none; }
+      #masthead .tagline { right: 16px; font-size: 9px; letter-spacing: 1px; }
     }
   </style>
 </head>
@@ -104,239 +182,240 @@
       <a class="navlink" href="rescan.html">Scan</a>
       <a class="navlink" href="dx.html">DX</a>
       <a class="navlink" href="roku.html">Roku</a>
+      <a class="navlink" href="inputs.html">Inputs</a>
       <a class="navlink" href="about.html" aria-current="page">About</a>
     </nav>
   </header>
 
-  <main class="page">
-    <div class="eyebrow">Broadcast · analog · concurrent</div>
-    <h1>About TV Thing</h1>
-    <p class="lede">
-      TV Thing turns the Hauppauge HVR-1600 in <code>viviserv</code> into
-      low-latency browser streams. The card carries two independent RF
-      front-ends, so a digital and an analog channel stream at the same time,
-      each on its own playlist. It is purpose-built around the installed
-      hardware, with fast source changes and hard limits that keep a bad
-      timestamp or encoder failure from running away with the machine.
-      The same dial also carries YouTube TV through a Roku, streams from the
-      web, and the station's own channels.
-    </p>
+<div id="wrap">
+  <div id="utility">
+    <span class="where">Your area: <b>viviserv</b> · Washington, DC &amp; Lansing, MI</span>
+    <span><a href="./">Home</a> | <a href="guide.html">TV Listings</a> | <a href="lineup-card.pdf">Channel Lineup</a> | <a href="api/v1">Developers</a></span>
+  </div>
 
-    <section class="lineup-dl" aria-label="Channel lineup card">
-      <span class="lineup-dl-stripe" aria-hidden="true"></span>
-      <span class="lineup-dl-text">
-        <strong>Channel lineup card</strong>
-        <span>Every TV Thing channel number on one US Letter page, typeset in
-          LaTeX like a cable company's lineup card from the seventies. The print
-          version leaves off the cream card stock to save ink.</span>
-      </span>
-      <span class="lineup-dl-actions">
-        <a class="lineup-dl-action" href="lineup-card.pdf" download="TV Thing channel lineup.pdf">Download PDF</a>
-        <a class="lineup-dl-action secondary" href="lineup-card-print.pdf" download="TV Thing channel lineup (print).pdf">Print version</a>
-      </span>
-    </section>
+  <div id="masthead" role="banner">
+    <svg class="swoosh" width="780" height="92" viewBox="0 0 780 92" aria-hidden="true">
+      <path d="M-20 80 C 180 20, 420 120, 800 30 L 800 50 C 430 135, 180 40, -20 98 Z" fill="#f39a1d" opacity=".85"/>
+      <path d="M-20 92 C 200 40, 440 130, 800 52 L 800 60 C 440 140, 200 52, -20 100 Z" fill="#fff" opacity=".35"/>
+    </svg>
+    <div class="logo">TV Thing<small>CABLE</small></div>
+    <div class="tagline">DIGITAL CABLE · BROADBAND STREAMS · ANALOG LIVES HERE</div>
+    <div class="burst"><div><b>NEW!</b>Cairo Radio<br>on Ch. 197</div></div>
+  </div>
 
-    <h2 class="section-title">The dial</h2>
-    <p class="section-lede">
-      Channel numbers come in blocks, as on an old cable card, so channel up
-      stays within a kind of thing. <code>lineup.json</code> files each
-      channel; one nobody has filed yet takes the first free number in its
-      source's block for newcomers and keeps it until it is given a place.
-    </p>
-    <dl class="dial">
-      <div><dt>0–9</dt><dd><strong>Our channels</strong><span>0 VizelVision, 1 Trains, 2 pen2live, 6 the Sports Guide. 3–5 and 7–9 are held for more.</span></dd></div>
-      <div><dt>10–24</dt><dd><strong>Washington &amp; Baltimore</strong><span>The antenna. A network's last digit is its channel on the air (14 NBC 4, 15 FOX 5, 17 ABC 7, 19 CBS 9), with a station's second channel right after it.</span></dd></div>
-      <div><dt>25–39</dt><dd><strong>Michigan</strong><span>YouTube TV's Lansing stations in the order of the Lansing and Flint dial: 26 CBS, 27 NBC, 30 PBS, 32 FOX, 34 ABC, 35 CW. The two markets never share a number.</span></dd></div>
-      <div><dt>40–59</dt><dd><strong>Sports</strong><span>Cable sports: TBS 40, TNT 41, ESPN 42, ESPN2 43, FS1 48, NFL Network 53, NBA TV 54.</span></dd></div>
-      <div><dt>60–69</dt><dd><strong>News &amp; more</strong><span>CNN 60, FOX News 62, CNBC 63, The Weather Channel 64, and a few favourites.</span></dd></div>
-      <div><dt>70</dt><dd><strong>House channel</strong><span>VizelVision again, where the cable channels meet the day's games.</span></dd></div>
-      <div><dt>71–99</dt><dd><strong>Live Sports</strong><span>Each day's games by kickoff, from Sunday Ticket, Thursday Night Football, MLB and the NHL. The day turns at 3 AM, so a late game keeps its number until then.</span></dd></div>
-      <div><dt>100–109</dt><dd><strong>Roku</strong><span>Sources with no block of their own; 109 is the Roku driven by hand.</span></dd></div>
-      <div><dt>110–289</dt><dd><strong>By genre</strong><span>YouTube TV and the antenna's subchannels side by side: news 110, learning 130, kids 150, entertainment 170, music 190 (Cairo Radio on 197), classic TV 200, movies 220, crime 240, game shows 250, español 260, shopping 270, faith 280.</span></dd></div>
-      <div><dt>290–299</dt><dd><strong>Repeaters &amp; other markets</strong><span>A station heard twice, and room for YouTube TV's Lansing copies once a Michigan antenna takes 25–39.</span></dd></div>
-      <div><dt>300–399</dt><dd><strong>Newcomers</strong><span>A new antenna channel lands at 300, a new YouTube TV channel at 350, a new web stream at 370. 380–399 wait for a Michigan antenna's subchannels.</span></dd></div>
-      <div><dt>off</dt><dd><strong>Off the dial</strong><span>A hidden channel has no number and is in no list or guide, but can still be tuned by its id.</span></dd></div>
-    </dl>
+  <nav id="tabs" aria-label="About sections">
+    <a class="here" href="#overview">About Us</a>
+    <a href="#lineup">Channel Lineup</a>
+    <a href="#network">Our Network</a>
+    <a href="#signal">How It Works</a>
+    <a href="#technology">Technology Center</a>
+    <a href="#standards">Our Standards</a>
+  </nav>
 
-    <h2 class="section-title">Three services</h2>
-    <p class="section-lede">
-      Production is three processes behind one front door, so each can be
-      restarted without taking the others' viewers with it.
-    </p>
-    <section class="flow services" aria-label="Services">
-      <div class="flow-step"><div class="flow-num">:8080</div><div class="flow-name">Front door</div><div class="flow-sub">Apache sends the pages and <code>/api/</code> to control, <code>/stream/</code> to the feed, and the web streams to web-basic. It is reloaded gracefully, never restarted.</div></div>
-      <div class="flow-step"><div class="flow-num">tv-thing-feed</div><div class="flow-name">Feed</div><div class="flow-sub">The tuners, the Roku capture, every encoder, the recorders and the relays. Restarting it drops every stream and ends every recording.</div></div>
-      <div class="flow-step"><div class="flow-num">tv-thing</div><div class="flow-name">Control</div><div class="flow-sub">The API and this site, locks, tunes, Roku navigation, the guides and the VCR's rules. Restarting it drops no stream.</div></div>
-      <div class="flow-step"><div class="flow-num">tv-thing-web-basic</div><div class="flow-name">Web-basic</div><div class="flow-sub">The Sports Guide's video, Cairo Radio and pen2live, each made only while watched, on two cores and 768 MB. Restarting it drops only those.</div></div>
-    </section>
+  <div id="ticker" aria-label="News">
+    <span class="label">NEWS</span>
+    <span class="track">*** NOW ON CHANNEL 197: CAIRO RADIO *** THE SPORTS GUIDE MOVES TO CHANNEL 6 *** PEN2LIVE, THE PUPPY CAM, ON CHANNEL 2 *** TRAINS ON CHANNEL 1 *** MICHIGAN STATIONS NOW ON 25&#8211;39 *** LIVE GAMES ON 71&#8211;99 EVERY DAY *** THE DAY TURNS AT 3 AM ***</span>
+  </div>
 
-    <h2 class="section-title">An antenna channel's path</h2>
-    <section class="flow" aria-label="Broadcast processing path">
-      <div class="flow-step"><div class="flow-num">01</div><div class="flow-name">ATSC tuner</div><div class="flow-sub">Linux DVB frontend locks the requested RF channel.</div></div>
-      <div class="flow-step"><div class="flow-num">02</div><div class="flow-name">Service select</div><div class="flow-sub"><code>dvb_source.py</code> keeps the chosen program and remaps its PIDs.</div></div>
-      <div class="flow-step"><div class="flow-num">03</div><div class="flow-name">Local UDP</div><div class="flow-sub">A small MPEG transport stream crosses localhost only.</div></div>
-      <div class="flow-step"><div class="flow-num">04</div><div class="flow-name">Bounded encode</div><div class="flow-sub">FFmpeg produces H.264/AAC in 600 ms, generation-scoped HLS segments.</div></div>
-      <div class="flow-step"><div class="flow-num">05</div><div class="flow-name">Browser</div><div class="flow-sub">The UI waits for the exact generation, then atomically hands it to hls.js.</div></div>
-    </section>
+  <div id="body">
+    <aside id="side">
+      <p class="side-title">Quick Links</p>
+      <ul class="side-nav">
+        <li><a href="./">Watch TV</a></li>
+        <li><a href="guide.html">TV Listings</a></li>
+        <li><a href="vcr.html">Program Your VCR</a></li>
+        <li><a href="inputs.html">Network Status</a></li>
+        <li><a href="lineup-card.pdf">Lineup Card (PDF)</a></li>
+        <li><a href="api/v1">Developers</a></li>
+      </ul>
+      <div class="care">
+        <strong>Customer Care</strong>
+        Questions about your service? Dial
+        <div class="big">8080</div>
+        Open 24 hours. No hold music.
+      </div>
+      <div class="badge"><b>CERTIFIED</b>Three real retunes before every stream change</div>
+      <div class="badge"><b>BEST VIEWED</b>at 800 × 600 or higher, 16-bit color</div>
+    </aside>
 
-    <section class="grid">
-      <article class="card">
-        <h2>Why every tune starts fresh</h2>
-        <p>
-          Stations do not share one reliable timestamp clock. Reusing an encoder
-          across channels can make FFmpeg invent huge runs of duplicate frames.
-          Each request therefore gets a new source, encoder, stream ID, and
-          segment namespace. The old picture stays visible until the new
-          manifest is actually ready.
-        </p>
-      </article>
+    <main id="content">
+      <p class="crumbs"><a href="./">Home</a> &gt; About Us</p>
+      <h1>About TV Thing</h1>
 
-      <article class="card">
-        <h2>Quality presets</h2>
-        <p>
-          <span class="tag">480p · 1 Mb/s</span>
-          <span class="tag">720p · 2.5 Mb/s</span>
-          <span class="tag">Native · 4.5 Mb/s</span>
-        </p>
-        <p>Audio is AAC at 96, 128, or 160 kb/s respectively.</p>
-      </article>
+      <h2 id="overview">Company Overview</h2>
+      <p class="intro">
+        TV Thing turns the Hauppauge HVR-1600 in <code>viviserv</code> into low-latency browser
+        streams. The card carries two independent RF front-ends, so a digital and an analog
+        channel stream at the same time, each on its own playlist. It is purpose-built around the
+        installed hardware, with fast source changes and hard limits that keep a bad timestamp or
+        encoder failure from running away with the machine. The same dial also carries YouTube TV
+        through a Roku, streams from the web, and the station's own channels.
+      </p>
 
-      <article class="card">
-        <h2>Guardrails</h2>
-        <ul>
+      <h2 id="lineup">Channel Lineup</h2>
+      <div class="pdf">
+        <div class="pdf-icon" aria-hidden="true"><span>PDF</span></div>
+        <div class="pdf-text">
+          <strong>Download your Channel Lineup Card!</strong><br>
+          Every TV Thing channel number on one US Letter page, typeset in LaTeX like a cable
+          company's lineup card from the seventies. The printer-friendly version leaves off the
+          cream card stock to save ink.
+        </div>
+        <div>
+          <a class="button" href="lineup-card.pdf" download="TV Thing channel lineup.pdf">Download PDF</a><br>
+          <a class="button plain" href="lineup-card-print.pdf" download="TV Thing channel lineup (print).pdf">Printer-Friendly</a>
+        </div>
+      </div>
+      <p style="margin-top:10px">
+        Channel numbers come in blocks, as on an old cable card, so channel up stays within a kind
+        of thing. <code>lineup.json</code> files each channel; one nobody has filed yet takes the
+        first free number in its source's block for newcomers and keeps it until it is given a place.
+      </p>
+      <div class="scroll">
+        <table class="grid">
+          <tr><th>Channels</th><th>Block</th><th>What's on</th></tr>
+          <tr><td class="ch">0–9</td><td><b>Our channels</b></td><td>0 VizelVision, 1 Trains, 2 pen2live, 6 the Sports Guide. 3–5 and 7–9 are held for more.</td></tr>
+          <tr><td class="ch">10–24</td><td><b>Washington &amp; Baltimore</b></td><td>The antenna. A network's last digit is its channel on the air (14 NBC 4, 15 FOX 5, 17 ABC 7, 19 CBS 9), with a station's second channel right after it.</td></tr>
+          <tr><td class="ch">25–39</td><td><b>Michigan</b></td><td>YouTube TV's Lansing stations in the order of the Lansing and Flint dial: 26 CBS, 27 NBC, 30 PBS, 32 FOX, 34 ABC, 35 CW. The two markets never share a number.</td></tr>
+          <tr><td class="ch">40–59</td><td><b>Sports</b></td><td>Cable sports: TBS 40, TNT 41, ESPN 42, ESPN2 43, FS1 48, NFL Network 53, NBA TV 54.</td></tr>
+          <tr><td class="ch">60–69</td><td><b>News &amp; more</b></td><td>CNN 60, FOX News 62, CNBC 63, The Weather Channel 64, and a few favourites.</td></tr>
+          <tr><td class="ch">70</td><td><b>House channel</b></td><td>VizelVision again, where the cable channels meet the day's games.</td></tr>
+          <tr><td class="ch">71–99</td><td><b>Live Sports</b></td><td>Each day's games by kickoff, from Sunday Ticket, Thursday Night Football, MLB and the NHL. The day turns at 3 AM, so a late game keeps its number until then.</td></tr>
+          <tr><td class="ch">100–109</td><td><b>Roku</b></td><td>Sources with no block of their own; 109 is the Roku driven by hand.</td></tr>
+          <tr><td class="ch">110–289</td><td><b>By genre</b></td><td>YouTube TV and the antenna's subchannels side by side: news 110, learning 130, kids 150, entertainment 170, music 190 (Cairo Radio on 197), classic TV 200, movies 220, crime 240, game shows 250, español 260, shopping 270, faith 280.</td></tr>
+          <tr><td class="ch">290–299</td><td><b>Repeaters &amp; other markets</b></td><td>A station heard twice, and room for YouTube TV's Lansing copies once a Michigan antenna takes 25–39.</td></tr>
+          <tr><td class="ch">300–399</td><td><b>Newcomers</b></td><td>A new antenna channel lands at 300, a new YouTube TV channel at 350, a new web stream at 370. 380–399 wait for a Michigan antenna's subchannels.</td></tr>
+          <tr><td class="ch">off</td><td><b>Off the dial</b></td><td>A hidden channel has no number and is in no list or guide, but can still be tuned by its id.</td></tr>
+        </table>
+      </div>
+      <a class="top" href="#wrap">Back to top ▲</a>
+
+      <h2 id="network">Our Network</h2>
+      <p>Production is three processes behind one front door, so each can be restarted without
+        taking the others' viewers with it. See them live on the <a href="inputs.html">Inputs</a> page.</p>
+      <div class="scroll">
+        <table class="grid">
+          <tr><th>Facility</th><th>Unit</th><th>What it does</th></tr>
+          <tr><td><b>Front door</b></td><td><code>:8080</code></td><td>Apache sends the pages and <code>/api/</code> to control, <code>/stream/</code> to the feed, and the web streams to web-basic. It is reloaded gracefully, never restarted.</td></tr>
+          <tr><td><b>Feed</b></td><td><code>tv-thing-feed</code></td><td>The tuners, the Roku capture, every encoder, the recorders and the relays. Restarting it drops every stream and ends every recording.</td></tr>
+          <tr><td><b>Control</b></td><td><code>tv-thing</code></td><td>The API and this site, locks, tunes, Roku navigation, the guides and the VCR's rules. Restarting it drops no stream.</td></tr>
+          <tr><td><b>Web-basic</b></td><td><code>tv-thing-web-basic</code></td><td>The Sports Guide's video, Cairo Radio and pen2live, each made only while watched, on two cores and 768 MB. Restarting it drops only those.</td></tr>
+        </table>
+      </div>
+      <a class="top" href="#wrap">Back to top ▲</a>
+
+      <h2 id="signal">How Your Signal Gets To You</h2>
+      <p>An antenna channel's path, from the rooftop to your browser:</p>
+      <div class="steps" aria-label="Broadcast processing path">
+        <div class="step"><span class="n">1</span><b>ATSC tuner</b>Linux DVB frontend locks the requested RF channel.</div>
+        <div class="arrow" aria-hidden="true">►</div>
+        <div class="step"><span class="n">2</span><b>Service select</b><code>dvb_source.py</code> keeps the chosen program and remaps its PIDs.</div>
+        <div class="arrow" aria-hidden="true">►</div>
+        <div class="step"><span class="n">3</span><b>Local UDP</b>A small MPEG transport stream crosses localhost only.</div>
+        <div class="arrow" aria-hidden="true">►</div>
+        <div class="step"><span class="n">4</span><b>Bounded encode</b>FFmpeg produces H.264/AAC in 600 ms, generation-scoped HLS segments.</div>
+        <div class="arrow" aria-hidden="true">►</div>
+        <div class="step"><span class="n">5</span><b>Browser</b>The UI waits for the exact generation, then atomically hands it to hls.js.</div>
+      </div>
+      <a class="top" href="#wrap">Back to top ▲</a>
+
+      <h2 id="technology">Technology Center</h2>
+      <div class="boxes">
+        <div class="box"><h3>Why every tune starts fresh</h3><div class="in">
+          <p>Stations do not share one reliable timestamp clock. Reusing an encoder across channels
+            can make FFmpeg invent huge runs of duplicate frames. Each request therefore gets a new
+            source, encoder, stream ID, and segment namespace. The old picture stays visible until
+            the new manifest is actually ready.</p></div></div>
+        <div class="box"><h3>Quality presets</h3><div class="in">
+          <p><span class="tag">480p · 1 Mb/s</span><span class="tag">720p · 2.5 Mb/s</span><span class="tag">Native · 4.5 Mb/s</span></p>
+          <p>Audio is AAC at 96, 128, or 160 kb/s respectively.</p></div></div>
+        <div class="box"><h3>Guardrails</h3><div class="in"><ul>
           <li>Duplicate-frame and UDP-overrun trips</li>
           <li>Maximum segment size and stalled-output watchdogs</li>
           <li>CPU, memory, process, file-size, GPU, and temperature limits</li>
           <li>Three real retunes plus software decode before a stream change ships</li>
-        </ul>
-      </article>
+        </ul></div></div>
+        <div class="box"><h3>Encoding on viviserv</h3><div class="in">
+          <p>Production currently uses low-latency <code>libx264</code>. The NVIDIA Quadro K4200 can
+            encode with NVENC, but sustained streaming drove this particular card to its thermal
+            ceiling, so the safe CPU path is pinned. Hardware probing and automatic fallback remain
+            available.</p></div></div>
+        <div class="box"><h3>Operational pieces</h3><div class="in">
+          <p><code>server.py</code> is both halves: control, and in the feed role
+            (<code>feed_server.py</code>) the lanes. <code>channels.py</code> is the one list of
+            channels that the lineup, catalog, guide and tune all read, and <code>web_basic.py</code>
+            runs the web streams. <code>dvb_source.py</code> talks directly to Linux DVB,
+            <code>atsc_scan.py</code> sweeps the band and probes single channels for DX, and
+            <code>analog_tuner.py</code> discovers the card's tuner inputs and maps fixed US cable
+            channel numbers onto its NTSC tuner, while <code>stream_sanity_check.py</code> measures
+            request-to-stream time, decodability, segment behavior, write rate, CPU, memory, and GPU
+            load, and <code>web_stream_check.py</code> watches a web stream's CPU and memory.</p></div></div>
+        <div class="box"><h3>Two front-ends, two lanes</h3><div class="in">
+          <p>The S5H1409 ATSC demodulator and the analog tuner tune independently, so the
+            <code>digital</code> and <code>analog</code> lanes each hold their own tuner, encoder,
+            and HLS playlist and never displace one another. FM is the same analog tuner in radio
+            demod mode, so it replaces analog TV only. The analog list exposes channels 1–135 from
+            the fixed US cable STD plan and never runs a channel scan. Generic capture cards are not
+            supported: discovery keeps only nodes that expose a V4L2 tuner input.</p></div></div>
+        <div class="box"><h3>Scanning and DX</h3><div class="in">
+          <p>Channel scanning is native rather than a <code>w_scan</code> wrapper. Each frequency is
+            visited once, reading the PSIP virtual channel table and the PAT/PMT together, with
+            every PMT filtered concurrently. The sweep covers RF 2–36; everything above was
+            reallocated by the 2020 repack. The DX meter probes one channel at a time and reports
+            lock, signal, SNR and BER without disturbing the analog lane.</p></div></div>
+        <div class="box"><h3>Tuner locks</h3><div class="in">
+          <p>A recorder or a set-top can claim a front-end so nothing retunes it mid-programme,
+            either for a fixed time or until the guide says the current programme ends. A claim
+            blocks tuning, stopping the lane, band scans and the scheduled guide refresh alike.</p>
+          <p>It deliberately does not block the always-on keeper. If the encoder behind a locked
+            stream dies, the keeper still restarts that same channel — a lock whose stream cannot
+            recover would be worse than no lock at all.</p>
+          <p>Holding the lock means holding the token issued with it; that token is what releases
+            it early. Someone at this UI can override a lock anyway, but only through a prompt that
+            names who holds it and what is about to be interrupted. Locks expire on their own and
+            are capped, so a service that crashes cannot strand the tuner.</p></div></div>
+        <div class="box"><h3>Where the guide comes from</h3><div class="in">
+          <p>Nothing is fetched from the internet. Every ATSC station transmits its own schedule,
+            and <code>epg.py</code> reads it off the air with the same kind of section filter the
+            channel scan uses: the Master Guide Table names the PIDs, the Event Information Tables
+            carry the programmes, and the System Time Table supplies the leap-second offset that
+            turns broadcast timestamps into real times.</p>
+          <p>The EIT arrives in three-hour blocks, and stations are only obliged to send four of
+            them — so <strong>twelve hours</strong> is all the guide anyone is guaranteed. A single
+            overnight refresh would run out by midday, which is why it runs twice: <strong>03:00
+            and 15:00</strong>.</p>
+          <p>A refresh needs the digital tuner one frequency at a time, so it interrupts digital TV
+            like a scan does. Tuning a channel takes the tuner straight back and the refresh keeps
+            whatever it had read. Programme descriptions live in a separate table that repeats sixty
+            times more slowly, so they are opt-in rather than automatic.</p></div></div>
+        <div class="box"><h3>FM radio</h3><div class="in">
+          <p>The FM implementation remains in the project, but the control is hidden on viviserv
+            because the installed HVR-1600 does not expose a usable FM audio path with the current
+            Linux driver setup.</p></div></div>
+      </div>
+      <a class="top" href="#wrap">Back to top ▲</a>
 
-      <article class="card">
-        <h2>Encoding on viviserv</h2>
-        <p>
-          Production currently uses low-latency <code>libx264</code>. The NVIDIA
-          Quadro K4200 can encode with NVENC, but sustained streaming drove this
-          particular card to its thermal ceiling, so the safe CPU path is pinned.
-          Hardware probing and automatic fallback remain available.
-        </p>
-      </article>
-
-      <article class="card">
-        <h2>Operational pieces</h2>
-        <p>
-          <code>server.py</code> is both halves: control, and in the feed
-          role (<code>feed_server.py</code>) the lanes.
-          <code>channels.py</code> is the one list of channels that the
-          lineup, catalog, guide and tune all read, and
-          <code>web_basic.py</code> runs the web streams.
-          <code>dvb_source.py</code> talks directly to Linux DVB,
-          <code>atsc_scan.py</code> sweeps the band and probes single
-          channels for DX, and
-          <code>analog_tuner.py</code> discovers the card's tuner inputs and
-          maps fixed US cable channel numbers onto its NTSC tuner, while
-          <code>stream_sanity_check.py</code> measures request-to-stream time,
-          decodability, segment behavior, write rate, CPU, memory, and GPU load,
-          and <code>web_stream_check.py</code> watches a web stream's CPU and memory.
-        </p>
-      </article>
-
-      <article class="card">
-        <h2>Two front-ends, two lanes</h2>
-        <p>
-          The S5H1409 ATSC demodulator and the analog tuner tune
-          independently, so the <code>digital</code> and <code>analog</code>
-          lanes each hold their own tuner, encoder, and HLS playlist and never
-          displace one another. FM is the same analog tuner in radio demod
-          mode, so it replaces analog TV only. The analog list exposes
-          channels 1–135 from the fixed US cable STD plan and never runs a
-          channel scan. Generic capture cards are not supported: discovery
-          keeps only nodes that expose a V4L2 tuner input.
-        </p>
-      </article>
-
-      <article class="card">
-        <h2>Scanning and DX</h2>
-        <p>
-          Channel scanning is native rather than a <code>w_scan</code> wrapper.
-          Each frequency is visited once, reading the PSIP virtual channel
-          table and the PAT/PMT together, with every PMT filtered
-          concurrently. The sweep covers RF 2–36; everything above was
-          reallocated by the 2020 repack. The DX meter probes one channel at a
-          time and reports lock, signal, SNR and BER without disturbing the
-          analog lane.
-        </p>
-      </article>
-
-      <article class="card">
-        <h2>Tuner locks</h2>
-        <p>
-          A recorder or a set-top can claim a front-end so nothing retunes it
-          mid-programme, either for a fixed time or until the guide says the
-          current programme ends. A claim blocks tuning, stopping the lane,
-          band scans and the scheduled guide refresh alike.
-        </p>
-        <p>
-          It deliberately does not block the always-on keeper. If the encoder
-          behind a locked stream dies, the keeper still restarts that same
-          channel — a lock whose stream cannot recover would be worse than no
-          lock at all.
-        </p>
-        <p>
-          Holding the lock means holding the token issued with it; that token
-          is what releases it early. Someone at this UI can override a lock
-          anyway, but only through a prompt that names who holds it and what
-          is about to be interrupted. Locks expire on their own and are
-          capped, so a service that crashes cannot strand the tuner.
-        </p>
-      </article>
-
-      <article class="card">
-        <h2>Where the guide comes from</h2>
-        <p>
-          Nothing is fetched from the internet. Every ATSC station transmits
-          its own schedule, and <code>epg.py</code> reads it off the air with
-          the same kind of section filter the channel scan uses: the Master
-          Guide Table names the PIDs, the Event Information Tables carry the
-          programmes, and the System Time Table supplies the leap-second
-          offset that turns broadcast timestamps into real times.
-        </p>
-        <p>
-          The EIT arrives in three-hour blocks, and stations are only obliged
-          to send four of them — so <strong>twelve hours</strong> is all the
-          guide anyone is guaranteed. A single overnight refresh would run out
-          by midday, which is why it runs twice: <strong>03:00 and
-          15:00</strong>.
-        </p>
-        <p>
-          A refresh needs the digital tuner one frequency at a time, so it
-          interrupts digital TV like a scan does. Tuning a channel takes the
-          tuner straight back and the refresh keeps whatever it had read.
-          Programme descriptions live in a separate table that repeats sixty
-          times more slowly, so they are opt-in rather than automatic.
-        </p>
-      </article>
-
-      <article class="card">
-        <h2>FM radio</h2>
-        <p>
-          The FM implementation remains in the project, but the control is hidden
-          on viviserv because the installed HVR-1600 does not expose a usable FM
-          audio path with the current Linux driver setup.
-        </p>
-      </article>
-    </section>
-
-    <aside class="note">
-      <strong>What a change must pass</strong>
-      <ul>
-        <li>Every change: the fast test suite.</li>
-        <li>The stream stack (encoders, playlists, tuners and capture, process supervision, the feed): staged on isolated ports through three real retunes, then the same gate again on production.</li>
-        <li>Control alone: a restart under the drill, which fails if a stream, a recording or a relay so much as moved.</li>
-        <li>The web streams: ten minutes watched with no CPU excess or memory growth, and the video stopping once nobody watches.</li>
-        <li>The front door: a staged check, then a graceful reload.</li>
-        <li>Roku tuning and this site: the fast suite alone.</li>
+      <h2 id="standards">Our Standards: What a Change Must Pass</h2>
+      <ul class="standards">
+        <li><b>Every change:</b> the fast test suite.</li>
+        <li><b>The stream stack</b> (encoders, playlists, tuners and capture, process supervision, the feed): staged on isolated ports through three real retunes, then the same gate again on production.</li>
+        <li><b>Control alone:</b> a restart under the drill, which fails if a stream, a recording or a relay so much as moved.</li>
+        <li><b>The web streams:</b> ten minutes watched with no CPU excess or memory growth, and the video stopping once nobody watches.</li>
+        <li><b>The front door:</b> a staged check, then a graceful reload.</li>
+        <li><b>Roku tuning and this site:</b> the fast suite alone.</li>
       </ul>
-    </aside>
-  </main>
+      <a class="top" href="#wrap">Back to top ▲</a>
+    </main>
+  </div>
+
+  <div id="footer" role="contentinfo">
+    <a href="./">Home</a> | <a href="guide.html">TV Listings</a> | <a href="inputs.html">Network Status</a> |
+    <a href="lineup-card.pdf">Channel Lineup</a> | <a href="api/v1">Developers</a>
+    <div class="counter" aria-label="Visitor counter"><span>0</span><span>0</span><span>0</span><span>8</span><span>0</span><span>8</span><span>0</span></div>
+    <div>You are visitor number 8,080.</div>
+    <div class="fine">© 2001–2026 TV Thing Cable, a fictional cable company on <code style="color:#c8d6ee">viviserv</code>. All rights reserved.
+      Channel availability subject to the antenna, the Roku and the weather.</div>
+  </div>
+</div>
 </body>
 </html>
