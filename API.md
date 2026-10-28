@@ -59,7 +59,7 @@ games keep their numbers until they are over.
 `house` lists VizelVision's numbers and `slides` the station's slide channels,
 each with `channel_id`, `page_path` (the page that plays it in a browser,
 relative to the UI), `data_path`, and `stream_path`: the same slides as live
-HLS for players that only take streams, such as a Roku. Channel 60 is the only
+HLS for players that only take streams, such as a Roku. Channel 6 is the only
 one, the Sports Guide (`channel_id` `sports-guide`). `internet` lists the
 internet streams (see below), each with `channel_id`, `name`, `note` and
 `stream_path`.
@@ -148,7 +148,7 @@ played since the feed started answers **503** until control is back. A fixed
 A stream may name a listings URL as `guide`: JSON `{"events": [{"start", "duration",
 "title", "description"}]}` (Unix seconds). TV Thing reads it at most once a minute
 (5 s timeout) and lists the stream in the programme guide (below). When it fails, the
-last good listings stand in for 15 minutes. Channel 144, Cab Ride (`cabride`), is one:
+last good listings stand in for 15 minutes. Channel 1, Trains (`cabride`, the stream Cab Ride), is one:
 hazel's `cabride.service` on `127.0.0.1:8791` plays train cab rides only while watched
 and publishes its schedule at `/guide.json`.
 

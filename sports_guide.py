@@ -1,6 +1,6 @@
 """VizelVision's Sports Guide: today's games by sport, each where TV Thing shows it.
 
-Channel 60 plays it as slides (static/sports-guide.html, from
+Channel 6 plays it as slides (static/sports-guide.html, from
 /api/v1/sports-guide). A game is listed only when it can be watched here:
 
 * on a national broadcaster in the lineup, by that channel's name and number:

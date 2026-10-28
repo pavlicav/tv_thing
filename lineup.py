@@ -16,6 +16,10 @@ are placed by rule:
   kept in ``lineup_state.json`` so it never moves; a fixed number in
   lineup.json takes precedence.
 * Whatever does not fit goes to the ``overflow`` section.
+* A channel in ``hidden`` is off the dial: it gets no number, overflow
+  included, and is left out of every list of channels. It still tunes by its
+  id, and its row stays in roku.json or channels.json (the Roku's fast seek
+  must still recognise a hidden YouTube TV row it passes).
 
 A channel is keyed by its source and its id there: ``digital/22.4`` (the
 antenna's virtual channel number, which survives a rescan; the id embeds the
@@ -62,6 +66,7 @@ class Plan:
     fixed: dict         # key -> (number, name override or None)
     house: tuple        # (number, name) of each of the station's numbers
     slides: tuple = ()  # (number, name, channel id) of each of its slide channels
+    hidden: frozenset = frozenset()   # keys of the channels off the dial
 
     def station_numbers(self):
         return {number for number, _ in self.house} | {number for number, _, _ in self.slides}
@@ -149,7 +154,16 @@ def parse_plan(document):
         if key in fixed:
             raise LineupError(f"{where}: {key} already has {fixed[key][0]}")
         fixed[key] = (number, name)
-    return Plan(tuple(sections), fixed, tuple(sorted(house)), tuple(sorted(slides)))
+    hidden = set()
+    for index, raw in enumerate(document.get("hidden") or []):
+        where = f"hidden[{index}]"
+        if not isinstance(raw, dict) or not raw.get("source") or not raw.get("channel"):
+            raise LineupError(f"{where}: a hidden channel needs its source and channel id")
+        key = f"{raw['source']}/{raw['channel']}"
+        if key in fixed:
+            raise LineupError(f"{where}: {key} is hidden but also has {fixed[key][0]}")
+        hidden.add(key)
+    return Plan(tuple(sections), fixed, tuple(sorted(house)), tuple(sorted(slides)), frozenset(hidden))
 
 
 def antenna_keys(channels):
@@ -234,6 +248,13 @@ class Lineup:
             print(f"[Lineup] could not save {self.state_path}: {error}", flush=True)
 
     # -- numbering --------------------------------------------------------------
+    def hides(self, source_id, channel_id):
+        """Whether lineup.json puts a channel off the dial; False when it is unusable."""
+        try:
+            return f"{source_id}/{channel_id}" in self.plan().hidden
+        except LineupError:
+            return False
+
     def _view(self, plan, number, name):
         section = plan.section_of(number)
         return {"tv_number": number, "tv_name": name, "tv_section": section.name if section else None}
@@ -256,8 +277,8 @@ class Lineup:
         """Numbers for one source's channels: ``entries`` is ``[(id, name)]``.
 
         Returns one view per entry, in order; ``None`` for all of them when
-        lineup.json is unusable. A channel lineup.json does not list is given
-        a number here, and keeps it.
+        lineup.json is unusable, and for a hidden one. A channel lineup.json
+        does not list is given a number here, and keeps it.
         """
         try:
             plan = self.plan()
@@ -267,13 +288,16 @@ class Lineup:
             assigned = self._assigned()
             changed = False
             fixed_numbers = {number for number, _ in plan.fixed.values()} | plan.station_numbers()
-            for key in [key for key in assigned if key in plan.fixed]:
-                del assigned[key]     # Now listed: lineup.json has the say.
+            for key in [key for key in assigned if key in plan.fixed or key in plan.hidden]:
+                del assigned[key]     # Now listed or hidden: lineup.json has the say.
                 changed = True
             taken = fixed_numbers | {entry["number"] for entry in assigned.values()}
             views = []
             for channel_id, name in entries:
                 key = f"{source_id}/{channel_id}"
+                if key in plan.hidden:
+                    views.append(None)
+                    continue
                 if key in plan.fixed:
                     number, override = plan.fixed[key]
                     views.append(self._view(plan, number, override or name))

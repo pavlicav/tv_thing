@@ -55,8 +55,8 @@ def test_every_kind_of_channel_is_one_shape_with_what_plays_it(lineup_sources):
     node = server.FEED_CONFIG.node
 
     assert by_id["digital/4.1"] | {"detail": None} == {
-        "id": "digital/4.1", "source_id": "digital", "channel_id": "wrc_hd_4_1", "number": 4,
-        "name": by_id["digital/4.1"]["name"], "section": "Local stations", "kind": "digital",
+        "id": "digital/4.1", "source_id": "digital", "channel_id": "wrc_hd_4_1", "number": 14,
+        "name": by_id["digital/4.1"]["name"], "section": "Washington & Baltimore", "kind": "digital",
         "lane": "digital", "node": node, "network": "NBC", "market": "dc",
         "tune": {"source": "digital", "channel_id": "wrc_hd_4_1"}, "stream": "/stream/digital.m3u8",
         "listings": "4.1", "detail": None}
@@ -71,7 +71,7 @@ def test_every_kind_of_channel_is_one_shape_with_what_plays_it(lineup_sources):
     assert by_id["youtube-tv/CNN"]["network"] is None
 
     game = by_id["mlb/823254"]
-    assert 61 <= game["number"] <= 69 and game["listings"] == f"games/{game['number']}"
+    assert 71 <= game["number"] <= 99 and game["listings"] == f"games/{game['number']}"
     assert game["tune"] == {"source": "mlb", "channel_id": "823254", "date": "2027-01-15"}
     assert game["detail"]["start_time"] == "2027-01-15T23:00Z" and game["detail"]["playable"]
 
@@ -80,7 +80,7 @@ def test_every_kind_of_channel_is_one_shape_with_what_plays_it(lineup_sources):
     assert puppies["stream"] == "/stream/internet/pentulive/index.m3u8"
     assert [c["number"] for c in listed if c["id"] == "vizelvision"] == [0, 70]
     guide = by_id["vizelvision/sports-guide"]
-    assert (guide["kind"], guide["number"], guide["stream"]) == ("slides", 60, "/stream/sports-guide/index.m3u8")
+    assert (guide["kind"], guide["number"], guide["stream"]) == ("slides", 6, "/stream/sports-guide/index.m3u8")
 
     # The station holds two numbers under one id; nothing else repeats.
     ids = [channel["id"] for channel in listed if channel["id"] != "vizelvision"]
@@ -98,7 +98,7 @@ def test_the_lineup_is_the_same_channels_each_in_its_kinds_row(lineup_sources):
     listed = server.api_v1_channels("2027-01-15")["channels"]
     assert [row["tv_number"] for row in rows] == [channel["number"] for channel in listed]
     wrc = next(row for row in rows if row.get("channel_id") == "wrc_hd_4_1")
-    assert wrc == {"tv_number": 4, "tv_name": wrc["tv_name"], "tv_section": "Local stations",
+    assert wrc == {"tv_number": 14, "tv_name": wrc["tv_name"], "tv_section": "Washington & Baltimore",
                    "kind": "digital", "source_id": "digital", "channel_id": "wrc_hd_4_1",
                    "name": "WRC-HD", "antenna_number": "4.1", "rf_channel": 34}
     game = next(row for row in rows if row.get("channel_id") == "823254")

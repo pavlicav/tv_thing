@@ -163,7 +163,9 @@ class AntennaChannels(Adapter):
         listed = host.load_channels()
         lane = host.LANE_DIGITAL
         found_channels = []
-        for key, channel in zip(lineup.antenna_keys(listed), host.numbered_channels(listed)):
+        # numbered_channels leaves out what antenna_on_dial does: the two stay in step.
+        keys = [key for key, _ in host.antenna_on_dial(listed)]
+        for key, channel in zip(keys, host.numbered_channels(listed)):
             network, market = NETWORKS.antenna_channel(channel.get("number")) or (None, None)
             found_channels.append(Channel(
                 id=f"{lineup.ANTENNA}/{key}", source_id="digital", channel_id=channel["id"],
@@ -195,7 +197,7 @@ class AntennaChannels(Adapter):
                     key: channel[key] for key in ("tv_number", "tv_name", "tv_section")})
         rows = {}
         for key, channel in guide["channels"].items():
-            if window.wants(key):
+            if window.wants(key) and not host.channel_lineup.hides(lineup.ANTENNA, key):
                 rows[key] = {**channel, **numbers.get(key, {}), "key": key, "kind": "digital",
                              "events": window.current(channel["events"])}
         now = window.now
@@ -223,13 +225,15 @@ class AntennaChannels(Adapter):
         }
 
     def guide_now(self, now):
-        guide = self.host.epg.load_guide()
-        entries = now_and_next((guide or {}).get("channels", {}), now)
+        host = self.host
+        guide = host.epg.load_guide()
+        entries = now_and_next({key: channel for key, channel in (guide or {}).get("channels", {}).items()
+                                if not host.channel_lineup.hides(lineup.ANTENNA, key)}, now)
         # The antenna's games named by their teams, as the guide names them; the
         # named airings come back in order, now before next.
         airings = {number: {"events": [event for event in entry.values() if event]}
                    for number, entry in entries.items()}
-        for number, channel in self.host.name_antenna_games(airings).items():
+        for number, channel in host.name_antenna_games(airings).items():
             named = iter(channel["events"])
             entries[number] = {slot: event and next(named) for slot, event in entries[number].items()}
         return entries, {"available": bool(guide), "generated_at": (guide or {}).get("generated_at")}

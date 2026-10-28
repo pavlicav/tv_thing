@@ -982,7 +982,7 @@ def test_guide_payload_names_each_channel_by_its_tv_thing_number(monkeypatch):
         {"id": "wusa_hd_9_1", "number": "9.1", "name": "WUSA-HD", "rf_channel": 9}])
     channel = server.guide_payload(now=now)["channels"]["9.1"]
     assert (channel["number"], channel["tv_number"], channel["tv_section"]) == (
-        "9.1", 9, "Local stations")
+        "9.1", 19, "Washington & Baltimore")
 
 
 def test_guide_payload_without_data_says_so_rather_than_failing(monkeypatch):
@@ -1018,8 +1018,8 @@ def test_guide_lists_internet_streams_that_publish_listings(monkeypatch):
     payload = server.guide_payload(now=now)
 
     cab = payload["channels"]["internet/cabride"]
-    assert (cab["kind"], cab["source_id"], cab["channel_id"], cab["tv_number"], cab["name"]) == (
-        "internet", "internet", "cabride", 144, "Cab Ride")
+    assert (cab["kind"], cab["source_id"], cab["channel_id"], cab["tv_number"], cab["tv_name"], cab["name"]) == (
+        "internet", "internet", "cabride", 1, "Trains", "Cab Ride")
     assert cab["stream_path"] == "/stream/internet/cabride/index.m3u8"
     assert [e["title"] for e in cab["events"]] == ["Aizu Railway", "Train in the Snow", "Bergen Line"]
     # Pentulive publishes none, so it has no row; the antenna's rows are as ever.
@@ -1121,7 +1121,7 @@ def test_guide_lists_youtube_tv_rows_keyed_by_source_and_numbered(monkeypatch):
 
     nbc = payload["channels"]["youtube-tv/NBC"]
     assert (nbc["kind"], nbc["source_id"], nbc["channel_id"], nbc["tv_number"]) == (
-        "roku", "youtube-tv", "NBC", 16)
+        "roku", "youtube-tv", "NBC", 27)
     assert nbc["listing"] == {"source": "gracenote", "station": 35543, "call_sign": "WILXDT"}
     assert [e["title"] for e in nbc["events"]] == ["NFL Football", "News"]
     assert payload["channels"]["youtube-tv/CNN"]["stale"] is True
@@ -1255,18 +1255,18 @@ def test_the_guide_lists_every_sport_together_on_the_live_sports_numbers(monkeyp
     assert {source for source, _ in asked} == {
         "mlb", "sunday-ticket", "thursday-night-football", "nhl"}
     rows = {key: channel for key, channel in payload["channels"].items() if key.startswith("games/")}
-    # The day's games share the block from 61 (the Sports Guide is on 60) by start
+    # The day's games share the block from 71 (VizelVision is on 70) by start
     # time, whatever the sport; the game already over keeps its number and leaves the guide.
-    assert sorted(rows) == ["games/61", "games/62", "games/63", "games/64"]
-    baseball = rows["games/62"]
+    assert sorted(rows) == ["games/71", "games/72", "games/73", "games/74"]
+    baseball = rows["games/72"]
     assert (baseball["kind"], baseball["tv_number"], baseball["tv_name"], baseball["tv_section"]) == (
-        "games", 62, "Live Sports", "Live Sports")
+        "games", 72, "Live Sports", "Live Sports")
     game = baseball["events"][0]
     assert (game["title"], game["episode_title"], game["source_id"], game["channel_id"],
             game["date"], game["playable"]) == (
         "Guardians at Rays", "MLB Baseball", "mlb", "823254", "2027-01-15", True)
     assert game["description"] == "Cleveland Guardians at Tampa Bay Rays. On TBS from YouTube TV."
-    flyers = rows["games/63"]["events"][0]
+    flyers = rows["games/73"]["events"][0]
     assert (flyers["title"], flyers["source_id"], flyers["channel_id"], flyers["live"], flyers["playable"]) == (
         "Flyers at Rangers", "nhl", "12", True, True)
     assert flyers["episode_title"] == "NHL Hockey · ESPN Unlimited"
@@ -1274,10 +1274,10 @@ def test_the_guide_lists_every_sport_together_on_the_live_sports_numbers(monkeyp
     assert flyers["start"] + flyers["duration"] == now + 19 * 60
     assert flyers["description"] == ("Philadelphia Flyers at New York Rangers. Out of market on"
                                      " ESPN Unlimited in YouTube TV. Home stream: MSG. Away stream: NBCSP.")
-    capitals = rows["games/64"]["events"][0]
+    capitals = rows["games/74"]["events"][0]
     assert capitals["blackout"] == ["DC"] and "blacks out the Capitals in DC" in capitals["description"]
-    # The next day's slate is numbered afresh, from 61.
-    exclusive = rows["games/61"]["events"][0]
+    # The next day's slate is numbered afresh, from 71.
+    exclusive = rows["games/71"]["events"][0]
     assert (exclusive["title"], exclusive["date"], exclusive["exclusive"]) == (
         "Flyers at Kings", "2027-01-16", True)
     assert "blackout" not in exclusive and "no blackouts" in exclusive["description"]
@@ -1300,7 +1300,7 @@ def test_the_sports_rows_follow_the_window_and_the_channel_asked_for(monkeypatch
     asked.clear()
     # The Watch page asks for one channel at a time: no schedule is read for another's.
     assert server.guide_payload(number="9.1", now=now)["sports"] is None and asked == []
-    assert list(server.guide_payload(number="games/64", now=now)["channels"]) == ["games/64"]
+    assert list(server.guide_payload(number="games/74", now=now)["channels"]) == ["games/74"]
 
 
 def test_the_nights_games_keep_their_rows_until_3_am(monkeypatch):
@@ -1309,9 +1309,9 @@ def test_the_nights_games_keep_their_rows_until_3_am(monkeypatch):
     now = 1_800_079_200     # 2027-01-16T06:00Z, 01:00 Eastern on the 16th
     rows = {key: channel for key, channel in server.guide_payload(window_hours=1, now=now)["channels"].items()
             if key.startswith("games/")}
-    # Still the 15th's games: the 22:00 one, still on, keeps 64 and its Watch.
+    # Still the 15th's games: the 22:00 one, still on, keeps 74 and its Watch.
     assert {day for _, day in asked} == {"2027-01-15"}
-    assert (rows["games/64"]["events"][0]["channel_id"], rows["games/64"]["events"][0]["date"]) == (
+    assert (rows["games/74"]["events"][0]["channel_id"], rows["games/74"]["events"][0]["date"]) == (
         "13", "2027-01-15")
     asked.clear()
     server.guide_payload(window_hours=1, now=now + 3 * 3600)     # 04:00: the 16th's
@@ -1324,12 +1324,12 @@ def test_the_lineup_numbers_the_days_games_together(monkeypatch):
     rows = [row for row in server.api_v1_lineup("2027-01-15")["channels"]
             if row.get("source_id") in ("nhl", "mlb")]
     assert [(row["tv_number"], row["source_id"], row["channel_id"], row["playable"]) for row in rows] == [
-        (61, "nhl", "11", False), (62, "mlb", "823254", True), (63, "nhl", "12", True),
-        (64, "nhl", "13", True)]
+        (71, "nhl", "11", False), (72, "mlb", "823254", True), (73, "nhl", "12", True),
+        (74, "nhl", "13", True)]
 
 
 # ---------------------------------------------------------------------------
-# VizelVision's Sports Guide (channel 60)
+# VizelVision's Sports Guide (channel 6)
 # ---------------------------------------------------------------------------
 
 def _espn_game(game_id, start, away, home, *networks, state="pre", **extra):
@@ -1383,7 +1383,7 @@ def test_the_sports_guide_lists_todays_games_by_sport_on_their_channels(monkeypa
     payload = server.api_v1_sports_guide(now=now)
     assert (payload["date"], payload["available"], payload["games"], payload["errors"]) == (
         "2027-01-15", True, 3, [])
-    assert payload["channel"]["tv_number"] == 60 and payload["channel"]["page_path"] == "sports-guide.html"
+    assert payload["channel"]["tv_number"] == 6 and payload["channel"]["page_path"] == "sports-guide.html"
     # Every league is read for today alone, college football whole (not just the Power 5).
     assert {day for _, day, _ in asked} == {"2027-01-15"}
     assert {league for league, _, _ in asked} == set(server.sports_guide.ESPN_LEAGUES)
@@ -1391,9 +1391,9 @@ def test_the_sports_guide_lists_todays_games_by_sport_on_their_channels(monkeypa
     listed = [(sport["sport"], game["title"], game["network"], game["tv_number"])
               for sport in payload["sports"] for game in sport["games"]]
     # The NBA game is on Prime Video alone: not on any channel here.
-    assert listed == [("NFL Football", "Commanders at 49ers", "ESPN", 33),
-                      ("Baseball", "Guardians at Rays", "TBS", 31),
-                      ("Hockey", "Flyers at Kings", "ESPN+", 61)]
+    assert listed == [("NFL Football", "Commanders at 49ers", "ESPN", 42),
+                      ("Baseball", "Guardians at Rays", "TBS", 40),
+                      ("Hockey", "Flyers at Kings", "ESPN+", 71)]
 
 
 def test_after_midnight_the_sports_guide_keeps_the_games_still_on(monkeypatch):
@@ -1446,10 +1446,10 @@ def test_without_youtube_tv_the_sports_guide_still_places_antenna_games(monkeypa
 
     monkeypatch.setattr(server.roku, "catalog", broken)
     payload = server.api_v1_sports_guide(now=1_800_036_000)
-    # MNF is on ABC too: WJLA 7 over the antenna. TBS needs YouTube TV.
+    # MNF is on ABC too: WJLA 7 (TV Thing 17) over the antenna. TBS needs YouTube TV.
     listed = [(game["title"], game["network"], game["tv_number"])
               for sport in payload["sports"] for game in sport["games"]]
-    assert listed == [("Commanders at 49ers", "ABC", 7), ("Flyers at Kings", "ESPN+", 61)]
+    assert listed == [("Commanders at 49ers", "ABC", 17), ("Flyers at Kings", "ESPN+", 71)]
     assert payload["errors"] == [{"source_id": "youtube-tv", "date": None,
                                   "message": "roku.json is unreadable"}]
 
@@ -1458,8 +1458,8 @@ def test_the_lineup_and_sources_carry_the_sports_guide(monkeypatch):
     _sports(monkeypatch)
     monkeypatch.setattr(server, "load_channels", lambda: [])
     rows = server.api_v1_lineup("2027-01-15")["channels"]
-    guide = next(row for row in rows if row["tv_number"] == 60)
-    assert guide == {"tv_number": 60, "tv_name": "VizelVision Sports Guide", "tv_section": "Live Sports",
+    guide = next(row for row in rows if row["tv_number"] == 6)
+    assert guide == {"tv_number": 6, "tv_name": "VizelVision Sports Guide", "tv_section": "Our channels",
                      "channel_id": "sports-guide", "page_path": "sports-guide.html",
                      "data_path": "/api/v1/sports-guide", "kind": "slides",
                      "stream_path": "/stream/sports-guide/index.m3u8",

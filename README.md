@@ -950,7 +950,7 @@ free one in 370–379.
 A stream can also publish listings: `guide` names a URL answering
 `{"events": [{"start", "duration", "title", "description"}]}`, and the stream
 gets a row in the Guide (and its NOW/NEXT banner on Watch), read at most once a
-minute. Channel 144, **Cab Ride**, uses it: hazel's `cabride.service`
+minute. Channel 1, **Trains** (the stream Cab Ride), uses it: hazel's `cabride.service`
 (`~hazel/cabride`, `127.0.0.1:8791`) plays train cab rides laid end to end from
 the wall clock, as if it never stopped, and runs its one stream-copy `ffmpeg`
 only while someone watches. Its schedule follows the clock, so the Guide shows
@@ -963,17 +963,27 @@ Every channel has a TV Thing number, laid out like an old cable lineup card in
 
 | Numbers | Section |
 |---|---|
-| 0, 70 | VizelVision (the house channel) |
-| 1–29 | Local stations: DC's network stations on their own dial positions (4, 5, 7, 9), NHK World on 1, the other DC and Baltimore stations, the Roku's Lansing locals (YouTube TV) on 16–21; 22–28 are held for a Lansing / Flint antenna receiver; Pentulive, Yle's puppy cam (an internet stream), on 29 |
-| 30–59 | Cable from YouTube TV: the Weather Channel, TBS, TNT, the sports networks, then CNN, MS NOW, FOX News, CNBC, Discovery, HGTV, Food, TLC, USA, FX, Comedy Central |
-| 60 | VizelVision's Sports Guide: today's games as slides (see [The Sports Guide](#the-sports-guide-channel-60)) |
-| 61–69, 71–99 | Live Sports: the day's games, football, baseball and hockey together by start time (NFL Sunday Ticket, Thursday Night Football, MLB, and the NHL on ESPN Unlimited); one block, split around VizelVision |
+| 0–9 | Our channels: VizelVision on 0, Trains (Cab Ride) on 1, pen2live (Yle's puppy cam) on 2, VizelVision's Sports Guide on 6 (see [The Sports Guide](#the-sports-guide-channel-6)); 3–5 and 7–9 held for more |
+| 10–24 | Washington & Baltimore: NHK World first on 10, then each network on the number ending in its channel on the air (14 NBC 4, 15 FOX 5, 17 ABC 7, 19 CBS 9), a station's second channel right after it, then ION, Univision, Telemundo, WDVM and Baltimore's CW |
+| 25–39 | Michigan, in the Lansing and Flint dial's order: the Roku's Lansing locals from YouTube TV (26 CBS, 27 NBC, 30 PBS, 32 FOX, 34 ABC, 35 The CW); the rest held for a Michigan antenna receiver |
+| 40–59 | Sports cable from YouTube TV: TBS, TNT, the ESPNs and the rest in their old order, then USA and truTV |
+| 60–69 | News and more: CNN, MS NOW, FOX News, CNBC, the Weather Channel, Discovery, HGTV, Smithsonian, FX, Comedy Central |
+| 70 | VizelVision again |
+| 71–99 | Live Sports: the day's games, football, baseball and hockey together by start time (NFL Sunday Ticket, Thursday Night Football, MLB, and the NHL on ESPN Unlimited) |
 | 100–109 | Roku (Manual Roku on 109) |
-| 110–299 | The digital tier, by genre, YouTube TV's other channels and the antenna's subchannels together: news and business, learning and lifestyle, kids, entertainment, music, classic TV, movies and westerns, crime and reality, game shows, Spanish, shopping, faith, repeaters |
+| 110–289 | The digital tier, by genre, YouTube TV's other channels and the antenna's subchannels together: news and business, learning and lifestyle, kids, entertainment, music (197 held for Cairo Radio), classic TV, movies and westerns, crime and reality, game shows, Spanish, shopping, faith |
+| 290–299 | Repeaters and other markets; 292–297 held for YouTube TV's Lansing locals once a Michigan antenna takes their numbers |
 | 300–349 | New on the antenna |
 | 350–369 | New on YouTube TV |
 | 370–379 | New internet streams |
+| 380–399 | Held for a Michigan receiver's subchannels |
 | 400 up | Overflow |
+
+A few channels are off the dial (`hidden` in `lineup.json`): TLC, All Reality We
+TV, Busted, and the antenna's second copies of HSN2 and Shop LC. They have no
+number and are in no list, but still tune by their id, and their rows stay in
+`roku.json` and `channels.json` (the Roku's fast seek must still recognise TLC's
+row when it passes it).
 
 Games are numbered afresh each day from the start of their section, so a
 day's slate keeps its numbers all day. Anything `lineup.json` does not list
@@ -1005,9 +1015,9 @@ per browser) lists the antenna's own numbers in antenna order instead. Tuning
 and recording always use the antenna channel itself, so either view tunes
 and tapes the same channel.
 
-### The Sports Guide (channel 60)
+### The Sports Guide (channel 6)
 
-Channel 60 heads Live Sports with **VizelVision's Sports Guide**: a page of
+Channel 6, among our own channels, is **VizelVision's Sports Guide**: a page of
 slides in the manner of a mid-90s cable character generator. A round opens on
 "Today's Sports...", then pages through the day's games by sport (NFL football,
 college football, baseball, basketball, hockey, soccer), each sport's by start

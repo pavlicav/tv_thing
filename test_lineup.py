@@ -218,50 +218,107 @@ def real_plan():
     return lineup.parse_plan(json.loads((ROOT / "lineup.json").read_text()))
 
 
-def test_every_channel_today_has_a_place_on_the_card():
+# -- off the dial -----------------------------------------------------------------
+
+def test_a_hidden_channel_gets_no_number_not_even_overflow(make):
+    document = plan_document()
+    document["hidden"] = [{"source": "youtube-tv", "channel": "TLC"}, {"source": "digital", "channel": "66.6"}]
+    numbering = make(document)
+    assert numbers(numbering.number("youtube-tv", [("TLC", "TLC"), ("CNN", "CNN")])) == [None, 22]
+    assert numbers(numbering.number("digital", antenna("66.6", "5.1"))) == [None, 250]
+    assert numbering.hides("youtube-tv", "TLC") and not numbering.hides("youtube-tv", "CNN")
+    state = json.loads(numbering.state_path.read_text())["assigned"]
+    assert "youtube-tv/TLC" not in state and "digital/66.6" not in state
+
+
+def test_hiding_a_channel_frees_the_number_it_was_given(make):
+    numbering = make()
+    assert numbers(numbering.number("youtube-tv", [("TLC", "TLC")])) == [22]
+    document = plan_document()
+    document["hidden"] = [{"source": "youtube-tv", "channel": "TLC"}]
+    numbering = make(document)
+    assert numbers(numbering.number("youtube-tv", [("TLC", "TLC"), ("CNN", "CNN")])) == [None, 22]
+
+
+def test_an_unusable_lineup_hides_nothing(make, tmp_path):
+    numbering = make()
+    (tmp_path / "lineup.json").write_text("{")
+    assert numbering.hides("youtube-tv", "TLC") is False
+
+
+@pytest.mark.parametrize("hidden, message", [
+    ([{"source": "youtube-tv"}], "needs its source and channel id"),
+    ([{"source": "youtube-tv", "channel": "TBS"}], "hidden but also has 21"),
+])
+def test_a_hidden_list_that_contradicts_itself_is_refused(hidden, message):
+    document = plan_document()
+    document["hidden"] = hidden
+    with pytest.raises(lineup.LineupError, match=message):
+        lineup.parse_plan(document)
+
+
+def test_every_channel_today_has_a_place_on_the_card_or_is_off_the_dial():
     plan = real_plan()
     channels = json.loads((ROOT / "channels.json").read_text())
-    listed = {key for key in plan.fixed if key.startswith("digital/")}
-    assert {f"digital/{key}" for key in lineup.antenna_keys(channels)} == listed
+    placed = {key for key in (*plan.fixed, *plan.hidden) if key.startswith("digital/")}
+    assert {f"digital/{key}" for key in lineup.antenna_keys(channels)} == placed
     roku_rows = [row["name"] for row in json.loads((ROOT / "roku.json").read_text())["channels"]]
     assert {f"youtube-tv/{name}" for name in roku_rows} == {
-        key for key in plan.fixed if key.startswith("youtube-tv/")}
+        key for key in (*plan.fixed, *plan.hidden) if key.startswith("youtube-tv/")}
     assert "roku-manual/manual" in plan.fixed
 
 
 def test_the_card_reads_like_a_cable_lineup():
+    """Lineup v4.1 (the owner's, 2026-10-27)."""
     plan = real_plan()
     by_number = {number: key for key, (number, _) in plan.fixed.items()}
+    section = lambda number: plan.section_of(number).name   # noqa: E731
+    # 0-9: our own channels. The station, then the web streams, the Sports Guide on 6;
+    # 3-5 and 7-9 held for more.
     assert [number for number, _ in plan.house] == [0, 70]
-    assert plan.slides == ((60, "VizelVision Sports Guide", "sports-guide"),)
-    # Locals through 29, NHK and Baltimore's CW among them, the Roku's Lansing
-    # stations together, 22-28 held for a Lansing / Flint receiver, and
-    # Pentulive, an internet stream, on 29.
-    assert plan.section_of(29).name == "Local stations" and plan.section_of(30).name == "Cable"
-    locals_ = [by_number[n] for n in range(1, 30) if n in by_number]
-    assert "digital/22.4" in locals_ and "digital/54.1" in locals_
-    assert [by_number[n] for n in range(16, 22)] == [
-        "youtube-tv/NBC", "youtube-tv/FOX", "youtube-tv/ABC", "youtube-tv/CBS",
-        "youtube-tv/PBS", "youtube-tv/The CW"]
-    assert not any(n in by_number for n in range(22, 29))
-    assert by_number[29] == "internet/pentulive"
-    # DC's network stations keep their own dial positions.
-    assert [by_number[n] for n in (4, 5, 7, 9)] == [
-        "digital/4.1", "digital/5.1", "digital/7.1", "digital/9.1"]
-    # Cable 30-59, every one from YouTube TV, the classics among them.
-    assert all(key.startswith("youtube-tv/") for number, key in by_number.items() if 30 <= number <= 59)
-    assert {"youtube-tv/CNN", "youtube-tv/MS NOW", "youtube-tv/Discovery Channel",
-            "youtube-tv/HGTV"} <= {by_number[n] for n in range(30, 60)}
-    # Live Sports: the Sports Guide on 60, then the games from 61 around
-    # VizelVision on 70, football, baseball and hockey in one block, numbered together.
-    assert plan.section_of(60).name == "Live Sports" and not plan.section_of(60).games
+    assert plan.slides == ((6, "VizelVision Sports Guide", "sports-guide"),)
+    assert plan.fixed["internet/cabride"] == (1, "Trains")
+    assert plan.fixed["internet/pentulive"] == (2, "pen2live")
+    assert not any(n in by_number for n in (3, 4, 5, 7, 8, 9))
+    assert {section(n) for n in range(0, 10)} == {"Our channels"}
+    # 10-24: Washington and Baltimore, NHK first; each network's last digit is its channel
+    # on the air, and a station's second channel comes right after it.
+    assert {section(n) for n in range(10, 25)} == {"Washington & Baltimore"}
+    assert all(by_number[n].startswith("digital/") for n in range(10, 25))
+    assert by_number[10] == "digital/22.4" and by_number[24] == "digital/54.1"
+    assert [by_number[n] for n in (14, 15, 16, 17, 18, 19)] == [
+        "digital/4.1", "digital/5.1", "digital/20.1", "digital/7.1", "digital/50.1", "digital/9.1"]
+    # 25-39: Michigan, on the Lansing and Flint dial. YouTube TV's Lansing rows hold their
+    # stations' numbers; the Flint stations' are held for an antenna there.
+    assert {section(n) for n in range(25, 40)} == {"Michigan"}
+    assert {n: by_number[n] for n in range(25, 40) if n in by_number} == {
+        26: "youtube-tv/CBS", 27: "youtube-tv/NBC", 30: "youtube-tv/PBS", 32: "youtube-tv/FOX",
+        34: "youtube-tv/ABC", 35: "youtube-tv/The CW"}
+    # 40-59: sports cable in its old order; 60-69 the news and the rest; all YouTube TV.
+    assert [by_number[n] for n in (40, 42, 53, 57, 58, 59)] == [
+        "youtube-tv/TBS", "youtube-tv/ESPN", "youtube-tv/NFL Network", "youtube-tv/Pickleball TV",
+        "youtube-tv/USA", "youtube-tv/truTV"]
+    assert {section(n) for n in range(40, 60)} == {"Sports"}
+    assert {section(n) for n in range(60, 70)} == {"News & more"}
+    assert all(by_number[n].startswith("youtube-tv/") for n in range(40, 70))
+    assert by_number[60] == "youtube-tv/CNN" and by_number[64] == "youtube-tv/The Weather Channel"
+    # Live Sports: one block of games after VizelVision on 70.
     for source in ("sunday-ticket", "thursday-night-football", "mlb", "nhl"):
-        assert [(s.first, s.last, s.name) for s in plan.games_sections(source)] == [
-            (61, 69, "Live Sports"), (71, 99, "Live Sports")]
+        assert [(s.first, s.last, s.name) for s in plan.games_sections(source)] == [(71, 99, "Live Sports")]
     assert by_number[109] == "roku-manual/manual"
+    assert (by_number[134], by_number[144], by_number[246]) == (
+        "youtube-tv/Food Network", "youtube-tv/GLIV", "youtube-tv/HLN")
+    # Held: 112, 177 and 227 left by moves; 197 for Cairo Radio; 291-297 for YouTube TV's
+    # Lansing copies once a Michigan antenna takes theirs; 380-399 for its subchannels.
+    assert not any(n in by_number for n in (112, 177, 197, 227, *range(291, 298), *range(380, 400)))
+    assert section(380) == "Michigan extras" and not plan.section_of(380).new
     assert plan.new_section("digital").first >= 300 and plan.new_section("youtube-tv").first >= 300
+    assert plan.new_section("internet").first == 370
+    # Off the dial: copies and the channels the owner does not watch.
+    assert plan.hidden == {"youtube-tv/TLC", "youtube-tv/All Reality We TV", "digital/66.6",
+                           "digital/49.2", "digital/49.6"}
     assert all(number >= 110 for number, key in by_number.items()
-               if key.startswith("digital/") and key not in locals_)
+               if key.startswith("digital/") and not 10 <= number <= 24)
 
 
 def test_a_state_file_that_cannot_be_written_still_numbers(tmp_path):

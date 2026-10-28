@@ -667,7 +667,7 @@ def test_guide_follows_the_lineup_unless_antenna_numbers_are_chosen():
 
 
 # ---------------------------------------------------------------------------
-# VizelVision's Sports Guide (channel 60)
+# VizelVision's Sports Guide (channel 6)
 # ---------------------------------------------------------------------------
 
 def test_the_sports_guide_pages_through_its_listings_from_the_lan_alone():

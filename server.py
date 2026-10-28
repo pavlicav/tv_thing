@@ -789,20 +789,28 @@ web_streams = internet_streams.InternetStreams(
     INTERNET_STREAMS_FILE, resolver=lambda stream: resolve_internet_stream(stream))
 
 
+def antenna_on_dial(channels):
+    """``[(lineup key, channel)]`` for the antenna's channels lineup.json does not hide."""
+    return [(key, channel) for key, channel in zip(lineup.antenna_keys(channels), channels)
+            if not channel_lineup.hides(lineup.ANTENNA, key)]
+
+
 def numbered_channels(channels):
     """Antenna channels with their TV Thing numbers (tv_number, tv_name,
     tv_section). A channel lineup.json does not list -- one a rescan has
-    just found -- is given the next number in its section here."""
-    views = channel_lineup.number(lineup.ANTENNA, list(zip(
-        lineup.antenna_keys(channels), (channel.get("name") for channel in channels))))
-    return [dict(channel, **(view or {})) for channel, view in zip(channels, views)]
+    just found -- is given the next number in its section here. One it hides
+    is left out."""
+    shown = antenna_on_dial(channels)
+    views = channel_lineup.number(lineup.ANTENNA, [(key, channel.get("name")) for key, channel in shown])
+    return [dict(channel, **(view or {})) for (_, channel), view in zip(shown, views)]
 
 
 def internet_views():
     """The internet streams with their TV Thing numbers and the playlist
     each plays from; [] when internet_streams.json is unusable."""
     try:
-        streams = list(web_streams.streams().values())
+        streams = [stream for stream in web_streams.streams().values()
+                   if not channel_lineup.hides(internet_streams.SOURCE, stream.id)]
     except internet_streams.StreamConfigError as error:
         print(f"[Internet] {error}", flush=True)
         return []
@@ -838,8 +846,12 @@ def numbered_roku_listings(listings):
 
     A day's games are numbered together across every listing given, so a
     caller numbering one game source passes the sources it shares a block
-    with (``channel_lineup.game_partners``) as well.
+    with (``channel_lineup.game_partners``) as well. Items lineup.json hides
+    (a YouTube TV row off the dial) are left out.
     """
+    for source_id, listing in listings.items():
+        listing["items"] = [item for item in listing["items"]
+                            if not channel_lineup.hides(source_id, str(item.get("id")))]
     pools = {source_id: listing["items"] for source_id, listing in listings.items()
              if source_id in roku_lane.GAME_SOURCES or source_id in roku_lane.LISTED_SOURCES}
     games = channel_lineup.number_games(pools)
@@ -4265,7 +4277,7 @@ def sports_guide_channels(floor, ceiling, now):
                       "by_source": counts, "errors": errors}
 
 
-# VizelVision's Sports Guide (channel 60): today's games by sport, each on the
+# VizelVision's Sports Guide (channel 6): today's games by sport, each on the
 # channel that carries it. The day turns at 3 AM (roku_control/days.py); for
 # three hours more, the night's games still on stay in it.
 SPORTS_GUIDE_LATE_HOURS = 3
@@ -4777,7 +4789,7 @@ def _api_v1_status_payload():
 
 
 def api_v1_digital_source():
-    channels = load_channels()
+    channels = numbered_channels(load_channels())
     return {
         "api_version": API_VERSION,
         "source": {
@@ -4790,7 +4802,7 @@ def api_v1_digital_source():
             "selector": "channel_id",
             "stream_path": f"/stream/{LANE_PLAYLIST[LANE_DIGITAL]}",
         },
-        "items": numbered_channels(channels),
+        "items": channels,
     }
 
 
@@ -5315,7 +5327,7 @@ class TVHandler(SimpleHTTPRequestHandler):
                     },
                     "sports_guide": {
                         "method": "GET", "path": "/api/v1/sports-guide",
-                        "note": "today's watchable games by sport (channel 60's slides)",
+                        "note": "today's watchable games by sport (channel 6's slides)",
                     },
                     "digital_channels": {
                         "method": "GET",

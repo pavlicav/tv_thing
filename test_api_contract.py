@@ -221,13 +221,13 @@ def test_hockey_is_a_roku_source_and_shares_the_days_numbers(roku_api):
     assert sources["listed"] == []
     code, hockey = request("/api/v1/sources/nhl?date=2026-10-20")
     assert code == 200
-    # The Thursday game (an earlier kickoff) has 61 (60 is the Sports Guide);
+    # The Thursday game (an earlier kickoff) has 71, the first of the games' numbers;
     # ESPN+'s three games follow.
     assert [(i["id"], i["tv_number"], i["playable"]) for i in hockey["items"]] == [
-        ("1", 62, True), ("3", 63, True), ("4", 64, True)]
+        ("1", 72, True), ("3", 73, True), ("4", 74, True)]
     # Baseball's catalog numbers the day's hockey with it, as the guide does.
     code, games = request("/api/v1/sources/mlb?date=2026-10-20")
-    assert [(i["id"], i["tv_number"]) for i in games["items"]] == [("823254", 65)]
+    assert [(i["id"], i["tv_number"]) for i in games["items"]] == [("823254", 75)]
     code, tune = request("/api/v1/tune", {"source": "nhl", "channel_id": "1", "date": "2026-10-20"})
     assert code == 202
     roku = wait_for(request, lambda l: l["selection"] and l["selection"].get("source_id") == "nhl")
@@ -263,39 +263,39 @@ def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypat
     assert code == 200
     # The antenna keeps its own numbers; a channel lineup.json has never heard
     # of (a rescan's surprise) is numbered in the hundreds, and keeps it.
-    assert [(i["number"], i["tv_number"]) for i in digital["items"]] == [("4.1", 4), ("7.5", 300)]
+    assert [(i["number"], i["tv_number"]) for i in digital["items"]] == [("4.1", 14), ("7.5", 300)]
     code, feeds = request("/api/v1/sources/youtube-tv")
     assert [(i["id"], i["tv_number"], i["tv_name"]) for i in feeds["items"]] == [
-        ("NBC", 16, "WILX"), ("ESPN", 33, "ESPN")]
+        ("NBC", 27, "WILX"), ("ESPN", 42, "ESPN")]
     code, tnf = request("/api/v1/sources/thursday-night-football?date=2026-10-01")
     assert [(i["id"], i["tv_number"], i["tv_section"]) for i in tnf["items"]] == [
-        ("401872964", 61, "Live Sports")]
+        ("401872964", 71, "Live Sports")]
     code, sources = request("/api/v1/sources")
     assert [view["tv_number"] for view in sources["lineup"]["house"]] == [0, 70]
-    # 60 is the station's Sports Guide, a page of slides rather than a stream.
+    # 6 is the station's Sports Guide, a page of slides rather than a stream.
     assert sources["lineup"]["slides"] == [{
-        "tv_number": 60, "tv_name": "VizelVision Sports Guide", "tv_section": "Live Sports",
+        "tv_number": 6, "tv_name": "VizelVision Sports Guide", "tv_section": "Our channels",
         "channel_id": "sports-guide", "page_path": "sports-guide.html",
         "data_path": "/api/v1/sports-guide", "stream_path": "/stream/sports-guide/index.m3u8"}]
-    assert {"first": 1, "last": 29, "name": "Local stations"} in sources["lineup"]["sections"]
-    # 29 and 144 are internet streams, played from TV Thing's relay of them.
-    assert [(view["tv_number"], view["channel_id"], view["stream_path"])
+    assert {"first": 10, "last": 24, "name": "Washington & Baltimore"} in sources["lineup"]["sections"]
+    # 1 and 2 are internet streams, played from TV Thing's relay of them.
+    assert [(view["tv_number"], view["tv_name"], view["channel_id"], view["stream_path"])
             for view in sources["lineup"]["internet"]] == [
-        (29, "pentulive", "/stream/internet/pentulive/index.m3u8"),
-        (144, "cabride", "/stream/internet/cabride/index.m3u8")]
+        (2, "pen2live", "pentulive", "/stream/internet/pentulive/index.m3u8"),
+        (1, "Trains", "cabride", "/stream/internet/cabride/index.m3u8")]
 
     code, card = request("/api/v1/lineup?date=2026-10-01")
     assert code == 200 and card["errors"] == [] and card["lineup_error"] is None
     assert [(row["tv_number"], row["kind"], row.get("channel_id")) for row in card["channels"]] == [
-        (0, "vizelvision", None), (4, "digital", "wrc_hd_4_1"), (16, "roku", "NBC"),
-        (29, "internet", "pentulive"), (33, "roku", "ESPN"), (60, "slides", "sports-guide"), (61, "roku", "401872964"),
-        (62, "roku", "823254"), (70, "vizelvision", None), (109, "roku", "manual"),
-        (144, "internet", "cabride"), (300, "digital", "surprise_7_5")]
-    assert card["channels"][3]["stream_path"] == "/stream/internet/pentulive/index.m3u8"
-    assert card["channels"][5]["name"] == "VizelVision Sports Guide"
-    assert card["channels"][5]["page_path"] == "sports-guide.html"
-    assert card["channels"][6]["source_id"] == "thursday-night-football"
-    assert card["channels"][6]["date"] == "2026-10-01"
+        (0, "vizelvision", None), (1, "internet", "cabride"), (2, "internet", "pentulive"),
+        (6, "slides", "sports-guide"), (14, "digital", "wrc_hd_4_1"), (27, "roku", "NBC"),
+        (42, "roku", "ESPN"), (70, "vizelvision", None), (71, "roku", "401872964"),
+        (72, "roku", "823254"), (109, "roku", "manual"), (300, "digital", "surprise_7_5")]
+    assert card["channels"][2]["stream_path"] == "/stream/internet/pentulive/index.m3u8"
+    assert card["channels"][3]["name"] == "VizelVision Sports Guide"
+    assert card["channels"][3]["page_path"] == "sports-guide.html"
+    assert card["channels"][8]["source_id"] == "thursday-night-football"
+    assert card["channels"][8]["date"] == "2026-10-01"
     code, discovery = request("/api/v1")
     assert discovery["endpoints"]["lineup"]["path"] == "/api/v1/lineup"
     assert discovery["endpoints"]["sports_guide"]["path"] == "/api/v1/sports-guide"
