@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "TV Thing core integration API",
-    "version": "1.4.0",
-    "description": "Core control contract. API.md defines ownership, retry, addressing, and trusted-LAN rules. Additional discovery and diagnostic endpoints are listed by GET /api/v1. 1.1.0 adds the roku lane: Roku sources, asynchronous Roku tunes (202 with an operation), the Roku remote, the still-playing check, and Roku recordings. 1.2.0 adds TV Thing channel numbers: tv_number, tv_name and tv_section on catalog items and guide channels, the lineup in GET /sources, and GET /lineup. 1.3.0 adds YouTube TV's listings to the guide: rows keyed youtube-tv/NAME with kind roku, every row's key and kind, the youtube_tv summary, and Roku guide recordings. 1.4.0 adds the station's slide channels: lineup.slides in GET /sources, kind slides in GET /lineup, and GET /sports-guide, the Sports Guide's listings (channel 60); each slide channel's stream_path, its live HLS made on demand (/stream/sports-guide/index.m3u8), and slides in GET /status."
+    "version": "1.5.0",
+    "description": "Core control contract. API.md defines ownership, retry, addressing, and trusted-LAN rules. Additional discovery and diagnostic endpoints are listed by GET /api/v1. 1.1.0 adds the roku lane: Roku sources, asynchronous Roku tunes (202 with an operation), the Roku remote, the still-playing check, and Roku recordings. 1.2.0 adds TV Thing channel numbers: tv_number, tv_name and tv_section on catalog items and guide channels, the lineup in GET /sources, and GET /lineup. 1.3.0 adds YouTube TV's listings to the guide: rows keyed youtube-tv/NAME with kind roku, every row's key and kind, the youtube_tv summary, and Roku guide recordings. 1.4.0 adds the station's slide channels: lineup.slides in GET /sources, kind slides in GET /lineup, and GET /sports-guide, the Sports Guide's listings (channel 6); each slide channel's stream_path, its live HLS made on demand (/stream/sports-guide/index.m3u8), and slides in GET /status. 1.5.0 adds GET /channels, every channel of the lineup in one shape, linked from GET /sources as channels_path; Cairo Radio (cairo-radio, channel 197), a second slide channel; hidden channels, which have no number and are left out of /lineup, /channels and the guide but still tune by id; and slides in GET /status read from the web-basic service, each reporting running false with unavailable when web-basic does not answer."
   },
   "servers": [
     {
@@ -162,9 +162,178 @@
         }
       }
     },
+    "/channels": {
+      "get": {
+        "summary": "Every channel in one shape, in number order (channels.py)",
+        "description": "The same channels as GET /lineup, each described the same way whatever carries it: the lane and feed that play it, its network and market, the tune that plays it, its stream and its guide row. Hidden channels are left out.",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "description": "YYYY-MM-DD: the day whose games are listed",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "channels",
+                    "sections"
+                  ],
+                  "properties": {
+                    "date": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "sections": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "channels": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "source_id",
+                          "channel_id",
+                          "number",
+                          "name",
+                          "section",
+                          "kind",
+                          "lane",
+                          "node",
+                          "network",
+                          "market",
+                          "tune",
+                          "stream",
+                          "listings",
+                          "detail"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "source/channel as lineup.json keys it (digital/22.4, youtube-tv/NBC, internet/pentulive, vizelvision/sports-guide, mlb/<game id>); never a TV Thing number. VizelVision is vizelvision at each number it holds, the only id that repeats"
+                          },
+                          "source_id": {
+                            "type": "string",
+                            "description": "what a tune or a recording names"
+                          },
+                          "channel_id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "what a tune or a recording names; null for VizelVision"
+                          },
+                          "number": {
+                            "type": "integer",
+                            "description": "its TV Thing number"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "section": {
+                            "type": "string",
+                            "description": "its lineup heading"
+                          },
+                          "kind": {
+                            "enum": [
+                              "digital",
+                              "roku",
+                              "internet",
+                              "vizelvision",
+                              "slides"
+                            ]
+                          },
+                          "lane": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "the feed lane that plays it (digital, roku); null for a relay, a slide channel or the station"
+                          },
+                          "node": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "the feed that makes its stream; null for the station's"
+                          },
+                          "network": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "the broadcast network it carries (networks.json)"
+                          },
+                          "market": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "whose station it is: dc or lansing"
+                          },
+                          "tune": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "description": "the POST /tune body that plays it (a game's carries its date); null for a channel played by opening its stream"
+                          },
+                          "stream": {
+                            "type": "string",
+                            "description": "its playlist; a lane's carries whatever the lane was last tuned to"
+                          },
+                          "listings": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "its row's key in GET /guide (22.4, youtube-tv/NBC, games/<number>, internet/cabride)"
+                          },
+                          "detail": {
+                            "type": "object",
+                            "description": "what its kind adds: an antenna channel's source_name, antenna_number and rf_channel; a game's date, start_time, state, status and playable; a stream's note; a slide channel's page_path and data_path"
+                          }
+                        }
+                      }
+                    },
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "lineup_error": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sports-guide": {
       "get": {
-        "summary": "Today's watchable games by sport: the Sports Guide's listings (channel 60)",
+        "summary": "Today's watchable games by sport: the Sports Guide's listings (channel 6)",
         "description": "A game is listed when a national broadcaster in the lineup carries it (by that channel's number; a network on its DC antenna station) or a Roku game source does (by its Live Sports number). Games already over are left out; before 06:00 Eastern, the night's games still being played stay in. Cached for a minute.",
         "responses": {
           "200": {

@@ -17,7 +17,7 @@
     .lede { max-width: 700px; color: var(--text-mute); font-size: 16px; line-height: 1.65; }
     .flow {
       display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px;
-      margin: 34px 0; overflow: hidden; border: 1px solid var(--border);
+      margin: 0 0 34px; overflow: hidden; border: 1px solid var(--border);
       border-radius: 10px; background: var(--border);
     }
     .flow-step { min-height: 108px; padding: 16px; background: var(--surface); }
@@ -61,13 +61,32 @@
     .lineup-dl .lineup-dl-action:hover { filter: brightness(1.1); }
     .lineup-dl .lineup-dl-action.secondary { background: transparent; color: var(--accent); }
     .lineup-dl .lineup-dl-action.secondary:hover { background: var(--accent-soft); filter: none; }
+    .section-title {
+      margin: 40px 0 6px; color: var(--text-dim); font-size: 11px; font-weight: 700;
+      letter-spacing: .16em; text-transform: uppercase;
+    }
+    .section-lede { max-width: 700px; margin: 0 0 14px; color: var(--text-mute); font-size: 13px; line-height: 1.65; }
+    /* The dial: one cell per block of numbers, like the lineup card's headings. */
+    .dial {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; margin: 0;
+      overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--border);
+    }
+    .dial > div { display: flex; gap: 14px; padding: 14px 16px; background: var(--surface); }
+    .dial dt { flex: 0 0 62px; color: var(--accent); font: 600 12px/1.6 var(--mono); }
+    .dial dd { margin: 0; min-width: 0; }
+    .dial strong { display: block; font-size: 13px; }
+    .dial span { display: block; margin-top: 3px; color: var(--text-mute); font-size: 12px; line-height: 1.55; }
+    .flow.services { grid-template-columns: repeat(4, 1fr); margin-top: 0; }
     .note { margin-top: 14px; padding: 18px 20px; border-left: 2px solid var(--accent); background: var(--surface); }
     .note strong { display: block; margin-bottom: 5px; font-size: 13px; }
     .note span { color: var(--text-mute); font-size: 12px; line-height: 1.55; }
+    .note ul { margin: 0; padding-left: 18px; }
+    .note li { color: var(--text-mute); font-size: 12px; line-height: 1.65; }
     @media (max-width: 760px) {
       .flow { grid-template-columns: 1fr; }
       .flow-step { min-height: 0; }
       .grid { grid-template-columns: 1fr; }
+      .dial, .flow.services { grid-template-columns: 1fr; }
       .lineup-dl { flex-direction: column; align-items: stretch; gap: 14px; }
       .lineup-dl-stripe { display: none; }
       .lineup-dl-actions .lineup-dl-action { flex: 1; text-align: center; }
@@ -99,6 +118,8 @@
       each on its own playlist. It is purpose-built around the installed
       hardware, with fast source changes and hard limits that keep a bad
       timestamp or encoder failure from running away with the machine.
+      The same dial also carries YouTube TV through a Roku, streams from the
+      web, and the station's own channels.
     </p>
 
     <section class="lineup-dl" aria-label="Channel lineup card">
@@ -115,6 +136,41 @@
       </span>
     </section>
 
+    <h2 class="section-title">The dial</h2>
+    <p class="section-lede">
+      Channel numbers come in blocks, as on an old cable card, so channel up
+      stays within a kind of thing. <code>lineup.json</code> files each
+      channel; one nobody has filed yet takes the first free number in its
+      source's block for newcomers and keeps it until it is given a place.
+    </p>
+    <dl class="dial">
+      <div><dt>0–9</dt><dd><strong>Our channels</strong><span>0 VizelVision, 1 Trains, 2 pen2live, 6 the Sports Guide. 3–5 and 7–9 are held for more.</span></dd></div>
+      <div><dt>10–24</dt><dd><strong>Washington &amp; Baltimore</strong><span>The antenna. A network's last digit is its channel on the air (14 NBC 4, 15 FOX 5, 17 ABC 7, 19 CBS 9), with a station's second channel right after it.</span></dd></div>
+      <div><dt>25–39</dt><dd><strong>Michigan</strong><span>YouTube TV's Lansing stations in the order of the Lansing and Flint dial: 26 CBS, 27 NBC, 30 PBS, 32 FOX, 34 ABC, 35 CW. The two markets never share a number.</span></dd></div>
+      <div><dt>40–59</dt><dd><strong>Sports</strong><span>Cable sports: TBS 40, TNT 41, ESPN 42, ESPN2 43, FS1 48, NFL Network 53, NBA TV 54.</span></dd></div>
+      <div><dt>60–69</dt><dd><strong>News &amp; more</strong><span>CNN 60, FOX News 62, CNBC 63, The Weather Channel 64, and a few favourites.</span></dd></div>
+      <div><dt>70</dt><dd><strong>House channel</strong><span>VizelVision again, where the cable channels meet the day's games.</span></dd></div>
+      <div><dt>71–99</dt><dd><strong>Live Sports</strong><span>Each day's games by kickoff, from Sunday Ticket, Thursday Night Football, MLB and the NHL. The day turns at 3 AM, so a late game keeps its number until then.</span></dd></div>
+      <div><dt>100–109</dt><dd><strong>Roku</strong><span>Sources with no block of their own; 109 is the Roku driven by hand.</span></dd></div>
+      <div><dt>110–289</dt><dd><strong>By genre</strong><span>YouTube TV and the antenna's subchannels side by side: news 110, learning 130, kids 150, entertainment 170, music 190 (Cairo Radio on 197), classic TV 200, movies 220, crime 240, game shows 250, español 260, shopping 270, faith 280.</span></dd></div>
+      <div><dt>290–299</dt><dd><strong>Repeaters &amp; other markets</strong><span>A station heard twice, and room for YouTube TV's Lansing copies once a Michigan antenna takes 25–39.</span></dd></div>
+      <div><dt>300–399</dt><dd><strong>Newcomers</strong><span>A new antenna channel lands at 300, a new YouTube TV channel at 350, a new web stream at 370. 380–399 wait for a Michigan antenna's subchannels.</span></dd></div>
+      <div><dt>off</dt><dd><strong>Off the dial</strong><span>A hidden channel has no number and is in no list or guide, but can still be tuned by its id.</span></dd></div>
+    </dl>
+
+    <h2 class="section-title">Three services</h2>
+    <p class="section-lede">
+      Production is three processes behind one front door, so each can be
+      restarted without taking the others' viewers with it.
+    </p>
+    <section class="flow services" aria-label="Services">
+      <div class="flow-step"><div class="flow-num">:8080</div><div class="flow-name">Front door</div><div class="flow-sub">Apache sends the pages and <code>/api/</code> to control, <code>/stream/</code> to the feed, and the web streams to web-basic. It is reloaded gracefully, never restarted.</div></div>
+      <div class="flow-step"><div class="flow-num">tv-thing-feed</div><div class="flow-name">Feed</div><div class="flow-sub">The tuners, the Roku capture, every encoder, the recorders and the relays. Restarting it drops every stream and ends every recording.</div></div>
+      <div class="flow-step"><div class="flow-num">tv-thing</div><div class="flow-name">Control</div><div class="flow-sub">The API and this site, locks, tunes, Roku navigation, the guides and the VCR's rules. Restarting it drops no stream.</div></div>
+      <div class="flow-step"><div class="flow-num">tv-thing-web-basic</div><div class="flow-name">Web-basic</div><div class="flow-sub">The Sports Guide's video, Cairo Radio and pen2live, each made only while watched, on two cores and 768 MB. Restarting it drops only those.</div></div>
+    </section>
+
+    <h2 class="section-title">An antenna channel's path</h2>
     <section class="flow" aria-label="Broadcast processing path">
       <div class="flow-step"><div class="flow-num">01</div><div class="flow-name">ATSC tuner</div><div class="flow-sub">Linux DVB frontend locks the requested RF channel.</div></div>
       <div class="flow-step"><div class="flow-num">02</div><div class="flow-name">Service select</div><div class="flow-sub"><code>dvb_source.py</code> keeps the chosen program and remaps its PIDs.</div></div>
@@ -151,7 +207,7 @@
           <li>Duplicate-frame and UDP-overrun trips</li>
           <li>Maximum segment size and stalled-output watchdogs</li>
           <li>CPU, memory, process, file-size, GPU, and temperature limits</li>
-          <li>Three real retunes plus software decode before deployment</li>
+          <li>Three real retunes plus software decode before a stream change ships</li>
         </ul>
       </article>
 
@@ -168,14 +224,19 @@
       <article class="card">
         <h2>Operational pieces</h2>
         <p>
-          <code>server.py</code> owns the API and lifecycle,
+          <code>server.py</code> is both halves: control, and in the feed
+          role (<code>feed_server.py</code>) the lanes.
+          <code>channels.py</code> is the one list of channels that the
+          lineup, catalog, guide and tune all read, and
+          <code>web_basic.py</code> runs the web streams.
           <code>dvb_source.py</code> talks directly to Linux DVB,
           <code>atsc_scan.py</code> sweeps the band and probes single
           channels for DX, and
           <code>analog_tuner.py</code> discovers the card's tuner inputs and
           maps fixed US cable channel numbers onto its NTSC tuner, while
           <code>stream_sanity_check.py</code> measures request-to-stream time,
-          decodability, segment behavior, write rate, CPU, memory, and GPU load.
+          decodability, segment behavior, write rate, CPU, memory, and GPU load,
+          and <code>web_stream_check.py</code> watches a web stream's CPU and memory.
         </p>
       </article>
 
@@ -266,8 +327,15 @@
     </section>
 
     <aside class="note">
-      <strong>Deployment rule</strong>
-      <span>Streaming and player changes are staged on isolated ports and must pass the real-stream resource gate before production is changed. The same gate runs again after promotion.</span>
+      <strong>What a change must pass</strong>
+      <ul>
+        <li>Every change: the fast test suite.</li>
+        <li>The stream stack (encoders, playlists, tuners and capture, process supervision, the feed): staged on isolated ports through three real retunes, then the same gate again on production.</li>
+        <li>Control alone: a restart under the drill, which fails if a stream, a recording or a relay so much as moved.</li>
+        <li>The web streams: ten minutes watched with no CPU excess or memory growth, and the video stopping once nobody watches.</li>
+        <li>The front door: a staged check, then a graceful reload.</li>
+        <li>Roku tuning and this site: the fast suite alone.</li>
+      </ul>
     </aside>
   </main>
 </body>
