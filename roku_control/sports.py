@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 from . import days
 from .baseball import scoreline
 from .errors import BaseballScheduleError, ChannelNotFoundError, ConfigError
+from .networks import NETWORKS
 
 ESPN_URL = 'https://site.api.espn.com/apis/site/v2/sports/{path}/scoreboard?dates={day}'
 ESPN_WEEK_URL = 'https://site.api.espn.com/apis/site/v2/sports/{path}/scoreboard{query}'
@@ -50,19 +51,23 @@ ESPN_LEAGUES = ('nfl', 'nba', 'nhl', 'wnba', 'nwsl', 'ncaaf')
 # ESPN's current conference memberships: ACC, Big 12, Big Ten, SEC, Pac-12.
 POWER_FIVE_CONFERENCES = frozenset({'1', '4', '5', '8', '9'})
 NOTRE_DAME_ID = '87'
-# Teams whose Sunday CBS/FOX games Washington's stations carry: the antenna's market.
-LOCAL_NFL_TEAMS = {'WSH', 'BAL'}
-# The Roku's YouTube TV carries Lansing's stations, not Washington's: on 2026-10-25 its CBS had
-# Colts at Vikings while WUSA had Bengals at Ravens. Its Sunday CBS/FOX games are the ones its
-# listings (yttv_epg.py, from Gracenote) name; these teams' games where the listings stop.
-YOUTUBE_TV_NFL_TEAMS = {'DET'}
-# The networks whose Sunday-afternoon NFL games are regional, and Washington's stations for them.
+# The markets are networks.json's: the antenna's (Washington) and YouTube TV's (Lansing).
+ANTENNA_MARKET, YOUTUBE_TV_MARKET = NETWORKS.antenna, NETWORKS.youtube_tv
+# Teams whose Sunday CBS/FOX games the antenna's stations carry.
+LOCAL_NFL_TEAMS = set(ANTENNA_MARKET.nfl_teams)
+# The Roku's YouTube TV carries its own market's stations, not Washington's: on 2026-10-25 its
+# CBS (Lansing's) had Colts at Vikings while WUSA had Bengals at Ravens. Its Sunday CBS/FOX games
+# are the ones its listings (yttv_epg.py, from Gracenote) name; these teams' games where the
+# listings stop.
+YOUTUBE_TV_NFL_TEAMS = set(YOUTUBE_TV_MARKET.nfl_teams)
+# The networks whose Sunday-afternoon NFL games are regional, and the antenna's stations for them.
 REGIONAL_NETWORKS = ('CBS', 'FOX')
-WASHINGTON_STATIONS = {'CBS': 'WUSA', 'FOX': 'FOX 5'}
+ANTENNA_STATIONS = {network: ANTENNA_MARKET.stations[network].label for network in REGIONAL_NETWORKS
+                    if network in ANTENNA_MARKET.stations}
 # A Commanders game on a national cable channel is also broadcast over the air in DC: the
 # channel -> the station's call sign. ESPN's feed does not list these. NFL Network on FOX 5
-# was seen on 2026-10-04 (Colts at Commanders, in London); add others once seen.
-LOCAL_SIMULCASTS = {'WSH': {'NFL Network': 'WTTG'}}
+# was seen on 2026-10-04 (Colts at Commanders, in London); add others to networks.json once seen.
+LOCAL_SIMULCASTS = ANTENNA_MARKET.simulcasts
 # ESPN Unlimited, which YouTube TV's main plan includes since 2026-09-01, streams the
 # NHL's out-of-market games (NHL Power Play) and its ESPN+ exclusives inside YouTube TV.
 # ESPN's scoreboard names both with a national "ESPN+" broadcast; a game on ESPN, ABC,
@@ -73,7 +78,7 @@ ESPN_UNLIMITED_NHL = 'ESPN+'
 ESPN_EXCLUSIVE_ALSO = frozenset({'DISNEY+', 'HULU'})
 # Teams ESPN Unlimited blacks out, and where: YouTube TV's market for the Roku moves
 # between DC and Lansing, so their games may or may not be watchable.
-NHL_LOCAL_TEAMS = {'WSH': 'DC', 'DET': 'Lansing'}
+NHL_LOCAL_TEAMS = {team: market.label for market in NETWORKS.markets.values() for team in market.nhl_teams}
 # ESPN network labels that differ from a configured channel name or alias.
 NETWORK_ALIASES = {'NFL NET': 'NFL Network', 'NFL NETWORK': 'NFL Network', 'ESPN 2': 'ESPN2',
                    'FOX SPORTS 1': 'FS1', 'NBA TV': 'NBA TV', 'NHL NET': 'NHL Network',
@@ -424,15 +429,16 @@ class SportsCatalog:
             note = 'Thursday Night Football on Prime Video. Sign in on the Roku if prompted.'
         elif regional and not lansing:
             suggestion = ticket
-            note = ("Not on YouTube TV's Lansing CBS or FOX: NFL Sunday Ticket (found by reading the "
-                    'YouTube TV guide).')
+            note = (f"Not on YouTube TV's {YOUTUBE_TV_MARKET.name} CBS or FOX: NFL Sunday Ticket "
+                    '(found by reading the YouTube TV guide).')
             if washington:
-                note += (" Over the air, Washington's "
-                         f"{' or '.join(WASHINGTON_STATIONS[c] for c in regional_networks)} has it.")
+                note += (f" Over the air, {ANTENNA_MARKET.name}'s "
+                         f"{' or '.join(ANTENNA_STATIONS.get(c, c) for c in regional_networks)} has it.")
         else:
             channel = lansing if regional else channels[0] if channels else None
             suggestion = {'source_id': 'youtube-tv', 'channel_id': channel} if channel else None
-            note = ("Regional CBS/FOX window: YouTube TV's Lansing station carries it." if regional else
+            note = (f"Regional CBS/FOX window: YouTube TV's {YOUTUBE_TV_MARKET.name} station carries it."
+                    if regional else
                     None if channels else 'No national broadcast on a configured channel; choose a source.')
         # Who carries it on its network: YouTube TV's Lansing stations and the antenna's
         # Washington ones differ only for regional games. listed: Lansing's listings said so.

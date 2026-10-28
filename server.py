@@ -33,6 +33,7 @@ from zoneinfo import ZoneInfo
 
 import analog_tuner
 import atsc_scan
+import channels
 import epg
 import feed_api
 import feed_node
@@ -749,6 +750,9 @@ def load_channels():
 
 
 channel_lineup = lineup.Lineup(LINEUP_FILE, LINEUP_STATE_FILE)
+# Every channel, whatever carries it: the lineup, the source catalog, the guide and tune
+# iterate it (channels.py). Its adapters read this module when asked.
+CHANNELS = channels.registry(sys.modules[__name__])
 
 
 def resolve_internet_stream(stream):
@@ -4478,89 +4482,13 @@ def guide_payload(number=None, window_hours=None, now=None):
     ``available`` and the counts beside it describe the broadcast guide;
     ``youtube_tv`` and ``sports`` the others.
     """
-    guide = epg.load_guide()
     now = int(time.time()) if now is None else now
-    # Keep the hour already in progress so the grid has a left edge.
-    floor = now - 3600
-    ceiling = now + window_hours * 3600 if window_hours else None
-
-    def current(events):
-        return [event for event in events
-                if event["start"] + event["duration"] > floor
-                and (ceiling is None or event["start"] < ceiling)]
-
-    channels = {}
-    if guide:
-        lineup_numbers = {}
-        for channel in numbered_channels(load_channels()):
-            if "tv_number" in channel:
-                lineup_numbers.setdefault(channel.get("number"), {
-                    key: channel[key] for key in ("tv_number", "tv_name", "tv_section")})
-        antenna = {}
-        for key, channel in guide["channels"].items():
-            if number and key != number:
-                continue
-            antenna[key] = {**channel, **lineup_numbers.get(key, {}), "key": key,
-                            "kind": "digital", "events": current(channel["events"])}
-        channels.update(name_antenna_games(antenna))
-    yttv_channels, yttv_guide = yttv_guide_channels()
-    for key, channel in yttv_channels.items():
-        if number and key != number:
-            continue
-        channels[key] = {**channel, "events": current(channel["events"])}
-    youtube_tv = yttv_guide_summary(yttv_guide, now)
-    # One other row asked for (the Watch page asks per channel): no schedule is.
-    sports_channels, sports = ({}, None) if number and not str(number).startswith(
-        "games/") else sports_guide_channels(floor, ceiling, now)
-    for key, channel in sports_channels.items():
-        if number and key != number:
-            continue
-        channels[key] = {**channel, "events": current(channel["events"])}
-    if not number or str(number).startswith("internet/"):
-        for key, channel in internet_guide_channels().items():
-            events = current(channel["events"])
-            # A stream whose listings say nothing (or did not answer) has no row.
-            if (number and key != number) or not events:
-                continue
-            channels[key] = {**channel, "events": events}
-
-    if not guide:
-        return {
-            "available": False,
-            "channels": channels,
-            "refresh_times": [f"{h:02d}:{m:02d}" for h, m in
-                              EPG_REFRESH_TIMES],
-            "refreshing": guide_refreshing,
-            "last_error": guide_status["last_error"],
-            "youtube_tv": youtube_tv,
-            "sports": sports,
-        }
-
-    return {
-        "available": True,
-        "generated_at": guide.get("generated_at"),
-        "age_seconds": now - guide.get("generated_at", now),
-        # Recomputed against the clock, never passed through. The stored
-        # figure was true when the sweep ran; hours later it overstates what
-        # is left by exactly the age of the file, which is the one number a
-        # viewer must not be misled about.
-        "coverage_hours": remaining_coverage_hours(guide, now),
-        "coverage_hours_at_refresh": guide.get("coverage_hours"),
-        "horizon": guide.get("horizon"),
-        "event_count": guide.get("event_count"),
-        "channels_with_events": guide.get("channels_with_events"),
-        "compressed_strings": guide.get("compressed_strings", 0),
-        "descriptions": guide.get("descriptions", False),
-        "blocks_requested": guide.get("blocks_requested"),
-        "elapsed_seconds": guide.get("elapsed_seconds"),
-        "refresh_times": [f"{h:02d}:{m:02d}" for h, m in EPG_REFRESH_TIMES],
-        "next_refresh": next_refresh_at(EPG_REFRESH_TIMES),
-        "refreshing": guide_refreshing,
-        "last_error": guide_status["last_error"],
-        "youtube_tv": youtube_tv,
-        "sports": sports,
-        "channels": channels,
-    }
+    # Keep the hour already in progress so the grid has a left edge. One row asked
+    # for (the Watch page asks per channel): no schedule but its own is read.
+    window = channels.GuideWindow(now, now - 3600, now + window_hours * 3600 if window_hours else None,
+                                  number)
+    rows, summary = CHANNELS.guide(window)
+    return {**summary, "channels": rows}
 
 
 def name_antenna_games(channels):
@@ -4589,40 +4517,8 @@ def guide_now_payload(now=None):
     Antenna channels by number, YouTube TV's as ``youtube-tv/NAME``, internet
     streams with listings as ``internet/ID``.
     """
-    now = int(time.time()) if now is None else now
-    guide = epg.load_guide()
-    yttv_channels, yttv_guide = yttv_guide_channels()
-    everything = {**(guide or {}).get("channels", {}), **yttv_channels}
-    entries = {}
-    for number, channel in everything.items():
-        current = None
-        following = None
-        for event in channel["events"]:
-            if event["start"] <= now < event["start"] + event["duration"]:
-                current = event
-            elif event["start"] > now and following is None:
-                following = event
-        if current or following:
-            entries[number] = {"now": current, "next": following}
-    # The antenna's games named by their teams, as the guide names them; the
-    # named airings come back in order, now before next.
-    antenna = {number: {"events": [event for event in entry.values() if event]}
-               for number, entry in entries.items() if number in (guide or {}).get("channels", {})}
-    for number, channel in name_antenna_games(antenna).items():
-        named = iter(channel["events"])
-        entries[number] = {slot: event and next(named) for slot, event in entries[number].items()}
-    for key, channel in internet_guide_channels().items():
-        on = next((event for event in channel["events"]
-                   if event["start"] <= now < event["start"] + event["duration"]), None)
-        later = next((event for event in channel["events"] if event["start"] > now), None)
-        if on or later:
-            entries[key] = {"now": on, "next": later}
-    return {
-        "available": bool(guide),
-        "generated_at": (guide or {}).get("generated_at"),
-        "youtube_tv_available": bool(yttv_guide and yttv_guide.get("channels_with_events")),
-        "channels": entries,
-    }
+    entries, summary = CHANNELS.guide_now(int(time.time()) if now is None else now)
+    return {**summary, "channels": entries}
 
 
 def normalize_quality(value):
@@ -4923,81 +4819,67 @@ def api_v1_cable_source():
 
 
 def api_v1_source_catalog():
-    digital = api_v1_digital_source()["source"]
-    cable = api_v1_cable_source()["source"]
-    roku_sources = [
-        dict(source, stream_path=f"/stream/{LANE_PLAYLIST[LANE_ROKU]}")
-        for source in roku.source_list(roku_sources_available())
-    ] if roku is not None else []
+    """Every source a tune names, each with its lane and kind, from the registry's adapters.
+
+    ``listed``: catalogs the Watch page lists but nothing can tune, apart from
+    ``sources`` so vizelVision and the VCR never offer them. ``lineup``: the
+    lineup card's sections, the station's own numbers, its slide channels and
+    the internet streams. Every catalog item carries its tv_number; the cable
+    tab is the analog tuner's RF plan and is not part of the lineup.
+    """
+    catalog = CHANNELS.catalog()
     return {
         "api_version": API_VERSION,
-        "sources": [
-            dict(digital, items_path="/api/v1/sources/digital"),
-            dict(cable, items_path="/api/v1/sources/cable"),
-            *roku_sources,
-        ],
-        # Catalogs the Watch page lists but nothing can tune (ESPN Unlimited's
-        # NHL games). Apart from "sources", so vizelVision and the VCR never offer them.
-        "listed": roku.listed_source_list(roku_sources_available()) if roku is not None else [],
-        # The lineup card's sections and the station's own numbers. Every
-        # catalog item carries its tv_number; the cable tab is the analog
-        # tuner's RF plan and is not part of the lineup.
-        "lineup": {"path": "/api/v1/lineup", "sections": channel_lineup.sections(),
-                   "house": channel_lineup.house(), "slides": slide_views(),
-                   "internet": internet_views()},
+        "sources": catalog["sources"],
+        "listed": catalog["listed"],
+        "lineup": {"path": "/api/v1/lineup", "sections": channel_lineup.sections(), **catalog["lineup"]},
+        "channels_path": "/api/v1/channels",
         "status_path": "/api/v1/status",
         "tune_path": "/api/v1/tune",
     }
 
 
-def api_v1_lineup(requested_date=None):
-    """Every channel with its TV Thing number, in number order.
-
-    The station, the antenna channels and every Roku catalog (the day's
-    games for ``requested_date``). A Roku catalog that cannot be read is left
-    out and named in ``errors``.
-    """
+def lineup_listing(requested_date=None):
+    """``(channels in number order, Found, lineup.json's problem or None)``: every channel
+    the registry lists, with ``requested_date``'s games. A catalog that cannot be read is
+    left out and named in the Found's errors."""
     try:
         channel_lineup.plan()
         problem = None
     except lineup.LineupError as error:
         problem = str(error)
-    rows = [dict(view, kind="vizelvision", name="VizelVision",
-                 stream_path="/stream/vizelvision/index.m3u8")
-            for view in channel_lineup.house()]
-    rows += [dict(view, kind="slides", name=lineup.SLIDES[view["channel_id"]])
-             for view in slide_views()]
-    rows += [dict(view, kind="internet", source_id=internet_streams.SOURCE) for view in internet_views()]
-    for channel in numbered_channels(load_channels()):
-        rows.append({key: channel.get(key) for key in ("tv_number", "tv_name", "tv_section")}
-                    | {"kind": "digital", "source_id": "digital", "channel_id": channel["id"],
-                       "name": channel.get("name"), "antenna_number": channel.get("number"),
-                       "rf_channel": channel.get("rf_channel")})
-    errors, day = [], None
-    if roku is not None:
-        listings = {}
-        for source_id in (*roku_lane.SOURCES, *roku_lane.LISTED_SOURCES):
-            try:
-                listings[source_id] = roku.catalog(source_id, requested_date)
-            except Exception as error:   # noqa: BLE001 - one catalog never sinks the lineup
-                errors.append({"source_id": source_id, "message": str(error)})
-        for source_id, listing in numbered_roku_listings(listings).items():
-            day = listing.get("date") or day
-            for item in listing["items"]:
-                rows.append({key: item.get(key) for key in ("tv_number", "tv_name", "tv_section")}
-                            | {"kind": "roku", "source_id": source_id,
-                               "channel_id": str(item.get("id")), "name": item.get("name"),
-                               "date": listing.get("date"),
-                               **{key: item[key] for key in ("start_time", "state", "status", "playable")
-                                  if key in item}})
-    rows.sort(key=lambda row: (row["tv_number"] is None, row["tv_number"] or 0,
-                               str(row.get("name") or "")))
+    found = channels.Found()
+    return sorted(CHANNELS.channels(requested_date, found), key=channels.lineup_order), found, problem
+
+
+def api_v1_lineup(requested_date=None):
+    """Every channel with its TV Thing number, in number order, each in its kind's row.
+
+    The station, its slide channels, the internet streams, the antenna and
+    every Roku catalog (the day's games for ``requested_date``).
+    """
+    listed, found, problem = lineup_listing(requested_date)
     return {
         "api_version": API_VERSION,
-        "date": day or requested_date,
+        "date": found.date or requested_date,
         "sections": channel_lineup.sections(),
-        "channels": rows,
-        "errors": errors,
+        "channels": [channel.row for channel in listed],
+        "errors": found.errors,
+        "lineup_error": problem,
+    }
+
+
+def api_v1_channels(requested_date=None):
+    """The lineup's channels as one shape (channels.Channel), in number order: what carries
+    each, the lane and node that play it, its network and market, the tune that plays it,
+    its stream and its guide row."""
+    listed, found, problem = lineup_listing(requested_date)
+    return {
+        "api_version": API_VERSION,
+        "date": found.date or requested_date,
+        "sections": channel_lineup.sections(),
+        "channels": [channel.view() for channel in listed],
+        "errors": found.errors,
         "lineup_error": problem,
     }
 
@@ -5253,40 +5135,22 @@ def api_v1_error(message, status, code=None, extra=None):
 
 
 def api_v1_tune(body):
-    """Dispatch one source-neutral tune request and normalize its response."""
+    """Dispatch one source-neutral tune request to the adapter that tunes its source."""
     if not isinstance(body, dict):
         return api_v1_error("JSON object required", 400)
-    source_kind = str(body.get("source", "")).lower()
-    source_kind = {
-        "tv": "digital", "television": "digital",
-        "analog": "cable", "ntsc": "cable",
-    }.get(source_kind, source_kind)
+    adapter, source_id = CHANNELS.tuner(str(body.get("source", "")).lower())
     quality = body.get("quality", "medium")
     if quality not in QUALITY_PRESETS:
         return api_v1_error(
             "quality must be low, medium, or high", 400, "invalid_quality"
         )
+    if adapter is None:
+        return api_v1_error("source must be " + CHANNELS.tune_choices(), 400, "invalid_source")
+    return adapter.tune(source_id, body, quality)
 
-    if source_kind in roku_lane.SOURCES:
-        return perform_roku_tune(dict(body, source=source_kind))
-    token = body.get("token")
-    override = bool(body.get("override"))
-    if source_kind == "digital":
-        result, status = perform_digital_tune(
-            body.get("channel_id"), quality, token=token, override=override,
-        )
-        lane = LANE_DIGITAL
-    elif source_kind == "cable":
-        result, status = perform_cable_tune(
-            body.get("channel"), quality, token=token, override=override,
-        )
-        lane = LANE_ANALOG
-    else:
-        return api_v1_error(
-            "source must be digital, cable, or a Roku source ("
-            + ", ".join(roku_lane.SOURCES) + ")", 400, "invalid_source",
-        )
 
+def lane_tune_response(result, status, lane):
+    """A digital or analog tune's ``(result, status)`` in the shape every tune answers."""
     if status != 200:
         return api_v1_error(result["error"], status, extra={
             "lock": result["lock"]} if "lock" in result else None)
@@ -5442,6 +5306,12 @@ class TVHandler(SimpleHTTPRequestHandler):
                         "method": "GET", "path": "/api/v1/lineup",
                         "query": {"date": "YYYY-MM-DD (games)"},
                         "note": "every channel with its TV Thing number",
+                    },
+                    "channels": {
+                        "method": "GET", "path": "/api/v1/channels",
+                        "query": {"date": "YYYY-MM-DD (games)"},
+                        "note": "the lineup's channels in one shape: lane, node, network, "
+                                "market, the tune that plays each, its stream and guide row",
                     },
                     "sports_guide": {
                         "method": "GET", "path": "/api/v1/sports-guide",
@@ -5683,6 +5553,11 @@ class TVHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/v1/lineup":
             self.send_json(api_v1_lineup(
+                parse_qs(parsed.query).get("date", [None])[0]))
+            return
+
+        if path == "/api/v1/channels":
+            self.send_json(api_v1_channels(
                 parse_qs(parsed.query).get("date", [None])[0]))
             return
 

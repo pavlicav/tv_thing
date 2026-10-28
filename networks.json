@@ -1,0 +1,44 @@
+{
+  "_comment": [
+    "Which station carries each broadcast network in the markets TV Thing gets television from (roku_control/networks.py reads it; control reads it when it starts).",
+    "antenna_market: the antenna's, its stations by virtual channel number. youtube_tv_market: where YouTube TV places the Roku, whose stations are YouTube TV's network rows (NBC, FOX...). If YouTube TV moves the Roku, change youtube_tv_market.",
+    "A market's name is how messages name its city, its label how blackout notes name the market. A station's label is how messages name it (its call sign unless given); aliases are other names a schedule gives its network.",
+    "nfl_teams: the teams whose regional Sunday CBS and FOX games the market's stations carry. nhl_teams: the teams ESPN Unlimited blacks out when YouTube TV places the Roku there.",
+    "affiliates: other stations the antenna gets, by channel, and their network (WNUV is Baltimore's CW). simulcasts: a team's games on a national cable channel that the market's station also airs, channel -> call sign."
+  ],
+  "antenna_market": "dc",
+  "youtube_tv_market": "lansing",
+  "markets": {
+    "dc": {
+      "name": "Washington",
+      "label": "DC",
+      "stations": {
+        "ABC": {"call_sign": "WJLA", "antenna": "7.1"},
+        "CBS": {"call_sign": "WUSA", "antenna": "9.1"},
+        "NBC": {"call_sign": "WRC", "antenna": "4.1"},
+        "FOX": {"call_sign": "WTTG", "label": "FOX 5", "antenna": "5.1"},
+        "CW": {"call_sign": "WDCW", "antenna": "50.1", "aliases": ["The CW"]},
+        "ION": {"call_sign": "WPXW", "antenna": "66.1"},
+        "Univision": {"call_sign": "WFDC", "antenna": "14.1"},
+        "Telemundo": {"call_sign": "WZDC", "antenna": "44.1"}
+      },
+      "affiliates": {"54.1": "CW"},
+      "nfl_teams": ["WSH", "BAL"],
+      "nhl_teams": ["WSH"],
+      "simulcasts": {"WSH": {"NFL Network": "WTTG"}}
+    },
+    "lansing": {
+      "name": "Lansing",
+      "label": "Lansing",
+      "stations": {
+        "NBC": {"call_sign": "WILX"},
+        "FOX": {"call_sign": "WSYM"},
+        "ABC": {"call_sign": "WLAJ"},
+        "CBS": {"call_sign": "WLNS"},
+        "CW": {"call_sign": "WLAJ-DT2", "aliases": ["The CW"]}
+      },
+      "nfl_teams": ["DET"],
+      "nhl_teams": ["DET"]
+    }
+  }
+}

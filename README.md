@@ -83,6 +83,8 @@ Antenna → DVB frontend → minimal DVB source → localhost UDP
 | File / Directory | Purpose |
 |---|---|
 | `server.py` | Main HTTP server, streaming controller, tuner arbitration |
+| `channels.py` | The channel list: every channel as one `Channel`, one adapter per kind of source (antenna, cable, Roku, internet, the station, its slides) that the lineup, source catalog, guide and tune iterate |
+| `networks.json` | Which station carries each broadcast network in the antenna's market (Washington) and the Roku's YouTube TV market (Lansing); read by `roku_control/networks.py` |
 | `analog_tuner.py` | Tuner-only V4L2 discovery, fixed US cable channel plan, direct analog tuner control |
 | `atsc_scan.py` | Native ATSC band scan, single-channel DX probe, PSIP/PSI parsing, signal statistics |
 | `epg.py` | Broadcast guide: PSIP MGT/EIT/ETT/STT parsing, scheduled schedule refresh |
@@ -983,6 +985,21 @@ precedence, and a UI reload shows it. An unusable `lineup.json` leaves
 channels unnumbered (the Watch list falls back to alphabetical) rather than
 renumbering anything.
 
+`GET /api/v1/channels` lists the same channels in one shape, each with the lane
+and node that play it, its network and market, the tune that plays it, its
+stream and its guide row (see `API.md`). The channel list is `channels.py`: one
+adapter per kind of source, which the lineup, the source catalog, the guide and
+tune iterate, so a new kind of source is one new adapter.
+
+Which station is NBC, FOX, ABC, CBS and CW in each market is
+[`networks.json`](networks.json): the antenna's (Washington, by virtual
+channel) and the Roku's YouTube TV market (Lansing, whose stations are YouTube
+TV's network rows), with each market's NFL and NHL teams. The Sports Guide and
+the Roku's Sunday NFL routing read it. If YouTube TV moves the Roku to another
+market, change `youtube_tv_market` there and restart control. A broken file is
+reported in control's log and leaves the sports without station placement;
+control still starts.
+
 The Guide shows TV Thing numbers too; its **Antenna numbers** option (kept
 per browser) lists the antenna's own numbers in antenna order instead. Tuning
 and recording always use the antenna channel itself, so either view tunes
@@ -1077,6 +1094,9 @@ row comes sooner. Each needs a guide-logo template in `roku_state/templates-720p
 (not in git): select its row on the Roku, then POST `api/v1/roku/calibrate`
 with `{"kind": "guide", "channel": NAME}` and the Roku lock's token. Rows the
 antenna already carries (QVC, HSN, Charge!, Roar, ION and the like) are left out.
+Control takes up a changed channel list without a restart, at the next look
+after any navigation ends; `roku.json`'s other settings still need one. A
+`roku.json` that does not load keeps the list there is and says so in the log.
 
 Tuning walks the guide verifying each row it lands on. A target six or more
 rows away is reached by **fast seek** first: bursts of five quick keys, each

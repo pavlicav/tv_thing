@@ -23,6 +23,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from roku_control.config import normalize_channel_name
+from roku_control.networks import NETWORKS
 from roku_control.sports import NETWORK_ALIASES, nhl_on_espn_unlimited
 
 # Each sport and its leagues, as (league, tag), in the order the guide shows them.
@@ -37,12 +38,12 @@ SPORTS = (
 )
 # The leagues read from ESPN's scoreboards; baseball comes from the Roku's MLB catalog.
 ESPN_LEAGUES = tuple(league for _, leagues in SPORTS for league, _ in leagues if league != "mlb")
-# A network's national games are on its DC station, by virtual channel number:
-# over the air, no Roku needed. (YouTube TV's NBC and the rest are Lansing's.)
-NETWORK_STATIONS = {"abc": ("ABC", "7.1"), "cbs": ("CBS", "9.1"), "nbc": ("NBC", "4.1"),
-                    "fox": ("FOX", "5.1"), "cw": ("CW", "50.1"), "thecw": ("CW", "50.1"),
-                    "ion": ("ION", "66.1"), "univision": ("Univision", "14.1"),
-                    "telemundo": ("Telemundo", "44.1")}
+# A network's national games are on its station over the antenna (networks.json's antenna
+# market, Washington), by virtual channel number: no Roku needed. (YouTube TV's NBC and the
+# rest are its own market's, Lansing's.) Keyed by every name the network goes by.
+NETWORK_STATIONS = {normalize_channel_name(name): (station.network, station.antenna)
+                    for station in NETWORKS.antenna.stations.values() if station.antenna
+                    for name in station.names()}
 # YouTube TV rows whose names are too long for the guide's network column.
 SHORT_NAMES = {"Big Ten Network": "BTN", "NBC Sports Network": "NBCSN",
                "CBS Sports Network": "CBSSN", "The CW": "CW"}
@@ -244,8 +245,8 @@ LISTING_LEAGUES = (
     (re.compile(r"MLS Soccer"), "mls"),
     (re.compile(r"NWSL Soccer"), "nwsl"),
 )
-# The antenna's affiliates other than NETWORK_STATIONS' DC ones, by network.
-AFFILIATES = {"54.1": "CW"}   # WNUV, the CW from Baltimore
+# The antenna's affiliates other than NETWORK_STATIONS' own, by network (WNUV, Baltimore's CW).
+AFFILIATES = NETWORKS.antenna.affiliates
 # How far a game's start may be from its airing's: ESPN gives the broadcast
 # window's start, as the listing does.
 MATCH_SECONDS = 15 * 60

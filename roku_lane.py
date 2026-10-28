@@ -21,11 +21,13 @@ calling anything here that changes the Roku.
 from __future__ import annotations
 
 import copy
+import os
 import re
 import threading
 import time
 import uuid
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import date
 
 import feed_node
@@ -117,8 +119,11 @@ def same_target(left, right):
 class RokuLane:
     def __init__(self, config, controller, *, baseball, sports, capture_source,
                  record=None, reuse_max_age=900.0, playing_seconds=PLAYING_SECONDS,
-                 clock=time.monotonic, wall_clock=time.time, sleep=time.sleep):
+                 clock=time.monotonic, wall_clock=time.time, sleep=time.sleep, config_path=None):
         self.config = config
+        # roku.json, whose channel list is taken up when it changes (reload_channels).
+        self.config_path = config_path
+        self._config_signature = self._signature()
         self.controller = controller
         self.feedback = controller.feedback
         self.ecp = controller.ecp
@@ -148,6 +153,43 @@ class RokuLane:
         left = self.record.state()["navigation"]
         if left is not None and left["ended_at"] is None:
             self.record.end_navigation(left["op_id"], None)
+
+    # -- roku.json ----------------------------------------------------------
+    def _signature(self):
+        try:
+            stat = os.stat(self.config_path) if self.config_path else None
+        except OSError:
+            return None
+        return stat and (stat.st_mtime_ns, stat.st_size)
+
+    def reload_channels(self):
+        """Take up roku.json's channel list once the file changes, so a YouTube TV row added
+        there needs no restart (its other settings still take one). Never mid-navigation,
+        which reads the list as it goes: the first look after it ends takes it up. A file
+        that does not load keeps the list there is, and says why once. True when it changed."""
+        signature = self._signature()
+        if signature is None or signature == self._config_signature:
+            return False
+        from roku_control.config import load_config
+        with self._lock:
+            navigation = self.record.state()["navigation"]
+            if self._running() or (navigation is not None and navigation["ended_at"] is None):
+                return False
+            self._config_signature = signature
+            try:
+                fresh = load_config(self.config_path)
+            except ConfigError as error:
+                print(f"[Roku] roku.json changed but does not load ({error}); its old channel list stays",
+                      flush=True)
+                return False
+            if fresh.channels == self.config.channels:
+                return False
+            # Everything that resolves a channel by name holds the config.
+            lists = {"channels": fresh.channels, "_channel_lookup": fresh._channel_lookup}
+            for holder in (self, self.controller, self.baseball, self.sports):
+                holder.config = replace(holder.config, **lists)
+        print(f"[Roku] roku.json's channel list taken up: {len(fresh.channels)} channels", flush=True)
+        return True
 
     # -- identity ---------------------------------------------------------
     def capture_id(self):
@@ -195,6 +237,7 @@ class RokuLane:
         if not isinstance(channel, str) or not channel or len(channel) > 200:
             raise ConfigError("channel_id is required: a YouTube TV channel or a game ID")
         if source == YOUTUBE_TV:
+            self.reload_channels()
             _, resolved = self.config.resolve_channel(channel)
             return {"source_id": YOUTUBE_TV, "channel_id": resolved.name}, None
         if not channel.isascii() or not channel.isdecimal() or int(channel) <= 0:
@@ -593,6 +636,7 @@ class RokuLane:
             return {"items": [{"id": "manual", "name": "Manual Roku",
                                "note": "Drive the Roku yourself with the on-screen remote"}]}
         if source_id == YOUTUBE_TV:
+            self.reload_channels()
             return {"items": [{"id": channel.name, "name": channel.name, "number": None,
                                "aliases": list(channel.aliases), "guide_index": channel.guide_index}
                               for channel in self.config.channels]}
@@ -657,5 +701,6 @@ def load(config_path, *, capture_source, record=None, reuse_max_age=900.0, ecp=N
     # YouTube TV's own (Lansing's) listings say which regional NFL games its CBS and FOX show.
     sports = SportsCatalog(config, baseball, listings=lambda: (yttv_epg.load_guide() or {}).get("channels"))
     return RokuLane(config, controller, baseball=baseball, sports=sports,
-                    capture_source=capture_source, record=record, reuse_max_age=reuse_max_age)
+                    capture_source=capture_source, record=record, reuse_max_age=reuse_max_age,
+                    config_path=config_path)
 

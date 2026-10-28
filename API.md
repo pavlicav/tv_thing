@@ -81,6 +81,34 @@ returns the whole lineup in number order: VizelVision, the slide channels
 with `kind`, `source_id`, `channel_id` and (for games) `date`. A Roku catalog
 that could not be read is named in `errors` and left out.
 
+`GET /api/v1/channels[?date=YYYY-MM-DD]` is the same channels in the same
+order, each in one shape whatever carries it (`channels.py`'s `Channel`),
+beside `date`, `sections`, `errors` and `lineup_error` as above:
+
+* `id`: `source/channel`, as `lineup.json` keys it (`digital/22.4`,
+  `youtube-tv/NBC`, `internet/pentulive`, `vizelvision/sports-guide`, a game's
+  `mlb/<game id>`). It never holds a TV Thing number. VizelVision itself is
+  `vizelvision` at each number it holds (0 and 70), the only id that repeats;
+* `source_id` and `channel_id`: what a tune or a recording names;
+* `number`, `name`, `section`: its TV Thing number, name and lineup heading;
+* `kind`: `digital`, `roku`, `internet`, `vizelvision` or `slides`;
+* `lane`: the feed lane that plays it (`digital`, `roku`), or null for a
+  relay, a slide channel or the station; `node`: the feed that makes its
+  stream (null for the station's);
+* `network`, `market`: the broadcast network it carries and whose station it
+  is (`dc`, `lansing`), from `networks.json`; null otherwise;
+* `tune`: the `POST /api/v1/tune` body that plays it (a game's carries its
+  `date`), or null for a channel played by opening its `stream`;
+* `stream`: its playlist (a lane's carries whatever the lane was last tuned to);
+* `listings`: its row's key in `/api/v1/guide` (`22.4`, `youtube-tv/NBC`,
+  `games/<number>`, `internet/cabride`), or null;
+* `detail`: what its kind adds: an antenna channel's `source_name`,
+  `antenna_number` and `rf_channel`; a game's `date`, `start_time`, `state`,
+  `status` and `playable`; a stream's `note`; a slide channel's `page_path` and
+  `data_path`.
+
+`GET /api/v1/sources` links it as `channels_path`.
+
 `GET /api/v1/sports-guide` is the Sports Guide's listings: today's games
 (Eastern, the day turning at 03:00) that can be watched here, as
 `sports: [{sport, games}]` in a fixed order (Football, Baseball, Basketball,
