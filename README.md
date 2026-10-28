@@ -40,7 +40,9 @@ while needed, OCR and calibrated logo templates in `roku_state/`), and verifies
 each selection on screen. **Manual Roku** hands it to an on-screen remote on the
 Watch page's Roku tab. The Roku has its own lock (`lane: "roku"`), the VCR records
 it alongside the digital tuner, and `roku.html` shows its capture, signal and
-calibration. It is not a video lane for the legacy `live.m3u8` alias. See
+calibration. `inputs.html` shows every input at once: each front-end and its lanes with
+signal and encoder health, the Roku and its capture, the web streams made here and from
+the web, and the services, disks and health behind them (`API.md`, "Inputs"). It is not a video lane for the legacy `live.m3u8` alias. See
 `API.md`, "The Roku lane".
 
 TV Thing drives the tuner card and that one Roku capture. Generic V4L2 capture hardware -- USB

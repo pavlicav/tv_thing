@@ -554,7 +554,7 @@ def test_watch_page_shows_what_is_on_youtube_tv():
 # Shared chrome
 # ---------------------------------------------------------------------------
 
-PAGES = ("index", "guide", "vcr", "cable", "rescan", "dx", "about", "roku")
+PAGES = ("index", "guide", "vcr", "cable", "rescan", "dx", "about", "roku", "inputs")
 
 
 def test_every_page_has_the_same_nav_in_the_same_place():

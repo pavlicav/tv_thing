@@ -5,6 +5,7 @@ import contextlib
 import copy
 import math
 import fcntl
+import ipaddress
 import resource
 import shutil
 import json
@@ -4819,6 +4820,172 @@ def api_v1_channels(requested_date=None):
     }
 
 
+# ---------------------------------------------------------------------------
+# Inputs (static/inputs.html): what feeds the dial beside the lanes /status reports -- the
+# three services as systemd sees them, the web streams and where each comes from, and the
+# disks the streams and recordings fill. Read-only.
+
+INPUT_SERVICES = (
+    ("feed", "tv-thing-feed", FEED_URL,
+     "The tuners, the Roku capture, every encoder, the recorders and its relays"),
+    ("control", "tv-thing", CONTROL_URL,
+     "The API and this site, locks, tunes, Roku navigation, the guides and the VCR's rules"),
+    ("web-basic", "tv-thing-web-basic", web_basic_status.url.rsplit("/web/", 1)[0],
+     "The slide channels' video and the simple web relays, each only while watched"),
+)
+SYSTEMD_FIELDS = ("Id", "ActiveState", "SubState", "ActiveEnterTimestamp", "NRestarts", "MainPID",
+                  "MemoryCurrent", "MemoryMax", "CPUUsageNSec", "CPUQuotaPerSecUSec", "TasksCurrent")
+SYSTEMD_CACHE_SECONDS = 5.0
+_systemd_cache = {"at": None, "units": {}}
+
+
+def _systemd_number(value, scale=1):
+    """A systemctl show number, or None for "[not set]", "infinity" and the like."""
+    try:
+        return int(value) / scale if scale != 1 else int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _quota_percent(value):
+    # CPUQuotaPerSecUSec is "2s", "800ms" or "infinity": CPU time allowed each second.
+    for suffix, scale in (("ms", 0.1), ("us", 0.0001), ("s", 100)):
+        if value and value.endswith(suffix) and value[:-len(suffix)].replace(".", "", 1).isdigit():
+            return round(float(value[:-len(suffix)]) * scale, 1)
+    return None
+
+
+def systemd_units(units, run=subprocess.run, clock=time.monotonic):
+    """``{unit: facts}`` for the services' units from ``systemctl show``, read at most every
+    five seconds; a unit systemd does not know (or no systemctl at all) is left out."""
+    cache = _systemd_cache
+    if cache["at"] is not None and clock() - cache["at"] < SYSTEMD_CACHE_SECONDS:
+        return cache["units"]
+    try:
+        shown = run(["systemctl", "show", "--timestamp=unix", "-p", ",".join(SYSTEMD_FIELDS), *units],
+                    capture_output=True, text=True, timeout=3).stdout
+    except (OSError, subprocess.SubprocessError):
+        shown = ""
+    found = {}
+    for block in shown.split("\n\n"):
+        values = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
+        unit = values.get("Id", "").removesuffix(".service")
+        if unit not in units or values.get("ActiveState") is None:
+            continue
+        since = values.get("ActiveEnterTimestamp", "")
+        found[unit] = {
+            "state": values["ActiveState"],
+            "sub_state": values.get("SubState"),
+            "since": _systemd_number(since[1:]) if since.startswith("@") else None,
+            "restarts": _systemd_number(values.get("NRestarts")),
+            "pid": _systemd_number(values.get("MainPID")) or None,
+            "memory_bytes": _systemd_number(values.get("MemoryCurrent")),
+            "memory_max_bytes": _systemd_number(values.get("MemoryMax")),
+            "cpu_seconds": _systemd_number(values.get("CPUUsageNSec"), 1e9),
+            "cpu_quota_percent": _quota_percent(values.get("CPUQuotaPerSecUSec")),
+            "tasks": _systemd_number(values.get("TasksCurrent")),
+            "read_at": round(time.time(), 3),   # a CPU rate is the CPU time between two reads
+        }
+    cache["at"], cache["units"] = clock(), found
+    return found
+
+
+# Where a looked-up stream's playlist comes from, by its resolver.
+RESOLVER_SITES = {"yle-areena": "areena.yle.fi"}
+
+
+def _upstream(stream):
+    """``(host, origin)`` of an internet stream: where its playlist comes from, and whether
+    that is "internal" (this machine or the LAN) or "external" (the web)."""
+    url = stream.params.get("url") if internet_streams.RESOLVERS[stream.resolver].fixed else None
+    if url is None:
+        return RESOLVER_SITES.get(stream.resolver, stream.resolver), "external"
+    parts = urlparse(url)
+    host = parts.hostname or ""
+    try:
+        internal = host == "localhost" or ipaddress.ip_address(host).is_private
+    except ValueError:
+        internal = host.endswith((".local", ".lan"))
+    return parts.netloc, "internal" if internal else "external"
+
+
+def web_inputs():
+    """The web streams on the dial, in number order: the house channel, the slide channels
+    and the internet relays, with who makes each and where it comes from."""
+    listed, _, _ = lineup_listing()
+    try:
+        configured = web_streams.streams()
+    except internet_streams.StreamConfigError:
+        configured = {}
+    slides = web_basic_status.slides() if ROLE == "control" else feed_client.slides()
+    house = urlparse(VIZELVISION_MEDIA_URL).netloc
+    out = []
+    for channel in listed:
+        if channel.kind not in ("vizelvision", "slides", "internet"):
+            continue
+        entry = {"id": channel.id, "number": channel.number, "name": channel.name,
+                 "kind": channel.kind, "stream": channel.stream, "note": channel.detail.get("note")}
+        if channel.kind == "vizelvision":
+            entry.update(origin="internal", service="vizelvision", upstream=house,
+                         made_by="VizelVision's master control", status=None)
+        elif channel.kind == "slides":
+            entry.update(origin="internal", service="web-basic", upstream=None,
+                         made_by="web-basic, drawing its slides", page=channel.detail.get("page_path"),
+                         status=slides.get(channel.channel_id))
+        else:
+            stream = configured.get(channel.channel_id)
+            host, origin = _upstream(stream) if stream else (None, None)
+            entry.update(origin=origin, service=stream.service if stream else None, upstream=host,
+                         resolver=stream.resolver if stream else None,
+                         listings=bool(stream and stream.guide),
+                         made_by=f"a relay in {stream.service}" if stream else None, status=None)
+        out.append(entry)
+    return out
+
+
+def disk_inputs():
+    """Free space where the streams, the web streams and the recordings are written, one
+    entry a filesystem (named for everything on it); a folder not made yet is left out."""
+    places = (("streams", STREAMS_DIR), ("web streams", web_basic.STREAMS_DIR),
+              ("recordings", RECORDINGS_DIR))
+    filesystems = {}
+    for name, path in places:
+        try:
+            device, usage = os.stat(path).st_dev, shutil.disk_usage(path)
+        except OSError:
+            continue
+        entry = filesystems.setdefault(device, {"names": [], "paths": [], "free_bytes": usage.free,
+                                                "total_bytes": usage.total})
+        entry["names"].append(name)
+        entry["paths"].append(str(path))
+    return list(filesystems.values())
+
+
+def api_v1_inputs():
+    """What feeds the dial, for the Inputs page: the services, the web streams and the disks.
+    The tuners and the Roku capture are /status's lanes and frontends."""
+    units = systemd_units(tuple(unit for _, unit, _, _ in INPUT_SERVICES))
+    epoch = feed_client.status()["feed_epoch"]   # asks the feed, so `reachable` is current
+    slides = web_basic_status.slides() if ROLE == "control" else {}
+    answering = {
+        "feed": bool(getattr(feed_client, "reachable", True)),
+        "control": True,
+        "web-basic": not any(state.get("unavailable") for state in slides.values()) if ROLE == "control" else None,
+    }
+    services = [{"id": service, "unit": unit, "url": url.rstrip("/"), "role": role,
+                 "answering": answering[service], "systemd": units.get(unit)}
+                for service, unit, url, role in INPUT_SERVICES]
+    return {
+        "api_version": API_VERSION,
+        "node": FEED_CONFIG.node,
+        "role": ROLE,
+        "feed_epoch": epoch,
+        "services": services,
+        "web": web_inputs(),
+        "disks": disk_inputs(),
+    }
+
+
 def lane_plays(lane, key, value):
     """Whether a lane is streaming the selection whose `key` is `value`, healthily.
 
@@ -5242,6 +5409,11 @@ class TVHandler(SimpleHTTPRequestHandler):
                         "query": {"date": "YYYY-MM-DD (games)"},
                         "note": "every channel with its TV Thing number",
                     },
+                    "inputs": {
+                        "method": "GET", "path": "/api/v1/inputs",
+                        "note": "the services, the web streams and where each comes from, "
+                                "and the disks; the tuners are status's lanes and frontends",
+                    },
                     "channels": {
                         "method": "GET", "path": "/api/v1/channels",
                         "query": {"date": "YYYY-MM-DD (games)"},
@@ -5489,6 +5661,10 @@ class TVHandler(SimpleHTTPRequestHandler):
         if path == "/api/v1/lineup":
             self.send_json(api_v1_lineup(
                 parse_qs(parsed.query).get("date", [None])[0]))
+            return
+
+        if path == "/api/v1/inputs":
+            self.send_json(api_v1_inputs())
             return
 
         if path == "/api/v1/channels":

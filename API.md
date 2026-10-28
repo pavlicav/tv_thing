@@ -155,6 +155,30 @@ last good listings stand in for 15 minutes. Channel 1, Trains (`cabride`, the st
 hazel's `cabride.service` on `127.0.0.1:8791` plays train cab rides only while watched
 and publishes its schedule at `/guide.json`.
 
+### Inputs
+
+`GET /api/v1/inputs` is what feeds the dial besides the lanes, for the Inputs page
+(`inputs.html`). Read-only; it starts nothing. The tuners and the Roku capture are
+`/api/v1/status`'s `frontends` and `lanes`, so a new tuner appears there and on the page
+once the feed reports it.
+
+* `services`: the feed, control and web-basic, each with `id`, `unit`, `url`, `role`,
+  `answering` (control's view: the feed answered its last read; web-basic answered its
+  status; null when control cannot tell) and `systemd`, null for a unit systemd does not
+  know, else `state`, `sub_state`, `since` (Unix seconds), `restarts`, `pid`,
+  `memory_bytes`, `memory_max_bytes`, `cpu_seconds` (CPU time used so far),
+  `cpu_quota_percent`, `tasks` and `read_at`. systemd is read at most every five seconds;
+  a CPU rate is the change in `cpu_seconds` between two reads over the change in `read_at`.
+* `web`: the web streams on the dial in number order -- the house channel (`vizelvision`),
+  the slide channels (`slides`) and the internet relays (`internet`) -- each with `id`,
+  `number`, `name`, `kind`, `stream`, `note`, `origin` (`internal`: made here or on the
+  LAN; `external`: from the web), `service` (who makes it: `vizelvision`, `web-basic` or
+  `feed`), `upstream` (where its playlist comes from, a host, never a URL with its
+  tokens) and `status` (a slide channel's, as `slides` in `/api/v1/status`). A relay adds
+  `resolver` and `listings` (it publishes a guide); a slide channel adds `page`.
+* `disks`: free space where the streams, the web streams and the recordings are written,
+  one entry a filesystem: `names`, `paths`, `free_bytes`, `total_bytes`.
+
 ## Integration flow
 
 1. GET `api/v1/sources/digital` (or `sources/cable`) and select an item.

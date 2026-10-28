@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Inputs · TV Thing</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="app.css">
+  <style>
+    body { min-height: 100vh; background: var(--bg); }
+    .page { max-width: 1120px; }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--err); }
+    .mute { color: var(--text-mute); }
+    .mono { font-family: var(--mono); font-size: 12px; }
+    .summary { display: flex; flex-wrap: wrap; gap: 8px; margin: -12px 0 28px; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 8px; padding: 6px 11px;
+      border: 1px solid var(--border); border-radius: var(--r-full); background: var(--surface);
+      font-size: 12px; color: var(--text-dim);
+    }
+    .chip strong { color: var(--text); font-weight: 600; }
+    .dot { flex-shrink: 0; }
+    .dot.idle { background: var(--text-mute); box-shadow: none; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 14px; }
+    .card h3 { display: flex; align-items: center; gap: 9px; margin: 0; font-size: 15px; font-weight: 650; }
+    .card .detail { margin: 4px 0 14px; color: var(--text-mute); font-size: 12px; line-height: 1.5; }
+    .lane { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+    .lane-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+    .lane-head strong { font-size: 13px; }
+    .tag {
+      display: inline-block; padding: 2px 8px; border: 1px solid var(--border-strong); border-radius: var(--r-full);
+      color: var(--text-dim); font: 600 10px/1.5 var(--mono); text-transform: uppercase; letter-spacing: .06em;
+    }
+    .tag.ok { border-color: rgba(74, 222, 128, .4); color: var(--ok); }
+    .tag.warn { border-color: rgba(251, 191, 36, .4); color: var(--warn); }
+    .tag.bad { border-color: rgba(248, 113, 113, .4); color: var(--err); }
+    .kv-row dd { overflow-wrap: anywhere; }
+    .meter { position: relative; height: 6px; margin-top: 5px; border-radius: var(--r-full); background: var(--surface-3); overflow: hidden; }
+    .meter span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--accent); }
+    .meter.ok span { background: var(--ok); }
+    .meter.warn span { background: var(--warn); }
+    .meter.bad span { background: var(--err); }
+    .flags { display: flex; flex-wrap: wrap; gap: 5px; justify-content: flex-end; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 10px 14px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    th { color: var(--text-mute); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+    td.num { color: var(--accent); font: 600 13px var(--mono); white-space: nowrap; }
+    td .sub { display: block; margin-top: 2px; color: var(--text-mute); font-size: 12px; }
+    .group-title { margin: 22px 0 10px; color: var(--text-dim); font-size: 13px; font-weight: 650; }
+    .group-title:first-of-type { margin-top: 0; }
+    .probe { margin-top: 6px; font: 12px/1.5 var(--mono); color: var(--text-dim); }
+    .btn-small { padding: 4px 10px; font-size: 12px; }
+    .notice {
+      margin-bottom: 18px; padding: 12px 14px; border: 1px solid var(--accent-line); border-radius: var(--r-md);
+      background: var(--accent-soft); color: var(--text-dim); font-size: 13px;
+    }
+    .disk + .disk { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+    .disk-head { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
+    .disk-head span { color: var(--text-dim); white-space: nowrap; }
+    .disk .sub { display: block; margin-top: 6px; color: var(--text-mute); overflow-wrap: anywhere; }
+    .tools { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tools a.btn { text-decoration: none; color: var(--text); }
+    .foot { margin-top: 28px; color: var(--text-mute); font-size: 12px; }
+    @media (max-width: 640px) {
+      .cards { grid-template-columns: 1fr; }
+      th, td { padding: 9px 10px; }
+      .hide-narrow { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./"><span class="brand-mark"></span><span>TV Thing</span></a>
+    <nav class="nav" aria-label="Pages">
+      <a class="navlink" href="./">Watch</a>
+      <a class="navlink" href="guide.html">Guide</a>
+      <a class="navlink" href="vcr.html">VCR</a>
+      <a class="navlink" href="cable.html">Cable</a>
+      <a class="navlink" href="rescan.html">Scan</a>
+      <a class="navlink" href="dx.html">DX</a>
+      <a class="navlink" href="roku.html">Roku</a>
+      <a class="navlink" href="inputs.html" aria-current="page">Inputs</a>
+      <a class="navlink" href="about.html">About</a>
+    </nav>
+  </header>
+
+  <main class="page">
+    <h1>Input streams</h1>
+    <p class="lede">Everything that feeds the dial: the tuner stack, the Roku input, and the web
+      streams made here or brought in from the web, with the services that run them.
+      It refreshes every five seconds while this page is open.</p>
+
+    <div class="summary" id="summary" aria-live="polite"></div>
+    <div class="notice" id="notice" hidden></div>
+
+    <h2>Tuner stack</h2>
+    <div class="cards" id="tuners"><div class="card mute">Loading…</div></div>
+    <p class="foot">Each front-end the feed reports gets a card, with the lanes it serves; a new
+      tuner appears here once the feed knows it.</p>
+
+    <h2>Roku input</h2>
+    <div class="cards">
+      <div class="card"><h3>Source Roku</h3><p class="detail" id="roku-detail"></p><dl class="kv" id="roku-now"></dl></div>
+      <div class="card"><h3>HD PVR capture</h3><p class="detail" id="capture-detail"></p><dl class="kv" id="roku-capture"></dl></div>
+    </div>
+
+    <h2>Web streams</h2>
+    <div id="web"><div class="card mute">Loading…</div></div>
+
+    <h2>Diagnostics</h2>
+    <div class="table-wrap">
+      <table aria-label="Services">
+        <thead><tr><th>Service</th><th>State</th><th>Up</th><th class="hide-narrow">Restarts</th><th>Memory</th><th>CPU</th><th class="hide-narrow">Tasks</th></tr></thead>
+        <tbody id="services"><tr><td colspan="7" class="mute">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="cards" style="margin-top:14px">
+      <div class="card"><h3>Health</h3><dl class="kv" id="health" style="margin-top:12px"></dl></div>
+      <div class="card"><h3>Disks</h3><div id="disks" style="margin-top:12px"></div></div>
+      <div class="card">
+        <h3>Tools</h3>
+        <p class="detail">Deeper looks, and a snapshot of everything on this page for a bug report.</p>
+        <div class="tools">
+          <a class="btn" href="dx.html">DX meter</a>
+          <a class="btn" href="rescan.html">Channel scan</a>
+          <a class="btn" href="roku.html">Roku calibration</a>
+          <a class="btn" href="api/v1">API</a>
+          <button class="btn btn-accent" id="copy" type="button">Copy snapshot</button>
+        </div>
+        <p class="probe" id="copied" hidden></p>
+      </div>
+    </div>
+    <p class="foot" id="updated"></p>
+  </main>
+
+  <script>
+  (() => {
+    "use strict";
+    const $ = id => document.getElementById(id);
+    const POLL_MS = 5000;
+    const last = { status: null, inputs: null, health: null, signal: null, roku: null };
+    const cpuSeen = {};          // unit -> {cpu, at, rate}: CPU time between two systemd reads
+    let cycle = 0, timer = null;
+
+    const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    })[c]);
+    const dash = v => (v == null || v === "" ? "—" : v);
+
+    function bytes(n) {
+      if (n == null) return null;
+      const units = ["B", "KB", "MB", "GB", "TB"];
+      let i = 0;
+      while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+      return `${n < 10 && i ? n.toFixed(1) : Math.round(n)} ${units[i]}`;
+    }
+    function span(seconds) {
+      if (seconds == null || !isFinite(seconds)) return null;
+      seconds = Math.max(0, Math.round(seconds));
+      if (seconds < 90) return `${seconds} s`;
+      const m = Math.floor(seconds / 60), h = Math.floor(m / 60), d = Math.floor(h / 24);
+      if (d) return `${d} d ${h % 24} h`;
+      if (h) return `${h} h ${m % 60} min`;
+      return `${m} min`;
+    }
+    const since = epoch => (epoch ? span(Date.now() / 1000 - epoch) : null);
+
+    function rows(pairs) {
+      return pairs.filter(p => p).map(([key, value, cls, html]) =>
+        `<div class="kv-row"><dt>${esc(key)}</dt>` +
+        `<dd class="${cls || ""}">${html != null ? html : esc(dash(value))}</dd></div>`).join("");
+    }
+    function meter(fraction, cls) {
+      const pct = Math.max(0, Math.min(100, (fraction || 0) * 100));
+      return `<div class="meter ${cls || ""}"><span style="width:${pct.toFixed(1)}%"></span></div>`;
+    }
+    const tag = (text, cls) => `<span class="tag ${cls || ""}">${esc(text)}</span>`;
+    const dot = cls => `<span class="dot ${cls}" aria-hidden="true"></span>`;
+
+    async function get(path, timeout = 5000) {
+      const controller = new AbortController();
+      const stop = setTimeout(() => controller.abort(), timeout);
+      try {
+        const res = await fetch(path, { cache: "no-store", signal: controller.signal });
+        let body = null;
+        try { body = await res.json(); } catch (_) { /* not JSON */ }
+        return { ok: res.ok, status: res.status, body };
+      } catch (error) {
+        return { ok: false, status: null, body: null, error: String(error) };
+      } finally {
+        clearTimeout(stop);
+      }
+    }
+
+    // ---- Tuner stack -------------------------------------------------------
+    function laneState(lane) {
+      const stream = lane.stream || {};
+      if (stream.health && stream.health.ok === false) return ["failed", "bad", "error"];
+      if (lane.navigating) return ["navigating", "warn", "busy"];
+      if (stream.ready) return ["streaming", "ok", "live"];
+      if (lane.lifecycle && lane.lifecycle !== "idle") return [lane.lifecycle, "warn", "busy"];
+      return ["idle", "", "idle"];
+    }
+
+    function selectionText(selection) {
+      if (!selection) return null;
+      if (selection.manual) return "Manual Roku";
+      const bits = [selection.name];
+      if (selection.number) bits.push(selection.number);
+      if (selection.rf_channel) bits.push(`RF ${selection.rf_channel}`);
+      if (selection.app && selection.app.name) bits.push(selection.app.name);
+      return bits.filter(Boolean).join(" · ");
+    }
+
+    function tunerText(lane) {
+      const tuner = lane.tuner || {};
+      if (tuner.device) return tuner.name ? `${tuner.name} · ${tuner.device}` : tuner.device;
+      if (tuner.adapter != null) return `${tuner.backend || "dvb"} adapter ${tuner.adapter}`;
+      return lane.encoder && lane.encoder.backend;
+    }
+
+    function signalRows(sample) {
+      const s = sample && sample.signal;
+      if (!s) return [];
+      const flags = Object.entries(s.flags || {}).map(([name, on]) => tag(name, on ? "ok" : "bad")).join("");
+      const snrClass = s.snr_db >= 20 ? "ok" : s.snr_db >= 15 ? "warn" : "bad";
+      return [
+        ["Signal", null, s.locked ? "ok" : "bad", `<div class="flags">${flags}</div>`],
+        ["Strength", null, "", `${esc(s.signal_percent != null ? s.signal_percent.toFixed(1) + "%" : "—")}${meter(s.signal_percent / 100, s.signal_percent >= 60 ? "ok" : "warn")}`],
+        ["SNR", null, snrClass, `${esc(s.snr_db != null ? s.snr_db.toFixed(1) + " dB" : "—")}${meter((s.snr_db || 0) / 35, snrClass)}`],
+        ["Errors", `BER ${dash(s.ber)} · ${dash(s.uncorrected_blocks)} uncorrected`, s.uncorrected_blocks ? "warn" : ""],
+      ];
+    }
+
+    function laneBlock(lane, status) {
+      const [label, cls] = laneState(lane);
+      const stream = lane.stream || {};
+      const health = stream.health || {};
+      const lock = (status.locks || {})[lane.id];
+      const pairs = [
+        ["Tuner", tunerText(lane)],
+        ["Encoder", lane.encoder ? [lane.encoder.name, lane.encoder.hardware ? "hardware" : null,
+          lane.encoder.backend, lane.quality].filter(Boolean).join(" · ") : null],
+        ["Tuned to", selectionText(lane.selection)],
+        lock ? ["Locked by", `${lock.owner}${lock.seconds_remaining != null ? ` · ${span(lock.seconds_remaining)} left` : ""}` +
+          (lock.until && lock.until !== "duration" ? ` · until ${lock.until}` : ""), "warn"] : null,
+        ["Stream", stream.id ? `${stream.state} · up ${dash(since(stream.started_at))}` : stream.state],
+        stream.id ? ["Segments", `${stream.segment_duration_seconds} s · largest ${dash(bytes(health.max_segment_bytes))}`] : null,
+        stream.id ? ["Encoder health", health.ok === false ? health.reason :
+          `ok · ${health.duplicated_frames || 0} dup · ${health.udp_overruns || 0} overruns · ${health.non_monotonous || 0} non-mono`,
+          health.ok === false ? "bad" : (health.duplicated_frames || health.udp_overruns ? "warn" : "ok")] : null,
+        stream.id && health.max_rss_mib != null ? ["Encoder memory", `${health.max_rss_mib} MiB peak` +
+          (health.max_gpu_temp_c != null ? ` · GPU ${health.max_gpu_temp_c} °C` : "")] : null,
+      ];
+      if (last.signal && last.signal.lane === lane.id && stream.ready) pairs.push(...signalRows(last.signal));
+      return `<div class="lane"><div class="lane-head"><strong>${esc(lane.name)}</strong>${tag(label, cls)}</div>` +
+        `<p class="detail" style="margin-top:-6px">${esc(lane.description)}</p><dl class="kv">${rows(pairs)}</dl></div>`;
+    }
+
+    function renderTuners(status) {
+      const lanes = status.lanes || {};
+      const placed = new Set();
+      const cards = (status.frontends || []).map(frontend => {
+        const own = (frontend.lanes || []).map(id => lanes[id]).filter(Boolean);
+        own.forEach(lane => placed.add(lane.id));
+        const state = frontend.busy ? "live" : "idle";
+        return `<div class="card"><h3>${dot(state)}${esc(frontend.name)}</h3>` +
+          `<p class="detail">${esc(frontend.detail)}${frontend.in_use_by ? ` · in use by ${esc(frontend.in_use_by)}` : " · free"}</p>` +
+          own.map(lane => laneBlock(lane, status)).join("") + `</div>`;
+      });
+      const loose = Object.values(lanes).filter(lane => !placed.has(lane.id));
+      if (loose.length) {
+        cards.push(`<div class="card"><h3>${dot("idle")}Other lanes</h3><p class="detail">Lanes no front-end names.</p>` +
+          loose.map(lane => laneBlock(lane, status)).join("") + `</div>`);
+      }
+      $("tuners").innerHTML = cards.join("") || `<div class="card mute">The feed reports no front-ends.</div>`;
+    }
+
+    // ---- Roku input ----------------------------------------------------------
+    function renderRoku(data) {
+      if (!data) return;
+      if (!data.configured) {
+        $("roku-now").innerHTML = rows([["Roku lane", "not configured (roku.json is missing)", "bad"]]);
+        return;
+      }
+      const lane = data.lane || {};
+      const roku = lane.roku || {};
+      const selection = roku.selection;
+      const operation = roku.operation;
+      const player = (roku.player && roku.player.data) || {};
+      $("roku-detail").textContent = `${data.roku_url || "address unknown"} · driven over ECP`;
+      $("roku-now").innerHTML = rows([
+        ["Showing", selection ? (selection.manual ? "Manual Roku" : selection.name) : "unverified"],
+        ["Active app", player.app ? player.app.name : (roku.player && roku.player.error) || null],
+        ["Player", player.media_player ? player.media_player.state : null],
+        ["Verified", selection && !selection.manual && selection.age_seconds != null ?
+          `${span(selection.age_seconds)} ago${selection.reusable ? " · reusable" : ""}` : null],
+        ["Route", selection && selection.resolved_source && selection.resolved_source.label],
+        ["Navigation", operation ? `${operation.state}: ${operation.message || operation.phase || ""}` : "idle",
+          operation && operation.state === "failed" ? "bad" : ""],
+      ]);
+      const calibration = data.calibration || {};
+      const device = calibration.device || {};
+      const signal = calibration.signal || {};
+      const target = calibration.target || {};
+      const verifier = calibration.capture || {};
+      const stream = lane.stream || {};
+      const usb = device.usb || {};
+      $("capture-detail").textContent = [calibration.source_name, device.path].filter(Boolean).join(" · ");
+      $("roku-capture").innerHTML = rows([
+        ["Device", device.label ? `${device.label} · ${device.state}` : null, device.state && device.state !== "ready" ? "bad" : "ok"],
+        usb.speed || usb.port ? ["USB", [usb.port, usb.speed, usb.product].filter(Boolean).join(" · ")] : null,
+        ["Signal", signal.label, signal.state === "locked" ? "ok" : "bad"],
+        ["Calibrated for", target.label ? `${target.label} · ${target.matches ? "matches" : "does not match"}` : null,
+          target.matches ? "ok" : "bad"],
+        ["Capture", stream.active ? `running · up ${dash(since(stream.started_at))}` : "stopped", stream.active ? "ok" : ""],
+        ["Verifier", verifier.decoding ? "decoding frames" : "idle"],
+        ["Last failure", verifier.last_stream_failure && verifier.last_stream_failure.error, "bad"],
+        ["Probe", calibration.error, "bad"],
+      ]);
+    }
+
+    // ---- Web streams ---------------------------------------------------------
+    const KINDS = { vizelvision: "House channel", slides: "Slide channel", internet: "Relay" };
+    const MAKERS = { vizelvision: "VizelVision", "web-basic": "web-basic", feed: "the feed" };
+
+    function webStatus(entry) {
+      const s = entry.status;
+      if (entry.kind === "slides") {
+        if (!s) return [tag("unknown"), ""];
+        if (s.unavailable) return [tag("web-basic down", "bad"), s.unavailable];
+        if (s.resting) return [tag("resting", "warn"), "died three times; waits a minute"];
+        if (s.running) return [tag(s.ready ? "on air" : "starting", s.ready ? "ok" : "warn"),
+          `${s.starts} start${s.starts === 1 ? "" : "s"} · watched ${dash(span(s.seconds_since_demand))} ago`];
+        return [tag("idle"), `starts when watched · ${s.starts} start${s.starts === 1 ? "" : "s"}` +
+          (s.last_stop ? ` · last stop: ${s.last_stop}` : "") + (s.last_error ? ` · ${s.last_error}` : "")];
+      }
+      if (entry.kind === "internet") return [tag("on demand"), entry.listings ? "publishes listings" : "no listings"];
+      return [tag("always on", "ok"), ""];
+    }
+
+    function renderWeb(inputs) {
+      const web = (inputs && inputs.web) || [];
+      const groups = [["Made here", web.filter(e => e.origin === "internal")],
+                      ["From the web", web.filter(e => e.origin !== "internal")]];
+      $("web").innerHTML = groups.map(([title, entries]) => entries.length ? (
+        `<div class="group-title">${esc(title)}</div><div class="table-wrap"><table>` +
+        `<thead><tr><th>Ch</th><th>Stream</th><th class="hide-narrow">Made by</th><th>Status</th><th></th></tr></thead><tbody>` +
+        entries.map(entry => {
+          const [state, note] = webStatus(entry);
+          const id = `probe-${entry.number}`;
+          return `<tr><td class="num">${esc(entry.number)}</td>` +
+            `<td>${esc(entry.name)}<span class="sub">${esc(KINDS[entry.kind] || entry.kind)}` +
+            `${entry.upstream ? ` · from ${esc(entry.upstream)}` : ""}${entry.note ? ` · ${esc(entry.note)}` : ""}</span></td>` +
+            `<td class="hide-narrow">${esc(MAKERS[entry.service] || entry.service || "—")}</td>` +
+            `<td>${state}${note ? `<span class="sub">${esc(note)}</span>` : ""}<div class="probe" id="${id}"></div></td>` +
+            `<td><button class="btn btn-small" type="button" data-probe="${esc(entry.stream)}" data-kind="${esc(entry.kind)}" ` +
+            `data-out="${id}">Probe</button></td></tr>`;
+        }).join("") + `</tbody></table></div>`) : "").join("") || `<div class="card mute">No web streams on the dial.</div>`;
+    }
+
+    // One look at a stream's playlist, as a player would: its answer, how fast, its segments.
+    async function probe(button) {
+      const out = $(button.dataset.out);
+      if (button.dataset.kind === "slides" &&
+          !confirm("Probing a slide channel starts its video, which runs for a minute after. Probe anyway?")) return;
+      button.disabled = true;
+      out.textContent = "probing…";
+      const path = button.dataset.probe.replace(/^\//, "");
+      const began = performance.now();
+      try {
+        let res = await fetch(path, { cache: "no-store" });
+        let text = await res.text();
+        if (res.ok && text.includes("#EXT-X-STREAM-INF")) {
+          const variant = text.split("\n").find(line => line && !line.startsWith("#"));
+          res = await fetch(path.replace(/[^/]*$/, "") + variant.trim(), { cache: "no-store" });
+          text = await res.text();
+        }
+        const ms = Math.round(performance.now() - began);
+        const segments = text.split("\n").filter(line => line.trim() && !line.startsWith("#")).length;
+        const target = (text.match(/#EXT-X-TARGETDURATION:(\d+(?:\.\d+)?)/) || [])[1];
+        out.className = `probe ${res.ok && segments ? "ok" : "bad"}`;
+        out.textContent = res.ok ? `${res.status} · ${segments} segments${target ? ` of ${target} s` : ""} · ${ms} ms`
+                                 : `${res.status} ${res.statusText} · ${ms} ms`;
+      } catch (error) {
+        out.className = "probe bad";
+        out.textContent = String(error);
+      } finally {
+        button.disabled = false;
+      }
+    }
+    $("web").addEventListener("click", event => {
+      const button = event.target.closest("button[data-probe]");
+      if (button) probe(button);
+    });
+
+    // ---- Diagnostics ---------------------------------------------------------
+    // Control reads systemd at most every five seconds; the same read twice is no new rate.
+    function cpuRate(unit, systemd) {
+      if (!systemd || systemd.cpu_seconds == null || systemd.read_at == null) return null;
+      const seen = cpuSeen[unit];
+      if (seen && systemd.read_at <= seen.at) return seen.rate;
+      const rate = seen && systemd.cpu_seconds >= seen.cpu
+        ? (systemd.cpu_seconds - seen.cpu) / (systemd.read_at - seen.at) * 100 : null;
+      cpuSeen[unit] = { cpu: systemd.cpu_seconds, at: systemd.read_at, rate };
+      return rate;
+    }
+
+    function renderServices(inputs) {
+      $("services").innerHTML = inputs.services.map(service => {
+        const sd = service.systemd;
+        const up = sd && sd.state === "active";
+        const answering = service.answering;
+        const stateCls = !sd ? "idle" : up && answering !== false ? "live" : up ? "busy" : "error";
+        const stateText = !sd ? "not installed" : `${sd.state}${sd.sub_state ? ` (${sd.sub_state})` : ""}` +
+          (up && answering === false ? " · not answering" : "");
+        const rate = cpuRate(service.unit, sd);
+        const quota = sd && sd.cpu_quota_percent;
+        const memFraction = sd && sd.memory_max_bytes ? sd.memory_bytes / sd.memory_max_bytes : null;
+        const memCls = memFraction > 0.85 ? "bad" : memFraction > 0.65 ? "warn" : "ok";
+        const cpuCls = quota && rate > quota * 0.85 ? "bad" : quota && rate > quota * 0.6 ? "warn" : "ok";
+        return `<tr><td><strong>${esc(service.id)}</strong><span class="sub mono">${esc(service.unit)}</span>` +
+          `<span class="sub">${esc(service.role)}</span></td>` +
+          `<td>${dot(stateCls)} ${esc(stateText)}${sd && sd.pid ? `<span class="sub mono">pid ${esc(sd.pid)}</span>` : ""}</td>` +
+          `<td>${esc(dash(sd && since(sd.since)))}</td>` +
+          `<td class="hide-narrow">${esc(dash(sd && sd.restarts))}</td>` +
+          `<td>${esc(dash(sd && bytes(sd.memory_bytes)))}${sd && sd.memory_max_bytes ?
+            `<span class="sub">of ${esc(bytes(sd.memory_max_bytes))}</span>${meter(memFraction, memCls)}` : ""}</td>` +
+          `<td>${rate != null ? esc(rate.toFixed(rate < 10 ? 1 : 0) + "%") : "—"}${quota ?
+            `<span class="sub">of ${esc(quota)}%</span>${meter(rate != null ? rate / quota : 0, cpuCls)}` : ""}</td>` +
+          `<td class="hide-narrow">${esc(dash(sd && sd.tasks))}</td></tr>`;
+      }).join("");
+    }
+
+    function renderDisks(inputs) {
+      $("disks").innerHTML = (inputs.disks || []).map(disk => {
+        const used = 1 - disk.free_bytes / disk.total_bytes;
+        const cls = used > 0.92 ? "bad" : used > 0.8 ? "warn" : "ok";
+        return `<div class="disk"><div class="disk-head"><strong>${esc(disk.names.join(", "))}</strong>` +
+          `<span>${esc(bytes(disk.free_bytes))} free of ${esc(bytes(disk.total_bytes))}</span></div>` +
+          `${meter(used, cls)}<span class="sub mono">${disk.paths.map(esc).join("<br>")}</span></div>`;
+      }).join("") || rows([["Disks", "none reported"]]);
+    }
+
+    function renderHealth(status, health, inputs) {
+      const unhealthy = (health && health.unhealthy_lanes) || [];
+      $("health").innerHTML = rows([
+        ["Lanes", health ? (health.ok ? `healthy · ${(health.active_lanes || []).length} streaming` :
+          `unhealthy: ${unhealthy.join(", ")}`) : "no answer", health && health.ok ? "ok" : "bad"],
+        ["Busy", status.busy_reason || "no"],
+        ["Scanning", status.scanning && Object.entries(status.scanning).filter(([, v]) => v).map(([k]) => k).join(", ") || "no"],
+        ["Recording", status.recording ? (status.recording.title || status.recording.channel || "yes") : "no"],
+        ["Feed epoch", status.feed_epoch, "mono"],
+        ["Node", inputs && inputs.role !== "control" ? `${inputs.node} · one process (${inputs.role})` : status.node],
+      ]);
+    }
+
+    function renderSummary(status, health, inputs) {
+      const chips = [];
+      if (inputs) {
+        inputs.services.forEach(service => {
+          const sd = service.systemd;
+          const fine = sd && sd.state === "active" && service.answering !== false;
+          chips.push(`<span class="chip">${dot(!sd ? "idle" : fine ? "live" : "error")}<strong>${esc(service.id)}</strong>` +
+            `${esc(!sd ? "not installed" : fine ? "up " + since(sd.since) : sd.state)}</span>`);
+        });
+      }
+      const lanes = Object.values(status.lanes || {});
+      const streaming = lanes.filter(lane => lane.stream && lane.stream.ready).length;
+      chips.push(`<span class="chip">${dot(health && health.ok ? "live" : "error")}<strong>${streaming} of ${lanes.length}</strong>lanes streaming</span>`);
+      if (inputs) {
+        const web = inputs.web || [];
+        const running = web.filter(e => e.status && e.status.running).length;
+        chips.push(`<span class="chip">${dot(running ? "live" : "idle")}<strong>${web.length}</strong>web streams · ${running} slide video on</span>`);
+      }
+      $("summary").innerHTML = chips.join("");
+    }
+
+    async function refresh() {
+      cycle++;
+      const wantRoku = cycle % 2 === 1;
+      const [status, inputs, health, roku] = await Promise.all([
+        get("api/v1/status"), get("api/v1/inputs"), get("api/v1/health"),
+        wantRoku ? get("api/v1/roku") : Promise.resolve(null),
+      ]);
+      if (!status.ok || !status.body) {
+        $("notice").hidden = false;
+        $("notice").textContent = "Control is not answering, so nothing here is current. It retries every five seconds.";
+        $("updated").textContent = `Last tried ${new Date().toLocaleTimeString()}`;
+        return;
+      }
+      last.status = status.body;
+      last.health = health.body;
+      last.inputs = inputs.ok ? inputs.body : null;
+      if (roku && roku.body) last.roku = roku.body;
+      const digital = Object.values(last.status.lanes || {}).find(lane =>
+        lane.tuner && lane.tuner.backend === "linux-dvb" && lane.stream && lane.stream.ready);
+      last.signal = digital ? (await get("api/v1/signal")).body : null;
+
+      $("notice").hidden = !!last.inputs;
+      if (!last.inputs) {
+        $("notice").textContent = inputs.status === 404
+          ? "The services, web streams and disks come from control's /api/v1/inputs, which arrives at control's next restart."
+          : "Control's /api/v1/inputs did not answer; the services, web streams and disks are not shown.";
+      }
+      renderSummary(last.status, last.health, last.inputs);
+      renderTuners(last.status);
+      renderRoku(last.roku);
+      if (last.inputs) {
+        renderWeb(last.inputs);
+        renderServices(last.inputs);
+        renderDisks(last.inputs);
+      } else {
+        $("web").innerHTML = `<div class="card mute">Not available yet.</div>`;
+        $("services").innerHTML = `<tr><td colspan="7" class="mute">Not available yet.</td></tr>`;
+      }
+      renderHealth(last.status, last.health, last.inputs);
+      $("updated").textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    }
+
+    function schedule() {
+      clearTimeout(timer);
+      if (document.hidden) return;
+      refresh().finally(() => { timer = setTimeout(schedule, POLL_MS); });
+    }
+    document.addEventListener("visibilitychange", schedule);
+
+    $("copy").addEventListener("click", async () => {
+      const snapshot = JSON.stringify({ taken_at: new Date().toISOString(), ...last }, null, 2);
+      const note = $("copied");
+      note.hidden = false;
+      try {
+        await navigator.clipboard.writeText(snapshot);
+        note.textContent = `Copied ${bytes(snapshot.length)} of JSON.`;
+      } catch (_) {
+        note.textContent = "The clipboard refused; the snapshot is in the console.";
+        console.log(snapshot);
+      }
+    });
+
+    schedule();
+  })();
+  </script>
+</body>
+</html>
