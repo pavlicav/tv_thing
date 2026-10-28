@@ -276,7 +276,7 @@ def test_the_card_reads_like_a_cable_lineup():
     # 0-9: our own channels. The station, then the web streams, the Sports Guide on 6;
     # 3-5 and 7-9 held for more.
     assert [number for number, _ in plan.house] == [0, 70]
-    assert plan.slides == ((6, "VizelVision Sports Guide", "sports-guide"),)
+    assert plan.slides == ((6, "VizelVision Sports Guide", "sports-guide"), (197, "Cairo Radio", "cairo-radio"))
     assert plan.fixed["internet/cabride"] == (1, "Trains")
     assert plan.fixed["internet/pentulive"] == (2, "pen2live")
     assert not any(n in by_number for n in (3, 4, 5, 7, 8, 9))
@@ -308,7 +308,7 @@ def test_the_card_reads_like_a_cable_lineup():
     assert by_number[109] == "roku-manual/manual"
     assert (by_number[134], by_number[144], by_number[246]) == (
         "youtube-tv/Food Network", "youtube-tv/GLIV", "youtube-tv/HLN")
-    # Held: 112, 177 and 227 left by moves; 197 for Cairo Radio; 291-297 for YouTube TV's
+    # Held: 112, 177 and 227 left by moves (197 is Cairo Radio, a slide channel); 291-297 for YouTube TV's
     # Lansing copies once a Michigan antenna takes theirs; 380-399 for its subchannels.
     assert not any(n in by_number for n in (112, 177, 197, 227, *range(291, 298), *range(380, 400)))
     assert section(380) == "Michigan extras" and not plan.section_of(380).new

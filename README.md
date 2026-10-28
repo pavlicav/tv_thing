@@ -979,7 +979,7 @@ Every channel has a TV Thing number, laid out like an old cable lineup card in
 | 70 | VizelVision again |
 | 71–99 | Live Sports: the day's games, football, baseball and hockey together by start time (NFL Sunday Ticket, Thursday Night Football, MLB, and the NHL on ESPN Unlimited) |
 | 100–109 | Roku (Manual Roku on 109) |
-| 110–289 | The digital tier, by genre, YouTube TV's other channels and the antenna's subchannels together: news and business, learning and lifestyle, kids, entertainment, music (197 held for Cairo Radio), classic TV, movies and westerns, crime and reality, game shows, Spanish, shopping, faith |
+| 110–289 | The digital tier, by genre, YouTube TV's other channels and the antenna's subchannels together: news and business, learning and lifestyle, kids, entertainment, music (Cairo Radio on 197), classic TV, movies and westerns, crime and reality, game shows, Spanish, shopping, faith |
 | 290–299 | Repeaters and other markets; 292–297 held for YouTube TV's Lansing locals once a Michigan antenna takes their numbers |
 | 300–349 | New on the antenna |
 | 350–369 | New on YouTube TV |

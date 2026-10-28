@@ -272,11 +272,15 @@ def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypat
         ("401872964", 71, "Live Sports")]
     code, sources = request("/api/v1/sources")
     assert [view["tv_number"] for view in sources["lineup"]["house"]] == [0, 70]
-    # 6 is the station's Sports Guide, a page of slides rather than a stream.
+    # 6 is the station's Sports Guide and 197 Cairo Radio: pages, each with its video.
     assert sources["lineup"]["slides"] == [{
         "tv_number": 6, "tv_name": "VizelVision Sports Guide", "tv_section": "Our channels",
         "channel_id": "sports-guide", "page_path": "sports-guide.html",
-        "data_path": "/api/v1/sports-guide", "stream_path": "/stream/sports-guide/index.m3u8"}]
+        "data_path": "/api/v1/sports-guide", "stream_path": "/stream/sports-guide/index.m3u8"}, {
+        # 197 is Cairo Radio: its page plays its video, which carries its card.
+        "tv_number": 197, "tv_name": "Cairo Radio", "tv_section": "Music",
+        "channel_id": "cairo-radio", "page_path": "cairo-radio.html",
+        "data_path": None, "stream_path": "/stream/cairo-radio/index.m3u8"}]
     assert {"first": 10, "last": 24, "name": "Washington & Baltimore"} in sources["lineup"]["sections"]
     # 1 and 2 are internet streams, played from TV Thing's relay of them.
     assert [(view["tv_number"], view["tv_name"], view["channel_id"], view["stream_path"])
@@ -290,7 +294,8 @@ def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypat
         (0, "vizelvision", None), (1, "internet", "cabride"), (2, "internet", "pentulive"),
         (6, "slides", "sports-guide"), (14, "digital", "wrc_hd_4_1"), (27, "roku", "NBC"),
         (42, "roku", "ESPN"), (70, "vizelvision", None), (71, "roku", "401872964"),
-        (72, "roku", "823254"), (109, "roku", "manual"), (300, "digital", "surprise_7_5")]
+        (72, "roku", "823254"), (109, "roku", "manual"), (197, "slides", "cairo-radio"),
+        (300, "digital", "surprise_7_5")]
     assert card["channels"][2]["stream_path"] == "/stream/internet/pentulive/index.m3u8"
     assert card["channels"][3]["name"] == "VizelVision Sports Guide"
     assert card["channels"][3]["page_path"] == "sports-guide.html"
