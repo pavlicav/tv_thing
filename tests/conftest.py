@@ -28,6 +28,8 @@ def _private_lineup_state(tmp_path, monkeypatch):
         # An internet stream's listings URL (internet_streams.json's "guide") is never
         # fetched in a test; a test that wants listings supplies them.
         monkeypatch.setattr(server.web_streams, "listings", lambda stream_id: [])
+        # This node's reception (the tuner pool's), which a rescan writes.
+        monkeypatch.setattr(server, "RECEPTION_FILE", tmp_path / "reception.json")
         # The feed's recorders and their journal, private to each test.
         import feed_node
         monkeypatch.setattr(server, "recorders", feed_node.Recorders(

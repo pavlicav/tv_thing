@@ -22,6 +22,7 @@ Until Phase 2 lands, TV Thing is one process, and a restart breaks invariants 1 
 | 6 | Control never treats an unreachable or hung feed's lanes as free. | A tune or recording would otherwise grab a tuner that is still busy. | `RemoteFeed` tests (Phase 2); drill rows C2, C3. |
 | 7 | Client URLs and API shapes on `:8080` and `/tv/` do not change. `/internal/` and `/feed/v1/` are never reachable through Apache. | VizelVision, the Watch page and the sideloaded Roku app take no part in the migration. Resolved upstream URLs carry tokens. | `test_api_contract.py` unchanged; drill rows D2–D4. |
 | 8 | A relay that is playing keeps playing while control is down. | Web streams are on air too. | Drill row A1 (with an internet stream playing). |
+| 9 | A node never treats its peer's tuners as free unless the peer answered within 6 s, and never writes the peer's state: a peer's tuner is changed, locked and released only by the peer's own API, and a node's request to its peer (`local_only`) is never forwarded again. | Two writers of one tuner's lock or lane would break invariants 3 and 6 across machines; a tune that bounced between nodes would retune both. | `tests/test_tuner_pool.py`, `tests/test_peers.py`; the staged two-node check (a node's control stopped: its tuners read unknown within 8 s). |
 
 ## The state model
 
@@ -63,6 +64,7 @@ Exactly one writer process per file.
 | File | Writer |
 |---|---|
 | `recordings.json`, `tuner_locks.json`, `playback_state.json` (always-on intent), `channels.json` (scan results), `epg.json`, `yttv_epg.json`, `lineup_state.json`, `roku_state/` | control |
+| `state/reception.json` (this node's antenna, by RF channel) | control |
 | `state/feed/recordings-journal.jsonl` (git-ignored; one place for both builds, so a rollback reads it), lane playlists and segments in `streams/` | feed |
 
 ## The failure matrix

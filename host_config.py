@@ -102,6 +102,11 @@ SETTINGS = (
             "A second node's way to the primary's own services: Cairo Radio's audio and song "
             "information, and VizelVision's media. Empty: this host's own, which a second node "
             "does not have."),
+    Setting("peer_host", "Peer's address", "TV_THING_PEER_HOST", (), ("control",),
+            "The other TV Thing node, whose digital tuners join this one's in one pool: a live "
+            "tune that finds every tuner here locked is played from the peer's and relayed "
+            "through this front door (/stream/peer/). An address on the LAN or the tailnet. "
+            "Empty: no pool. Auto: the primary's address on a second node, none on the primary."),
 )
 BY_ID = {setting.id: setting for setting in SETTINGS}
 
@@ -140,7 +145,21 @@ def check(setting_id, value, saving=False):
         if not isinstance(value, str) or not _HOST.fullmatch(value):
             raise ValueError("The primary's address is a host name or an IP address, no scheme or port")
         return value
+    if setting_id == "peer_host":
+        host, port = split_port(value) if isinstance(value, str) else (None, None)
+        if host is None or not _HOST.fullmatch(host) or not 0 < port < 65536:
+            raise ValueError("The peer's address is a host name or an IP address, with an optional "
+                             ":port, no scheme")
+        return value
     raise ValueError(f"{setting.label} cannot be set")
+
+
+def split_port(address, default=8080):
+    """(host, port) from ``host``, ``host:port``, ``[v6]`` or ``[v6]:port``."""
+    match = re.fullmatch(r"(.+?)(?::(\d{1,5}))?", address)
+    if not match or (":" in match.group(1) and not match.group(1).startswith("[")):
+        return None, None
+    return match.group(1), int(match.group(2) or default)
 
 
 def read_settings(path):
@@ -360,7 +379,22 @@ class Host:
             return Resolved(str(value), source, "set")
         return Resolved("", source or "auto", "this host's own services")
 
+    def _resolve_peer_host(self):
+        value, source = self._given("peer_host")
+        if source == "environment" and value.strip().lower() in ("", "off", "none"):
+            return Resolved("", source, "off")
+        if value:
+            return Resolved(str(value), source, "set")
+        if not self.primary and self.value("primary_host"):
+            return Resolved(self.value("primary_host"), "auto", "a second node pools with the primary")
+        return Resolved("", source or "auto", "no peer: this node's own tuners only")
+
     # -- what follows from them -----------------------------------------------------
+    def peer_url(self, path=""):
+        """The peer node's front door (``http://host:8080``) followed by ``path``, or None."""
+        host, port = split_port(self.value("peer_host") or "")
+        return f"http://{host}:{port}{path}" if host else None
+
     def primary_url(self, port, path=""):
         """A primary's service as a second node reaches it, or None to keep this host's own."""
         host = self.value("primary_host")

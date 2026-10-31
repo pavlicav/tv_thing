@@ -214,7 +214,7 @@ def test_override_is_never_automatic():
     assert "res.status === 423" in tune
     assert "await confirmOverride(" in tune
     # The retry only happens after the prompt resolves true.
-    assert tune.index("await confirmOverride(") < tune.index('post({ override: true })')
+    assert tune.index("await confirmOverride(") < tune.index('post({ override: true')
     assert "if (!await confirmOverride" in tune
 
 
@@ -279,9 +279,22 @@ def test_live_controls_do_not_advertise_dvr_seeking():
 
 def test_player_uses_lane_playlist_instead_of_shared_primary_alias():
     playback = section(INDEX, "function startTvPlayback", "function startFmPlayback")
-    assert 'state.playing === "cable" ? "analog"' in playback
-    assert '(state.playing === "roku" ? "roku" : "digital")' in playback
+    assert 'state.playing === "cable" ? "stream/analog.m3u8"' in playback
+    assert '(state.playing === "roku" ? "stream/roku.m3u8"' in playback
+    # Digital plays the tuner the tune landed on: this node's lane, or the peer's relayed.
+    assert '(state.tvPlaylist || "/stream/digital.m3u8")' in playback
     assert 'stream/live.m3u8' not in playback
+
+
+def test_the_watch_page_follows_the_tuner_the_pool_chose():
+    tune = section(INDEX, "async function tuneTv", "// Playback retries")
+    assert "state.tvTuner = data.tuner || null" in tune
+    assert "state.tvPlaylist = (data.stream && data.stream.playlist_path) || null" in tune
+    # A refusal naming a tuner is overridden on that tuner, after the prompt.
+    assert "...(data.tuner ? { tuner: data.tuner } : {})" in tune
+    wait = section(INDEX, "async function waitForTvStream", "function setMeter")
+    assert "(raw.tuners || []).find(t => t.id === state.tvTuner)" in wait
+    assert 'fetch("api/v1/tuners"' in INDEX and 'id="tuner-pool"' in INDEX
 
 
 def test_roku_tab_lists_feeds_and_drives_the_remote_under_its_lock():

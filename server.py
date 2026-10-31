@@ -42,10 +42,12 @@ import feed_node
 import host_config
 import internet_streams
 import lineup
+import peers
 import recorder
 import roku_lane
 import web_basic
 import sports_guide
+import tuner_pool
 import yttv_epg
 from roku_control.errors import (BaseballScheduleError, ChannelNotFoundError,
                                  ConfigError, ControlBusyError, EcpError,
@@ -367,6 +369,10 @@ feed_client = (feed_api.RemoteFeed(FEED_URL, FEED_CONFIG, new_lane_state) if ROL
 # The feed's /feed/v1/, which RemoteFeed asks (the feed role only).
 feed_http = feed_api.FeedAPI(feed_client) if ROLE == "feed" else None
 tuning_lanes = set()
+# The other node, whose digital tuners join this one's in one pool (peers.py, tuner_pool.py).
+# Control reads it from a poller thread, started in main(); nothing waits on it.
+PEER_URL = HOST.peer_url()
+peer = peers.PeerClient(PEER_URL) if PEER_URL and ROLE != "feed" else None
 
 # Per-lane child processes. Keys are "<lane>_<role>".
 procs = {
@@ -753,6 +759,191 @@ def tuner_lock_payload():
             lane: lock_view(active_lock(lane, now), now)
             for lane in ALL_LANES
         }
+
+
+# ---------------------------------------------------------------------------
+# The tuner pool: this node's digital tuners and its peer's (tuner_pool.py)
+#
+# Both nodes run the same channel plan (the tracked channels.json); what each one's antenna
+# actually gets is its reception, state/reception.json, written by its own scans. A tune
+# takes a tuner that already plays the channel, else an unlocked one of this node's, else an
+# unlocked one of the peer's, whose stream the front door relays (/stream/peer/). Each node
+# keeps its own locks: a lock on a peer's tuner is the peer's, asked for through its API.
+# ---------------------------------------------------------------------------
+# The digital lanes whose tuners join the pool.
+DIGITAL_TUNER_LANES = (LANE_DIGITAL,)
+
+
+def tuner_id(lane, node=None):
+    """A tuner's name across both nodes: ``viviserv:digital``."""
+    return f"{node or FEED_CONFIG.node}:{lane}"
+
+
+def load_reception():
+    """The RF channels this node's antenna got at its scans, or None: never scanned here,
+    so taken to get the whole plan."""
+    try:
+        return sorted({int(rf) for rf in json.loads(RECEPTION_FILE.read_text())["rf_channels"]})
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def save_reception(scanned, received):
+    """A scan's reception: the RF channels it ``scanned`` are replaced by those it ``received``.
+    Never scanned before, the rest of the plan's are kept, as load_reception took them."""
+    known = load_reception()
+    if known is None:
+        known = {channel.get("rf_channel") for channel in load_channels()} - {None}
+    kept = (set(known) - set(scanned)) | set(received)
+    path = RECEPTION_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(".tmp")
+    temp.write_text(json.dumps({"node": FEED_CONFIG.node, "scanned_at": round(time.time()),
+                                "rf_channels": sorted(kept)}, indent=2) + "\n")
+    os.replace(temp, path)
+
+
+def local_tuners():
+    """This node's digital tuners, in /api/v1/tuners' shape."""
+    reception = load_reception()
+    result = []
+    with lock:
+        for lane in DIGITAL_TUNER_LANES:
+            payload = _lane_payload(lane)
+            held = active_lock(lane)
+            unknown = bool(feed_client.lane(lane).get("unknown"))
+            stream = payload["stream"]
+            result.append({
+                "id": tuner_id(lane), "node": FEED_CONFIG.node, "lane": lane, "kind": "digital",
+                "name": payload["name"], "local": True, "reachable": not unknown,
+                "state": "unknown" if unknown else stream["state"],
+                "selection": payload["selection"], "quality": payload["quality"],
+                "lock": lock_view(held), "scanning": bool(scanning),
+                # Free for a change: known, unlocked and not sweeping the band.
+                "available": not unknown and held is None and not scanning,
+                "rf_channels": reception,
+                "stream": {key: stream[key] for key in (
+                    "id", "state", "active", "ready", "error", "playlist_path", "playback", "revision")},
+            })
+    return result
+
+
+def pool_tuners():
+    """Every tuner in the pool: this node's, then the peer's as last read."""
+    return local_tuners() + (peer.tuners() if peer is not None else [])
+
+
+def peer_payload():
+    if peer is None:
+        return None
+    return {"url": PEER_URL, "node": peer.node(), "reachable": peer.reachable, "error": peer.last_error}
+
+
+def api_v1_tuners_payload(local=False):
+    """``GET /api/v1/tuners``: the pool. ``local``: this node's tuners only, which is what a
+    peer reads."""
+    tuners = local_tuners() if local else pool_tuners()
+    return {"api_version": API_VERSION, "node": FEED_CONFIG.node, "peer": peer_payload(),
+            "tuners": tuners, "summary": tuner_pool.summary(tuners)}
+
+
+def peer_tuner(tuner):
+    """The peer's tuner called ``tuner``, as last read, or None."""
+    if peer is None or not isinstance(tuner, str):
+        return None
+    return next((entry for entry in peer.tuners() if entry["id"] == tuner), None)
+
+
+def api_v1_digital_tune(body, quality):
+    """A digital tune through the pool: on this node's tuner, or relayed from the peer's.
+
+    A tune with ``local_only`` (the peer's own request), or naming this node's tuner, or
+    overriding, or carrying this node's lock token, is this node's alone, as before the pool.
+    """
+    channel_id = body.get("channel_id")
+    token, override = body.get("token"), bool(body.get("override"))
+    wanted = body.get("tuner") or None
+
+    def here():
+        result, status = perform_digital_tune(channel_id, quality, token=token, override=override)
+        response, status = lane_tune_response(result, status, LANE_DIGITAL)
+        if status == 200:
+            response.update(tuner=tuner_id(LANE_DIGITAL), node=FEED_CONFIG.node, relayed=False)
+        return response, status
+
+    holds_here = bool(token and active_lock(LANE_DIGITAL) and lock_holder(LANE_DIGITAL, token) is None)
+    if (peer is None or body.get("local_only") or wanted == tuner_id(LANE_DIGITAL)
+            or (wanted is None and (override or holds_here))):
+        return here()
+    if wanted is not None:
+        chosen = peer_tuner(wanted)
+        if chosen is None:
+            return api_v1_error(f"no tuner called {wanted!r}", 400, "invalid_tuner")
+        return relay_tune(chosen, body, quality)
+    channel = next((item for item in load_channels() if item["id"] == channel_id), None)
+    if channel is None:
+        return here()               # 404, in the usual words
+    tuners = pool_tuners()
+    chosen, why = tuner_pool.choose(tuners, channel)
+    if chosen is None:
+        if why == "none":
+            return api_v1_error(f"No tuner's antenna gets RF {channel.get('rf_channel')} "
+                                f"({channel.get('number')})", 409, "not_received", extra={"tuners": tuners})
+        if why == "locked":
+            held = sorted((tuner for tuner in tuner_pool.candidates(tuners, channel) if tuner.get("lock")),
+                          key=lambda tuner: not tuner["local"])[0]
+            minutes = max(1, round(held["lock"]["seconds_remaining"] / 60))
+            return api_v1_error(
+                f"Every tuner is locked: {held['id']} by {held['lock']['owner']} for about "
+                f"{minutes} more minute{'s' if minutes != 1 else ''}", 423, "locked",
+                extra={"lock": held["lock"], "tuner": held["id"], "tuners": tuners})
+        return api_v1_error("No tuner is free: the others are scanning or not answering",
+                            503, "no_tuner", extra={"tuners": tuners})
+    if chosen["local"]:
+        return here()
+    return relay_tune(chosen, body, quality)
+
+
+def relay_tune(chosen, body, quality):
+    """Tune the peer's tuner ``chosen``; its stream plays here through /stream/peer/."""
+    try:
+        payload, status = peer.tune({**body, "quality": quality, "tuner": chosen["id"]})
+    except peers.PeerUnavailable as error:
+        return api_v1_error(f"{chosen['node']} did not answer: {error}", 503, "peer_unavailable")
+    if status == 200:
+        payload.update(lane=chosen["id"], tuner=chosen["id"], node=chosen["node"], relayed=True)
+        print(f"Pool: {body.get('channel_id')} relayed from {chosen['id']}")
+    return payload, status
+
+
+def pool_lock_request(body, release=False):
+    """A lock or release naming a peer's tuner (``lane``: its tuner id) goes to the peer, as
+    the peer's own lane; anything else is this node's, with this node's tuner id read as its
+    lane. ``None``: this node's to answer."""
+    lane = body.get("lane") if isinstance(body, dict) else None
+    if not isinstance(lane, str) or ":" not in lane:
+        return None
+    node, _, own = lane.partition(":")
+    if node == FEED_CONFIG.node:
+        body["lane"] = own
+        return None
+    chosen = peer_tuner(lane)
+    if chosen is None:
+        return api_v1_error(f"no tuner called {lane!r}", 400, "invalid_lane")
+    try:
+        call = peer.release if release else peer.lock
+        payload, status = call({**body, "lane": chosen["lane"]})
+    except peers.PeerUnavailable as error:
+        return api_v1_error(f"{chosen['node']} did not answer: {error}", 503, "peer_unavailable")
+    if isinstance(payload.get("lock"), dict):
+        payload["lock"]["lane"] = lane
+    payload["tuner"] = lane
+    return payload, status
+
+
+def pool_lock_payload():
+    """Every pool tuner's lock, by tuner id (``GET /api/v1/tuner/lock``'s ``pool``)."""
+    return {tuner["id"]: tuner["lock"] for tuner in pool_tuners()}
 
 
 def load_channels():
@@ -2407,6 +2598,8 @@ RECORDER_STOP_TIMEOUT = 8.0
 # in production, split or not, so either build reads what the other wrote.
 STATE_DIR = Path(os.environ.get("TV_THING_STATE_DIR", str(BASE_DIR / "state")))
 RECORDINGS_JOURNAL = STATE_DIR / "feed" / "recordings-journal.jsonl"
+# What this node's antenna gets, by RF channel: its scans write it (save_reception).
+RECEPTION_FILE = STATE_DIR / "reception.json"
 # The feed's recorder processes (feed_node.Recorders); the timers, pieces and
 # finalizing below are control's.
 recorders = feed_node.Recorders(RECORDINGS_JOURNAL, spawn=lambda command: _spawn_recorder(command),
@@ -4675,6 +4868,7 @@ def api_v1_status_payload():
 def _api_v1_status_payload():
     """Return the stable, multi-lane status document API clients read."""
     lanes_payload = {lane: lane_payload(lane) for lane in ALL_LANES}
+    tuners = pool_tuners()
     active = feed_client.running_lanes()
     legacy = status_payload()
     primary = feed_client.primary_video_lane()
@@ -4693,6 +4887,10 @@ def _api_v1_status_payload():
         "active_lanes": active,
         "concurrent": len(active) > 1,
         "frontends": frontend_payload(),
+        # The digital tuners of both nodes, and how many a change may take (tuner_pool.py).
+        "tuners": tuners,
+        "tuners_available": tuner_pool.summary(tuners)["available"],
+        "peer": peer_payload(),
         "primary_video_lane": primary,
         "streams": [
             lanes_payload[lane]["stream"] for lane in ALL_LANES
@@ -6014,10 +6212,16 @@ class TVHandler(SimpleHTTPRequestHandler):
             ))
             return
 
+        if path == "/api/v1/tuners":
+            local = parse_qs(parsed.query).get("local", ["0"])[0] not in ("", "0", "false")
+            self.send_json(api_v1_tuners_payload(local=local))
+            return
+
         if path in ("/api/tuner/lock", "/api/v1/tuner/lock"):
             self.send_json({
                 "api_version": API_VERSION,
                 "locks": tuner_lock_payload(),
+                "pool": pool_lock_payload(),
                 "max_seconds": LOCK_MAX_SECONDS,
                 "default_seconds": LOCK_DEFAULT_SECONDS,
             })
@@ -6122,7 +6326,7 @@ class TVHandler(SimpleHTTPRequestHandler):
                 else:
                     self.send_json({"error": str(error)}, status=400)
                 return
-            payload, status = acquire_tuner_lock(body)
+            payload, status = pool_lock_request(body) or acquire_tuner_lock(body)
             self.send_json(payload, status=status)
             return
 
@@ -6137,7 +6341,7 @@ class TVHandler(SimpleHTTPRequestHandler):
                 else:
                     self.send_json({"error": str(error)}, status=400)
                 return
-            payload, status = release_tuner_lock(body)
+            payload, status = pool_lock_request(body, release=True) or release_tuner_lock(body)
             self.send_json(payload, status=status)
             return
 
@@ -6406,7 +6610,11 @@ class TVHandler(SimpleHTTPRequestHandler):
             elapsed = time.monotonic() - scan_started
             channels = channels_from_scan(found)
             if channels:
-                save_channels(channels)
+                save_reception(channels_to_scan, {result["rf_channel"] for result in found})
+                # The plan is the primary's: a second node's scan says what its antenna
+                # gets (its reception), and leaves the dial both nodes share as it is.
+                if HOST.primary:
+                    save_channels(channels)
                 send_sse("done", {
                     "ok": True,
                     "count": len(channels),
@@ -7027,6 +7235,9 @@ def main():
                   "minutes left")
         recover_recordings()
         start_roku_lane()
+        if peer is not None:
+            print(f"Tuner pool: with the peer at {PEER_URL}")
+            peer.start()
         threading.Thread(target=always_on_worker, daemon=True).start()
         threading.Thread(target=guide_worker, daemon=True).start()
         threading.Thread(target=yttv_guide_worker, daemon=True).start()

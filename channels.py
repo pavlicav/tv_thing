@@ -240,9 +240,8 @@ class AntennaChannels(Adapter):
 
     def tune(self, source_id, body, quality):
         host = self.host
-        result, status = host.perform_digital_tune(
-            body.get("channel_id"), quality, token=body.get("token"), override=bool(body.get("override")))
-        return host.lane_tune_response(result, status, host.LANE_DIGITAL)
+        # Through the pool: this node's tuner, or the peer's relayed (server.api_v1_digital_tune).
+        return host.api_v1_digital_tune(body, quality)
 
 
 class CableChannels(Adapter):

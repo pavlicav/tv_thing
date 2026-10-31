@@ -204,6 +204,45 @@ first, and a setting a unit's environment sets is refused: nothing is saved unle
 are good (400, `invalid_settings`, with `fields`). It answers as GET does. Nothing running
 changes until its service restarts.
 
+### Tuner pool
+
+Two nodes (viviserv and viviserv2) run the same channel plan and pool their digital
+tuners (`tuner_pool.py`, `peers.py`). Each node's `peer_host` setting (Config) names the
+other's front door. Each node keeps its own tuners and locks; neither commands the other's
+feed. A peer's stream reaches a viewer through the viewer's own node, at `/stream/peer/`
+(the front door proxies it to the peer's `/stream/`).
+
+`GET /api/v1/tuners` (`?local=1`: this node's own only, what a peer reads) is
+`{node, peer: {url, node, reachable, error} | null, tuners, summary: {total, reachable,
+available}}`. Each tuner is `{id: "<node>:<lane>", node, lane, kind, name, local, reachable,
+state, selection, quality, lock, scanning, available, rf_channels, stream: {id, state,
+active, ready, error, playlist_path, playback, revision}}`. A peer's tuner has `local:
+false` and its `playlist_path` under `/stream/peer/`. `available` means a change may take
+it: known, unlocked, not scanning. A peer that has not answered for 6 s reads every tuner
+`reachable: false`, `state: "unknown"`, never available. `rf_channels` is what the node's
+antenna got at its scans (`state/reception.json`), or null (never scanned there: taken to
+get the whole plan). `GET /api/v1/status` carries the same `tuners`, `tuners_available`
+and `peer`; its `lanes` stay this node's own.
+
+A digital `POST /api/v1/tune` goes through the pool. It takes a tuner already playing the
+channel (watching along, even a locked one), else an unlocked tuner of this node's, else
+an unlocked one of the peer's whose antenna gets the channel's RF. The response adds
+`tuner`, `node` and `relayed`; on a relay, `lane` is the tuner id and `stream.playlist_path`
+is under `/stream/peer/`. A tune stays on this node, as before the pool, when it carries
+this node's lock `token`, `override: true` without a `tuner`, or `local_only: true` (what
+a node sends its peer, so a tune never bounces back). `tuner: "<id>"` asks for that tuner
+alone. Every tuner locked is 423 `locked` with the `lock` and `tuner` of one of them and
+all `tuners`. No antenna that gets the RF is 409 `not_received`. A peer that stops answering
+mid-tune is 503 `peer_unavailable`.
+
+Locks: `POST /api/v1/tuner/lock` and `/release` with `lane: "<peer node>:digital"` are the
+peer's own lock calls. The peer issues and checks the token, and the response's `lock.lane`
+is the tuner id. This node's own tuner id is its lane. `GET /api/v1/tuner/lock` adds `pool`:
+each tuner's lock by tuner id.
+
+A second node's rescan writes only its reception: the plan (`channels.json`, tracked) is
+the primary's, and its rescan writes both.
+
 ## Integration flow
 
 1. GET `api/v1/sources/digital` (or `sources/cable`) and select an item.

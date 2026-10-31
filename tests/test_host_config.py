@@ -172,6 +172,21 @@ def test_a_second_node_reaches_the_primarys_services(viviserv2, tmp_path):
     assert primary.primary_url(1615, "/cairo.mp3") is None
 
 
+def test_a_second_nodes_tuner_pool_peer_is_the_primary(viviserv2, tmp_path):
+    second = host(viviserv2, "viviserv2", tmp_path, settings={"primary_host": "10.0.0.98"})
+    assert second.get("peer_host").source == "auto"
+    assert second.peer_url("/api/v1/tuners") == "http://10.0.0.98:8080/api/v1/tuners"
+    assert host(viviserv2, "viviserv2", tmp_path, {"TV_THING_PEER_HOST": "off"},
+                settings={"primary_host": "10.0.0.98"}).peer_url() is None
+
+
+def test_the_primary_pools_only_with_a_peer_it_is_given(viviserv, tmp_path):
+    primary = host(viviserv, "viviserv", tmp_path)
+    assert primary.value("peer_host") == "" and primary.peer_url() is None
+    tailnet = host(viviserv, "viviserv", tmp_path, settings={"peer_host": "viviserv2.tail1234.ts.net:8081"})
+    assert tailnet.peer_url("/stream/") == "http://viviserv2.tail1234.ts.net:8081/stream/"
+
+
 def test_a_second_node_runs_the_roku_lane_only_with_its_capture_device_or_when_told(viviserv2, tmp_path):
     write(viviserv2 / HD_PVR.lstrip("/"))
     assert host(viviserv2, "viviserv2", tmp_path).value("roku") == "on"
@@ -230,8 +245,12 @@ def test_saving_checks_each_value(tmp_path):
     assert host_config.check("video_encoder", "auto") == "auto"       # a real choice: probe the GPUs
     assert host_config.check("digital_adapter", "2") == 2
     assert host_config.check("primary_host", "10.0.0.98") == "10.0.0.98"
+    assert host_config.check("peer_host", "10.0.0.99:8080") == "10.0.0.99:8080"
+    assert host_config.check("peer_host", "[fd7a:115c::1]") == "[fd7a:115c::1]"
     for setting_id, value in (("role", "boss"), ("node", "two words"), ("digital_adapter", 99),
                               ("primary_host", "http://viviserv"), ("recordings_dir", "relative"),
+                              ("peer_host", "http://viviserv2"), ("peer_host", "fd7a::1"),
+                              ("peer_host", "viviserv2:99999"),
                               ("nothing", "x")):
         with pytest.raises(ValueError):
             host_config.check(setting_id, value)

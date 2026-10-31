@@ -367,6 +367,7 @@
       .topbar-tools .segmented { margin-right: 2px; }
       .topbar-tools .status-pill { display: none; }
       .lock-pill { max-width: 112px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .tuner-pool .tuner-chip { display: none; }
     }
     .panel-foot {
       padding: 10px 14px;
@@ -450,6 +451,18 @@
     .lock-pill[hidden] { display: none; }
     .lock-pill:hover { background: rgba(251, 191, 36, .2); }
 
+    /* The digital tuners of both nodes (api/v1/tuners): free, in use, locked or unknown. */
+    .tuner-pool { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-mute); white-space: nowrap; }
+    .tuner-pool[hidden] { display: none; }
+    .tuner-chip {
+      padding: 2px 7px; border-radius: var(--r-full); border: 1px solid var(--border);
+      max-width: 150px; overflow: hidden; text-overflow: ellipsis;
+    }
+    .tuner-chip.available { border-color: rgba(52, 211, 153, .45); color: #6ee7b7; }
+    .tuner-chip.locked { border-color: rgba(251, 191, 36, .45); color: var(--warn); }
+    .tuner-chip.unknown { opacity: .5; text-decoration: line-through; }
+    .tuner-chip.watching { font-weight: 700; }
+
     .modal-backdrop {
       position: fixed; inset: 0; z-index: 50;
       background: rgba(6, 7, 9, .72);
@@ -516,6 +529,8 @@
           <span class="dot" id="status-dot"></span>
           <span id="status-text">Loading…</span>
         </div>
+
+        <div class="tuner-pool" id="tuner-pool" hidden aria-live="polite"></div>
 
         <button class="lock-pill" id="lock-pill" hidden></button>
       </div>
@@ -692,7 +707,7 @@
       panelLabel: $("panel-label"), panelCount: $("panel-count"),
       filter: $("filter"), list: $("list"),
       footLeft: $("foot-left"), footRight: $("foot-right"),
-      lockPill: $("lock-pill"), overrideModal: $("override-modal"),
+      lockPill: $("lock-pill"), tunerPool: $("tuner-pool"), overrideModal: $("override-modal"),
       ovrTitle: $("ovr-title"), ovrBody: $("ovr-body"), ovrNote: $("ovr-note"),
       ovrCancel: $("ovr-cancel"), ovrConfirm: $("ovr-confirm"),
     };
@@ -725,6 +740,10 @@
       quality: "medium",
       filter: "",
       locks: {},
+      pool: {},          // api/v1/tuner/lock's pool: each tuner's lock, by tuner id
+      tuners: [],        // api/v1/tuners: both nodes' digital tuners
+      tvTuner: null,     // the tuner the last tune landed on ("viviserv2:digital"), or null
+      tvPlaylist: null,  // its stream's playlist path (/stream/peer/... when relayed)
       roku: {
         available: false,
         sources: [],       // the Roku's feed sources, in order
@@ -1150,7 +1169,11 @@
         if (res.ok) {
           const raw = await res.json();
           const status = normalizeStatus(raw);
-          if (raw.lanes) {
+          const tuner = state.tvTuner && (raw.tuners || []).find(t => t.id === state.tvTuner);
+          if (tuner && tuner.stream && tuner.stream.id === streamId) {
+            // Another node's stream id may equal one of this node's: the tuner decides.
+            status.stream = tuner.stream;
+          } else if (raw.lanes) {
             const matching = Object.values(raw.lanes).find(lane => lane.stream.id === streamId);
             if (matching) status.stream = matching.stream;
           }
@@ -1731,13 +1754,15 @@
         const res = await fetchWithFallback(
           "api/v1/tuner/lock", "api/tuner/lock", { cache: "no-store" });
         if (!res.ok) return;
-        const locks = (await res.json()).locks || {};
+        const data = await res.json();
+        const locks = data.locks || {};
         state.locks = locks;
+        state.pool = data.pool || {};
         if (state.roku.lock && (!locks.roku || locks.roku.owner !== ROKU_OWNER)) {
           forgetRokuLock();  // Expired, released elsewhere, or overridden.
         }
         showLock(["vizelvision", "slides", "internet"].includes(state.playing) ? null : state.mode === "roku" || state.playing === "roku"
-          ? locks.roku || null : locks.digital || locks.analog || null);
+          ? locks.roku || null : tvLock(locks) || locks.analog || null);
         renderRokuTools();
       } catch (error) {
         // A missed poll is not worth surfacing; the next one is 15s away,
@@ -1745,8 +1770,53 @@
       }
     }
 
+    // The lock on the tuner the picture comes from: on a relay, the peer's tuner's.
+    function tvLock(locks) {
+      if (state.tvTuner && state.tvTuner in state.pool) return state.pool[state.tvTuner];
+      return locks.digital || null;
+    }
+
     pollLock();
     setInterval(pollLock, 15000);
+
+    function renderTuners() {
+      const tuners = state.tuners || [];
+      // One tuner and no peer: nothing to choose between, as before the pool.
+      els.tunerPool.hidden = tuners.length < 2;
+      if (els.tunerPool.hidden) return;
+      const available = tuners.filter(t => t.available).length;
+      els.tunerPool.replaceChildren(document.createTextNode(`Tuners ${available}/${tuners.length}`));
+      for (const tuner of tuners) {
+        const chip = document.createElement("span");
+        const unknown = tuner.reachable === false;
+        chip.className = "tuner-chip " + (unknown ? "unknown" : tuner.lock ? "locked" : "available")
+          + (tuner.id === state.tvTuner && state.playing === "tv" ? " watching" : "");
+        const selection = tuner.selection || {};
+        const label = tuner.lock ? `🔒 ${tuner.lock.owner}` : (selection.number || "free");
+        chip.textContent = `${tuner.node} · ${label}`;
+        chip.title = `${tuner.id}${tuner.local ? "" : " (relayed)"}: `
+          + (unknown ? (tuner.error || "not answering")
+            : `${selection.name ? `${selection.name} ${selection.number}` : "idle"}`
+              + (tuner.lock ? ` · ${lockSummary(tuner.lock)}` : " · available"));
+        els.tunerPool.append(chip);
+      }
+    }
+
+    async function pollTuners() {
+      try {
+        const res = await fetch("api/v1/tuners", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        state.tuners = data.tuners || [];
+        for (const tuner of state.tuners) state.pool[tuner.id] = tuner.lock || null;
+        renderTuners();
+      } catch (_) {
+        // The strip is a summary; a missed poll leaves the last one up.
+      }
+    }
+
+    pollTuners();
+    setInterval(pollTuners, 5000);
 
     // Follow external retunes and encoder recovery without issuing a tune.
     let streamPollBusy = false;
@@ -1760,9 +1830,12 @@
         if (!response.ok || state.tuning || serial !== state.tuneSerial || playing !== state.playing) return;
         const data = await response.json();
         if (state.tuning || serial !== state.tuneSerial || playing !== state.playing) return;
-        const lane = data.lanes && data.lanes[
-          playing === "cable" ? "analog" : (playing === "roku" ? "roku" : "digital")];
+        const tuner = playing === "tv" && state.tvTuner
+          && (data.tuners || []).find(t => t.id === state.tvTuner);
+        const lane = tuner || (data.lanes && data.lanes[
+          playing === "cable" ? "analog" : (playing === "roku" ? "roku" : "digital")]);
         if (!lane) return;
+        if (tuner && tuner.stream.playlist_path) state.tvPlaylist = tuner.stream.playlist_path;
         if (playing === "roku") {
           state.roku.lane = lane;
           renderRokuState();
@@ -1847,7 +1920,8 @@
             return;
           }
           if (tuneSerial !== state.tuneSerial) return;
-          res = await post({ override: true });
+          // Every tuner is locked: override the one the refusal names.
+          res = await post({ override: true, ...(data.tuner ? { tuner: data.tuner } : {}) });
           data = await res.json();
           if (tuneSerial !== state.tuneSerial) return;
           if (res.ok) showLock(null);
@@ -1865,6 +1939,10 @@
         state.playing = "tv";
         state.streamId = (data.stream && data.stream.id) || data.stream_id;
         if (!state.streamId) throw new Error("Server returned no stream ID");
+        // The pool may have put this on another node's tuner, relayed by this one.
+        state.tvTuner = data.tuner || null;
+        state.tvPlaylist = (data.stream && data.stream.playlist_path) || null;
+        renderTuners();
         render();
         setStatus(tuned.name, "busy");
         setNowPlaying(tuned.name, `${digitalLabel(tuned)} · buffering`);
@@ -1983,9 +2061,11 @@
       streamId = streamId || state.streamId || String(Date.now());
       if (streamId !== state.streamId || !["tv", "cable", "roku"].includes(state.playing)) return;
       state.needsReconnect = false;
-      const playlist = state.playing === "cable" ? "analog"
-        : (state.playing === "roku" ? "roku" : "digital");
-      attachStream(`stream/${playlist}.m3u8?v=${encodeURIComponent(streamId)}`, els.video, () => {
+      const playlist = state.playing === "cable" ? "stream/analog.m3u8"
+        : (state.playing === "roku" ? "stream/roku.m3u8"
+          // Relative, so it works under /tv/ too: /stream/peer/... when relayed.
+          : (state.tvPlaylist || "/stream/digital.m3u8").replace(/^\//, ""));
+      attachStream(`${playlist}?v=${encodeURIComponent(streamId)}`, els.video, () => {
         if (streamId !== state.streamId) return;
         if (attempt < 5) {
           setTimeout(() => startTvPlayback(streamId, attempt + 1, onReady), 1000);
