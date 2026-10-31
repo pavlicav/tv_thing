@@ -86,13 +86,20 @@ def build_sports_guide_command(generation, directory, now=None):
     directory = Path(directory)
     music = sports_guide_music(now)
     if music:
-        # The music, looped, from the wall clock's place in it.
-        sound = ["-stream_loop", "-1", "-ss", f"{music[1]:.3f}", "-thread_queue_size", "8",
-                 "-i", str(music[0])]
+        # The music, looped, from the wall clock's place in it. ffmpeg 7.1 and 8.1 (viviserv2,
+        # 2026-10-31) mishandle a seek on a looped input: an accurate seek ends the audio filter
+        # with ENOSPC seconds in, and video piles up to web-basic's MemoryMax; at the loop they
+        # lose the seek's offset, so the music runs that far ahead and -shortest holds it
+        # (~1 MB a second of it). So the seek lands on an AAC frame (21 ms), and the music's
+        # timestamps are counted from its samples.
+        sound = ["-stream_loop", "-1", "-noaccurate_seek", "-ss", f"{music[1]:.3f}",
+                 "-thread_queue_size", "8", "-i", str(music[0])]
+        retime = ["-af", "asetpts=N/SR/TB"]
     else:
         # Silence, as raw zeros: some players refuse a stream with no sound
         # track. (lavfi's anullsrc ran a filter graph of 28 threads.)
         sound = ["-f", "s16le", "-ar", "48000", "-ac", "2", "-thread_queue_size", "8", "-i", "/dev/zero"]
+        retime = []
     return [
         "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "warning",
         "-filter_threads", "1",
@@ -103,6 +110,7 @@ def build_sports_guide_command(generation, directory, now=None):
         "-map", "0:v:0", "-map", "1:a:0", "-shortest",
         # HD is BT.709; say so, or a player may assume it of untagged 601.
         "-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
+        *retime,
         "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
         "-color_range", "tv",
         # zerolatency drops the lookahead: 125 MB rather than 205 for veryfast's.

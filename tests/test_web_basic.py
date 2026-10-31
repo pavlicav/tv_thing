@@ -28,6 +28,7 @@ def test_the_sports_guide_encoder_is_one_bounded_libx264_writing_hls_in_its_fold
     # Raw frames from the renderer, silence from /dev/zero (no lavfi filter graph).
     assert "-f rawvideo -pix_fmt rgb24 -video_size 1280x720 -framerate 30" in joined
     assert "pipe:0" in cmd and "/dev/zero" in cmd and "lavfi" not in cmd and "-shortest" in cmd
+    assert "-af" not in cmd       # silence needs no retiming
     assert cmd[cmd.index("-c:v") + 1] == "libx264" and cmd[cmd.index("-threads") + 1] == "2"
     assert cmd[cmd.index("-filter_threads") + 1] == "1"
     assert "zerolatency" in cmd[cmd.index("-tune") + 1]
@@ -57,8 +58,12 @@ def test_the_sports_guide_plays_its_music_from_the_wall_clocks_place_in_it(tmp_p
     assert web_basic.sports_guide_music(now=1_000_000_123.5) == (music, 1_000_000_123.5 % 300)
     cmd = web_basic.build_sports_guide_command("gen1", tmp_path, now=1_000_000_123.5)
     joined = " ".join(cmd)
-    # Looped, sought to where a channel that never stopped would be; no /dev/zero.
-    assert f"-stream_loop -1 -ss {(1_000_000_123.5 % 300):.3f} -thread_queue_size 8 -i {music}" in joined
+    # Looped, sought to where a channel that never stopped would be; no /dev/zero. The seek is
+    # to a frame, not accurate, and the music's timestamps come from its samples: ffmpeg 7.1 and
+    # 8.1 kill an accurate seek's audio on a looped input, and lose its offset at the loop.
+    assert (f"-stream_loop -1 -noaccurate_seek -ss {(1_000_000_123.5 % 300):.3f} -thread_queue_size 8 "
+            f"-i {music}") in joined
+    assert cmd[cmd.index("-af") + 1] == "asetpts=N/SR/TB"
     assert "/dev/zero" not in cmd and "-shortest" in cmd and "lavfi" not in cmd
     assert cmd[cmd.index("-map") + 1] == "0:v:0" and "1:a:0" in cmd
     assert cmd[cmd.index("-b:a") + 1] == "96k"
