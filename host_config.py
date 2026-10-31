@@ -67,6 +67,7 @@ class Setting:
     services: tuple      # the services that read it, each when it starts
     help: str
     default: str = "auto"   # the value that is no setting at all
+    live: bool = False      # read on every use, so a change waits for no restart
 
 
 SETTINGS = (
@@ -107,6 +108,10 @@ SETTINGS = (
             "tune that finds every tuner here locked is played from the peer's and relayed "
             "through this front door (/stream/peer/). An address on the LAN or the tailnet. "
             "Empty: no pool. Auto: the primary's address on a second node, none on the primary."),
+    Setting("location", "Location", "TV_THING_LOCATION", (), ("control",),
+            "Where this box is (\"Apartment\", \"Mom's house\"): shown beside its tuners and inputs "
+            "on both nodes' pages, and settable from the Inputs page. Takes effect at once.",
+            default="", live=True),
 )
 BY_ID = {setting.id: setting for setting in SETTINGS}
 
@@ -145,6 +150,10 @@ def check(setting_id, value, saving=False):
         if not isinstance(value, str) or not _HOST.fullmatch(value):
             raise ValueError("The primary's address is a host name or an IP address, no scheme or port")
         return value
+    if setting_id == "location":
+        if not isinstance(value, str) or len(value.strip()) > 60 or any(ord(c) < 32 for c in value):
+            raise ValueError("A location is a short name, at most 60 characters, on one line")
+        return value.strip() or None
     if setting_id == "peer_host":
         host, port = split_port(value) if isinstance(value, str) else (None, None)
         if host is None or not _HOST.fullmatch(host) or not 0 < port < 65536:
@@ -388,6 +397,12 @@ class Host:
         if not self.primary and self.value("primary_host"):
             return Resolved(self.value("primary_host"), "auto", "a second node pools with the primary")
         return Resolved("", source or "auto", "no peer: this node's own tuners only")
+
+    def _resolve_location(self):
+        value, source = self._given("location")
+        if value:
+            return Resolved(str(value).strip(), source, "set")
+        return Resolved("", source or "auto", "not named")
 
     # -- what follows from them -----------------------------------------------------
     def peer_url(self, path=""):

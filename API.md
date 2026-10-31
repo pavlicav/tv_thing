@@ -243,6 +243,15 @@ each tuner's lock by tuner id.
 A second node's rescan writes only its reception: the plan (`channels.json`, tracked) is
 the primary's, and its rescan writes both.
 
+Each box has a `location` (Config, or the Inputs page's Set location): a short name for where
+it is, read on every use, so it waits for no restart. It is in `/api/v1/inputs`, in
+`/api/v1/tuners` (top level and on each tuner) and in `peer.location`. `POST
+/api/v1/location {"location": "<name>", "node"?: "<node>"}` saves it ("" clears it); naming
+the peer's node saves it on the peer, which answers. `GET /api/v1/peer/inputs` is the peer's
+`status`, `inputs`, `health`, `roku` and (while its antenna lane streams) `signal`, read now
+through its front door, with `peer` and `relay_prefix` (`/stream/peer/`, where its streams
+play here). One that does not answer is null; no peer is 404 `no_peer`, a silent one 503.
+
 ## Integration flow
 
 1. GET `api/v1/sources/digital` (or `sources/cable`) and select an item.

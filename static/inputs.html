@@ -65,6 +65,21 @@
     .tools { display: flex; flex-wrap: wrap; gap: 8px; }
     .tools a.btn { text-decoration: none; color: var(--text); }
     .foot { margin-top: 28px; color: var(--text-mute); font-size: 12px; }
+    .node + .node { margin-top: 44px; padding-top: 28px; border-top: 2px solid var(--border-strong); }
+    .node-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 10px 18px; margin-bottom: 18px; }
+    .page .node-head h2 {
+      margin: 0; padding: 0; border: 0; color: var(--text);
+      font-size: 22px; font-weight: 700; letter-spacing: -0.01em; text-transform: none;
+    }
+    .node-head .where { margin-left: 6px; color: var(--text-mute); font-size: 14px; font-weight: 500; }
+    .location { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--text-dim); }
+    .location .field { width: 220px; padding: 5px 9px; font-size: 13px; }
+    /* The shared page h2's look, one level down under each box's name. */
+    .node h3.sect {
+      margin: 30px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
+      color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+    }
+    .node .summary { margin: 0 0 18px; }
     @media (max-width: 640px) {
       .cards { grid-template-columns: 1fr; }
       th, td { padding: 9px 10px; }
@@ -91,37 +106,14 @@
 
   <main class="page">
     <h1>Input streams</h1>
-    <p class="lede">Everything that feeds the dial: the tuner stack, the Roku input, and the web
-      streams made here or brought in from the web, with the services that run them.
-      It refreshes every five seconds while this page is open.</p>
+    <p class="lede">Everything that feeds the dial, on this box and on the other one it pools
+      its tuners with: each box's tuner stack, Roku input and web streams, with the services that
+      run them. Name where each box is with Set location. It refreshes every five seconds while
+      this page is open.</p>
 
-    <div class="summary" id="summary" aria-live="polite"></div>
-    <div class="notice" id="notice" hidden></div>
+    <div id="nodes"></div>
 
-    <h2>Tuner stack</h2>
-    <div class="cards" id="tuners"><div class="card mute">Loading…</div></div>
-    <p class="foot">Each front-end the feed reports gets a card, with the lanes it serves; a new
-      tuner appears here once the feed knows it.</p>
-
-    <h2>Roku input</h2>
-    <div class="cards">
-      <div class="card"><h3>Source Roku</h3><p class="detail" id="roku-detail"></p><dl class="kv" id="roku-now"></dl></div>
-      <div class="card"><h3>HD PVR capture</h3><p class="detail" id="capture-detail"></p><dl class="kv" id="roku-capture"></dl></div>
-    </div>
-
-    <h2>Web streams</h2>
-    <div id="web"><div class="card mute">Loading…</div></div>
-
-    <h2>Diagnostics</h2>
-    <div class="table-wrap">
-      <table aria-label="Services">
-        <thead><tr><th>Service</th><th>State</th><th>Up</th><th class="hide-narrow">Restarts</th><th>Memory</th><th>CPU</th><th class="hide-narrow">Tasks</th></tr></thead>
-        <tbody id="services"><tr><td colspan="7" class="mute">Loading…</td></tr></tbody>
-      </table>
-    </div>
-    <div class="cards" style="margin-top:14px">
-      <div class="card"><h3>Health</h3><dl class="kv" id="health" style="margin-top:12px"></dl></div>
-      <div class="card"><h3>Disks</h3><div id="disks" style="margin-top:12px"></div></div>
+    <div class="cards" style="margin-top:28px">
       <div class="card">
         <h3>Tools</h3>
         <p class="detail">Deeper looks, and a snapshot of everything on this page for a bug report.</p>
@@ -138,14 +130,76 @@
     <p class="foot" id="updated"></p>
   </main>
 
+  <!-- One box's inputs. This node's section, then the peer's (/api/v1/peer/inputs). -->
+  <template id="node-template">
+    <section class="node">
+      <div class="node-head">
+        <h2><span data-part="name"></span> <span class="where" data-part="where"></span></h2>
+        <form class="location" data-part="location-form">
+          <label>Location <input class="field" data-part="location" maxlength="60"
+            placeholder="Where is this box?" autocomplete="off"></label>
+          <button class="btn btn-small" type="submit">Set location</button>
+          <span class="probe" data-part="location-note"></span>
+        </form>
+      </div>
+      <div class="summary" data-part="summary" aria-live="polite"></div>
+      <div class="notice" data-part="notice" hidden></div>
+
+      <h3 class="sect">Tuner stack</h3>
+      <div class="cards" data-part="tuners"><div class="card mute">Loading…</div></div>
+
+      <h3 class="sect">Roku input</h3>
+      <div class="cards">
+        <div class="card"><h3>Source Roku</h3><p class="detail" data-part="roku-detail"></p><dl class="kv" data-part="roku-now"></dl></div>
+        <div class="card"><h3>HD PVR capture</h3><p class="detail" data-part="capture-detail"></p><dl class="kv" data-part="roku-capture"></dl></div>
+      </div>
+
+      <h3 class="sect">Web streams</h3>
+      <div data-part="web"><div class="card mute">Loading…</div></div>
+
+      <h3 class="sect">Diagnostics</h3>
+      <div class="table-wrap">
+        <table aria-label="Services">
+          <thead><tr><th>Service</th><th>State</th><th>Up</th><th class="hide-narrow">Restarts</th><th>Memory</th><th>CPU</th><th class="hide-narrow">Tasks</th></tr></thead>
+          <tbody data-part="services"><tr><td colspan="7" class="mute">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="cards" style="margin-top:14px">
+        <div class="card"><h3>Health</h3><dl class="kv" data-part="health" style="margin-top:12px"></dl></div>
+        <div class="card"><h3>Disks</h3><div data-part="disks" style="margin-top:12px"></div></div>
+      </div>
+    </section>
+  </template>
+
   <script>
   (() => {
     "use strict";
     const $ = id => document.getElementById(id);
     const POLL_MS = 5000;
-    const last = { status: null, inputs: null, health: null, signal: null, roku: null };
-    const cpuSeen = {};          // unit -> {cpu, at, rate}: CPU time between two systemd reads
+    const cpuSeen = {};          // "node unit" -> {cpu, at, rate}: CPU time between two systemd reads
     let cycle = 0, timer = null;
+
+    // Each box's section: this node's, and the peer's once it answers. ``last`` is what it
+    // last read: status, inputs, health, roku, signal.
+    function makeNode(key) {
+      const section = $("node-template").content.firstElementChild.cloneNode(true);
+      section.dataset.node = key;
+      $("nodes").append(section);
+      const node = { key, section, name: null, relay: key === "peer", last: {},
+                     part: name => section.querySelector(`[data-part="${name}"]`) };
+      node.part("location-form").addEventListener("submit", event => {
+        event.preventDefault();
+        setLocation(node);
+      });
+      node.part("location").addEventListener("input", () => { node.part("location").dataset.dirty = "1"; });
+      node.part("web").addEventListener("click", event => {
+        const button = event.target.closest("button[data-probe]");
+        if (button) probe(node, button);
+      });
+      return node;
+    }
+    const nodes = { local: makeNode("local"), peer: makeNode("peer") };
+    nodes.peer.section.hidden = true;
 
     const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -237,7 +291,7 @@
       ];
     }
 
-    function laneBlock(lane, status) {
+    function laneBlock(node, lane, status) {
       const [label, cls] = laneState(lane);
       const stream = lane.stream || {};
       const health = stream.health || {};
@@ -257,12 +311,13 @@
         stream.id && health.max_rss_mib != null ? ["Encoder memory", `${health.max_rss_mib} MiB peak` +
           (health.max_gpu_temp_c != null ? ` · GPU ${health.max_gpu_temp_c} °C` : "")] : null,
       ];
-      if (last.signal && last.signal.lane === lane.id && stream.ready) pairs.push(...signalRows(last.signal));
+      const signal = node.last.signal;
+      if (signal && signal.lane === lane.id && stream.ready) pairs.push(...signalRows(signal));
       return `<div class="lane"><div class="lane-head"><strong>${esc(lane.name)}</strong>${tag(label, cls)}</div>` +
         `<p class="detail" style="margin-top:-6px">${esc(lane.description)}</p><dl class="kv">${rows(pairs)}</dl></div>`;
     }
 
-    function renderTuners(status) {
+    function renderTuners(node, status) {
       const lanes = status.lanes || {};
       const placed = new Set();
       const cards = (status.frontends || []).map(frontend => {
@@ -271,21 +326,23 @@
         const state = frontend.busy ? "live" : "idle";
         return `<div class="card"><h3>${dot(state)}${esc(frontend.name)}</h3>` +
           `<p class="detail">${esc(frontend.detail)}${frontend.in_use_by ? ` · in use by ${esc(frontend.in_use_by)}` : " · free"}</p>` +
-          own.map(lane => laneBlock(lane, status)).join("") + `</div>`;
+          own.map(lane => laneBlock(node, lane, status)).join("") + `</div>`;
       });
       const loose = Object.values(lanes).filter(lane => !placed.has(lane.id));
       if (loose.length) {
         cards.push(`<div class="card"><h3>${dot("idle")}Other lanes</h3><p class="detail">Lanes no front-end names.</p>` +
-          loose.map(lane => laneBlock(lane, status)).join("") + `</div>`);
+          loose.map(lane => laneBlock(node, lane, status)).join("") + `</div>`);
       }
-      $("tuners").innerHTML = cards.join("") || `<div class="card mute">The feed reports no front-ends.</div>`;
+      node.part("tuners").innerHTML = cards.join("") || `<div class="card mute">The feed reports no front-ends.</div>`;
     }
 
     // ---- Roku input ----------------------------------------------------------
-    function renderRoku(data) {
+    function renderRoku(node, data) {
       if (!data) return;
       if (!data.configured) {
-        $("roku-now").innerHTML = rows([["Roku lane", "not configured (roku.json is missing)", "bad"]]);
+        node.part("roku-detail").textContent = "";
+        node.part("roku-now").innerHTML = rows([["Roku lane", data.reason || "not configured on this box", "mute"]]);
+        node.part("roku-capture").innerHTML = rows([["Capture", "none"]]);
         return;
       }
       const lane = data.lane || {};
@@ -293,8 +350,8 @@
       const selection = roku.selection;
       const operation = roku.operation;
       const player = (roku.player && roku.player.data) || {};
-      $("roku-detail").textContent = `${data.roku_url || "address unknown"} · driven over ECP`;
-      $("roku-now").innerHTML = rows([
+      node.part("roku-detail").textContent = `${data.roku_url || "address unknown"} · driven over ECP`;
+      node.part("roku-now").innerHTML = rows([
         ["Showing", selection ? (selection.manual ? "Manual Roku" : selection.name) : "unverified"],
         ["Active app", player.app ? player.app.name : (roku.player && roku.player.error) || null],
         ["Player", player.media_player ? player.media_player.state : null],
@@ -311,8 +368,8 @@
       const verifier = calibration.capture || {};
       const stream = lane.stream || {};
       const usb = device.usb || {};
-      $("capture-detail").textContent = [calibration.source_name, device.path].filter(Boolean).join(" · ");
-      $("roku-capture").innerHTML = rows([
+      node.part("capture-detail").textContent = [calibration.source_name, device.path].filter(Boolean).join(" · ");
+      node.part("roku-capture").innerHTML = rows([
         ["Device", device.label ? `${device.label} · ${device.state}` : null, device.state && device.state !== "ready" ? "bad" : "ok"],
         usb.speed || usb.port ? ["USB", [usb.port, usb.speed, usb.product].filter(Boolean).join(" · ")] : null,
         ["Signal", signal.label, signal.state === "locked" ? "ok" : "bad"],
@@ -344,29 +401,32 @@
       return [tag("always on", "ok"), ""];
     }
 
-    function renderWeb(inputs) {
+    // A path on the peer, as this node's front door serves it (/stream/peer/...).
+    const here = (node, path) => node.relay && path ? path.replace(/^\/stream\//, "/stream/peer/") : path;
+
+    function renderWeb(node, inputs) {
       const web = (inputs && inputs.web) || [];
       const groups = [["Made here", web.filter(e => e.origin === "internal")],
                       ["From the web", web.filter(e => e.origin !== "internal")]];
-      $("web").innerHTML = groups.map(([title, entries]) => entries.length ? (
+      node.part("web").innerHTML = groups.map(([title, entries]) => entries.length ? (
         `<div class="group-title">${esc(title)}</div><div class="table-wrap"><table>` +
         `<thead><tr><th>Ch</th><th>Stream</th><th class="hide-narrow">Made by</th><th>Status</th><th></th></tr></thead><tbody>` +
         entries.map(entry => {
           const [state, note] = webStatus(entry);
-          const id = `probe-${entry.number}`;
+          const id = `probe-${node.key}-${entry.number}`;
           return `<tr><td class="num">${esc(entry.number)}</td>` +
             `<td>${esc(entry.name)}<span class="sub">${esc(KINDS[entry.kind] || entry.kind)}` +
             `${entry.upstream ? ` · from ${esc(entry.upstream)}` : ""}${entry.note ? ` · ${esc(entry.note)}` : ""}</span></td>` +
             `<td class="hide-narrow">${esc(MAKERS[entry.service] || entry.service || "—")}</td>` +
             `<td>${state}${note ? `<span class="sub">${esc(note)}</span>` : ""}<div class="probe" id="${id}"></div></td>` +
-            `<td><button class="btn btn-small" type="button" data-probe="${esc(entry.stream)}" data-kind="${esc(entry.kind)}" ` +
+            `<td><button class="btn btn-small" type="button" data-probe="${esc(here(node, entry.stream))}" data-kind="${esc(entry.kind)}" ` +
             `data-out="${id}">Probe</button></td></tr>`;
         }).join("") + `</tbody></table></div>`) : "").join("") || `<div class="card mute">No web streams on the dial.</div>`;
     }
 
     // One look at a stream's playlist, as a player would: its answer, how fast, its segments.
-    async function probe(button) {
-      const out = $(button.dataset.out);
+    async function probe(node, button) {
+      const out = node.section.querySelector(`#${button.dataset.out}`);
       if (button.dataset.kind === "slides" &&
           !confirm("Probing a slide channel starts its video, which runs for a minute after. Probe anyway?")) return;
       button.disabled = true;
@@ -394,16 +454,12 @@
         button.disabled = false;
       }
     }
-    $("web").addEventListener("click", event => {
-      const button = event.target.closest("button[data-probe]");
-      if (button) probe(button);
-    });
 
     // ---- Diagnostics ---------------------------------------------------------
     // Control reads systemd at most every five seconds; the same read twice is no new rate.
     function cpuRate(unit, systemd) {
       if (!systemd || systemd.cpu_seconds == null || systemd.read_at == null) return null;
-      const seen = cpuSeen[unit];
+      const seen = cpuSeen[unit];   // unit: "<node> <unit>"
       if (seen && systemd.read_at <= seen.at) return seen.rate;
       const rate = seen && systemd.cpu_seconds >= seen.cpu
         ? (systemd.cpu_seconds - seen.cpu) / (systemd.read_at - seen.at) * 100 : null;
@@ -411,15 +467,15 @@
       return rate;
     }
 
-    function renderServices(inputs) {
-      $("services").innerHTML = inputs.services.map(service => {
+    function renderServices(node, inputs) {
+      node.part("services").innerHTML = inputs.services.map(service => {
         const sd = service.systemd;
         const up = sd && sd.state === "active";
         const answering = service.answering;
         const stateCls = !sd ? "idle" : up && answering !== false ? "live" : up ? "busy" : "error";
         const stateText = !sd ? "not installed" : `${sd.state}${sd.sub_state ? ` (${sd.sub_state})` : ""}` +
           (up && answering === false ? " · not answering" : "");
-        const rate = cpuRate(service.unit, sd);
+        const rate = cpuRate(`${node.key} ${service.unit}`, sd);
         const quota = sd && sd.cpu_quota_percent;
         const memFraction = sd && sd.memory_max_bytes ? sd.memory_bytes / sd.memory_max_bytes : null;
         const memCls = memFraction > 0.85 ? "bad" : memFraction > 0.65 ? "warn" : "ok";
@@ -437,8 +493,8 @@
       }).join("");
     }
 
-    function renderDisks(inputs) {
-      $("disks").innerHTML = (inputs.disks || []).map(disk => {
+    function renderDisks(node, inputs) {
+      node.part("disks").innerHTML = (inputs.disks || []).map(disk => {
         const used = 1 - disk.free_bytes / disk.total_bytes;
         const cls = used > 0.92 ? "bad" : used > 0.8 ? "warn" : "ok";
         return `<div class="disk"><div class="disk-head"><strong>${esc(disk.names.join(", "))}</strong>` +
@@ -447,9 +503,9 @@
       }).join("") || rows([["Disks", "none reported"]]);
     }
 
-    function renderHealth(status, health, inputs) {
+    function renderHealth(node, status, health, inputs) {
       const unhealthy = (health && health.unhealthy_lanes) || [];
-      $("health").innerHTML = rows([
+      node.part("health").innerHTML = rows([
         ["Lanes", health ? (health.ok ? `healthy · ${(health.active_lanes || []).length} streaming` :
           `unhealthy: ${unhealthy.join(", ")}`) : "no answer", health && health.ok ? "ok" : "bad"],
         ["Busy", status.busy_reason || "no"],
@@ -460,7 +516,7 @@
       ]);
     }
 
-    function renderSummary(status, health, inputs) {
+    function renderSummary(node, status, health, inputs) {
       const chips = [];
       if (inputs) {
         inputs.services.forEach(service => {
@@ -478,48 +534,106 @@
         const running = web.filter(e => e.status && e.status.running).length;
         chips.push(`<span class="chip">${dot(running ? "live" : "idle")}<strong>${web.length}</strong>web streams · ${running} slide video on</span>`);
       }
-      $("summary").innerHTML = chips.join("");
+      const tuners = (status.tuners || []).filter(t => t.node === status.node);
+      if (tuners.length) {
+        const free = tuners.filter(t => t.available).length;
+        chips.push(`<span class="chip">${dot(free ? "live" : "busy")}<strong>${free} of ${tuners.length}</strong>` +
+          `digital tuner${tuners.length === 1 ? "" : "s"} free for the pool</span>`);
+      }
+      node.part("summary").innerHTML = chips.join("");
+    }
+
+    // ---- Location -------------------------------------------------------------
+    function renderHead(node, status, inputs) {
+      node.name = status.node;
+      const location = (inputs && inputs.location) ||
+        ((status.tuners || []).find(t => t.node === status.node) || {}).location || "";
+      node.part("name").textContent = status.node;
+      node.part("where").textContent = [location || "no location set", node.relay ? "the other box" : "this box"]
+        .join(" · ");
+      const field = node.part("location");
+      // Never under someone's typing.
+      if (document.activeElement !== field && !field.dataset.dirty) field.value = location;
+    }
+
+    async function setLocation(node) {
+      const field = node.part("location"), note = node.part("location-note");
+      note.className = "probe";
+      note.textContent = "saving…";
+      try {
+        const res = await fetch("api/v1/location", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ node: node.name, location: field.value }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error((body.error && body.error.message) || `${res.status}`);
+        delete field.dataset.dirty;
+        field.value = body.location || "";
+        note.className = "probe ok";
+        note.textContent = body.location ? "saved" : "cleared";
+        schedule();
+      } catch (error) {
+        note.className = "probe bad";
+        note.textContent = String(error.message || error);
+      }
+    }
+
+    function renderNode(node, read) {
+      const { status, inputs, health, roku } = read;
+      node.last = read;
+      renderHead(node, status, inputs);
+      node.part("notice").hidden = !!inputs;
+      if (!inputs) node.part("notice").textContent = "This box's /api/v1/inputs did not answer; its services, web streams and disks are not shown.";
+      renderSummary(node, status, health, inputs);
+      renderTuners(node, status);
+      renderRoku(node, roku);
+      if (inputs) {
+        renderWeb(node, inputs);
+        renderServices(node, inputs);
+        renderDisks(node, inputs);
+      } else {
+        node.part("web").innerHTML = `<div class="card mute">Not available.</div>`;
+        node.part("services").innerHTML = `<tr><td colspan="7" class="mute">Not available.</td></tr>`;
+      }
+      renderHealth(node, status, health, inputs);
     }
 
     async function refresh() {
       cycle++;
       const wantRoku = cycle % 2 === 1;
-      const [status, inputs, health, roku] = await Promise.all([
+      const [status, inputs, health, roku, peer] = await Promise.all([
         get("api/v1/status"), get("api/v1/inputs"), get("api/v1/health"),
         wantRoku ? get("api/v1/roku") : Promise.resolve(null),
+        get("api/v1/peer/inputs", 8000),
       ]);
+      const local = nodes.local;
       if (!status.ok || !status.body) {
-        $("notice").hidden = false;
-        $("notice").textContent = "Control is not answering, so nothing here is current. It retries every five seconds.";
+        local.part("notice").hidden = false;
+        local.part("notice").textContent = "Control is not answering, so nothing here is current. It retries every five seconds.";
         $("updated").textContent = `Last tried ${new Date().toLocaleTimeString()}`;
         return;
       }
-      last.status = status.body;
-      last.health = health.body;
-      last.inputs = inputs.ok ? inputs.body : null;
-      if (roku && roku.body) last.roku = roku.body;
-      const digital = Object.values(last.status.lanes || {}).find(lane =>
+      const digital = Object.values(status.body.lanes || {}).find(lane =>
         lane.tuner && lane.tuner.backend === "linux-dvb" && lane.stream && lane.stream.ready);
-      last.signal = digital ? (await get("api/v1/signal")).body : null;
+      renderNode(local, {
+        status: status.body, inputs: inputs.ok ? inputs.body : null, health: health.body,
+        roku: (roku && roku.body) || local.last.roku || null,
+        signal: digital ? (await get("api/v1/signal")).body : null,
+      });
 
-      $("notice").hidden = !!last.inputs;
-      if (!last.inputs) {
-        $("notice").textContent = inputs.status === 404
-          ? "The services, web streams and disks come from control's /api/v1/inputs, which arrives at control's next restart."
-          : "Control's /api/v1/inputs did not answer; the services, web streams and disks are not shown.";
+      // The other box: hidden with no peer at all, a notice while it does not answer.
+      const other = nodes.peer;
+      other.section.hidden = peer.status === 404;
+      if (peer.ok && peer.body && peer.body.status) {
+        renderNode(other, peer.body);
+      } else if (!other.section.hidden) {
+        const named = peer.body && peer.body.peer;
+        other.part("name").textContent = (named && named.node) || "The other box";
+        other.part("where").textContent = "not answering";
+        other.part("notice").hidden = false;
+        other.part("notice").textContent = `${(named && named.url) || "The peer"} did not answer, so its inputs ` +
+          "are not shown; its tuners are never counted free meanwhile. It retries every five seconds.";
       }
-      renderSummary(last.status, last.health, last.inputs);
-      renderTuners(last.status);
-      renderRoku(last.roku);
-      if (last.inputs) {
-        renderWeb(last.inputs);
-        renderServices(last.inputs);
-        renderDisks(last.inputs);
-      } else {
-        $("web").innerHTML = `<div class="card mute">Not available yet.</div>`;
-        $("services").innerHTML = `<tr><td colspan="7" class="mute">Not available yet.</td></tr>`;
-      }
-      renderHealth(last.status, last.health, last.inputs);
       $("updated").textContent = `Updated ${new Date().toLocaleTimeString()}`;
     }
 
@@ -531,7 +645,9 @@
     document.addEventListener("visibilitychange", schedule);
 
     $("copy").addEventListener("click", async () => {
-      const snapshot = JSON.stringify({ taken_at: new Date().toISOString(), ...last }, null, 2);
+      const snapshot = JSON.stringify({ taken_at: new Date().toISOString(),
+        [nodes.local.name || "this box"]: nodes.local.last,
+        ...(nodes.peer.section.hidden ? {} : { [nodes.peer.name || "the other box"]: nodes.peer.last }) }, null, 2);
       const note = $("copied");
       note.hidden = false;
       try {

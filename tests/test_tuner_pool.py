@@ -141,6 +141,9 @@ class FakePeer:
     def node(self):
         return "viviserv2"
 
+    def location(self):
+        return None
+
     def tuners(self):
         return self._tuners
 
@@ -239,3 +242,67 @@ def test_a_lock_on_the_peers_tuner_is_the_peers(monkeypatch):
     body = {"lane": f"{server.FEED_CONFIG.node}:digital", "owner": "me"}
     assert server.pool_lock_request(body) is None and body["lane"] == "digital"
     assert server.pool_lock_request({"lane": "digital", "owner": "me"}) is None
+
+
+# -- where each box is, and the peer's inputs (the Inputs page) --------------------------------
+def test_a_location_set_here_is_saved_and_shown_at_once(monkeypatch, tmp_path):
+    here = server.host_config.Host(environ={}, path=tmp_path / "host.json")
+    monkeypatch.setattr(server, "HOST", here)
+    monkeypatch.setattr(server, "peer", None)
+    assert server.node_location() == ""
+    payload, status = server.api_v1_location({"location": "  Apartment "})
+    assert status == 200 and payload["location"] == "Apartment" and server.node_location() == "Apartment"
+    assert json.loads((tmp_path / "host.json").read_text())["location"] == "Apartment"
+    # No restart waits on it: Config says so.
+    [item] = [s for s in server.api_v1_config()["settings"] if s["id"] == "location"]
+    assert item["effective"] == "Apartment" and item["waiting_for"] == []
+    assert server.api_v1_location({"location": ""})[0]["location"] == ""
+    assert "location" not in json.loads((tmp_path / "host.json").read_text())
+    assert server.api_v1_location({"location": "x" * 61})[1] == 400
+    assert server.api_v1_location({"location": "y", "node": "elsewhere"})[1] == 400
+
+
+def test_the_peers_location_is_the_peers_to_save(monkeypatch):
+    sent = []
+
+    class Peer(FakePeer):
+        def post(self, path, body):
+            sent.append((path, body))
+            return {"ok": True, "node": "viviserv2", "location": body["location"]}, 200
+
+    monkeypatch.setattr(server, "peer", Peer([]))
+    payload, status = server.api_v1_location({"node": "viviserv2", "location": "Mom's house"})
+    assert status == 200 and payload["location"] == "Mom's house"
+    assert sent == [("/api/v1/location", {"location": "Mom's house"})]
+
+
+def test_the_peers_inputs_are_read_through_this_node(monkeypatch):
+    asked = []
+    status = {"node": "viviserv2", "lanes": {"digital": {"tuner": {"backend": "linux-dvb"},
+                                                         "stream": {"ready": True}}}}
+
+    class Peer(FakePeer):
+        def get(self, path, timeout=None):
+            asked.append(path)
+            if path == "/api/v1/roku":
+                raise peers.PeerUnavailable("no")
+            return status if path == "/api/v1/status" else {"path": path}
+
+    monkeypatch.setattr(server, "peer", None)
+    assert server.api_v1_peer_inputs()[1] == 404
+    monkeypatch.setattr(server, "peer", Peer([]))
+    payload, code = server.api_v1_peer_inputs()
+    assert code == 200 and payload["status"] is status and payload["roku"] is None
+    assert payload["inputs"] == {"path": "/api/v1/inputs"} and payload["relay_prefix"] == "/stream/peer/"
+    assert payload["signal"] == {"path": "/api/v1/signal"}          # its antenna lane streams
+    status["lanes"]["digital"]["stream"]["ready"] = False
+    asked.clear()
+    assert server.api_v1_peer_inputs()[0]["signal"] is None and "/api/v1/signal" not in asked
+
+    class Silent(FakePeer):
+        def get(self, path, timeout=None):
+            raise peers.PeerUnavailable("down")
+
+    monkeypatch.setattr(server, "peer", Silent([]))
+    payload, code = server.api_v1_peer_inputs()
+    assert code == 503 and payload["error"]["code"] == "peer_unavailable"

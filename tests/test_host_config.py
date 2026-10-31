@@ -247,10 +247,13 @@ def test_saving_checks_each_value(tmp_path):
     assert host_config.check("primary_host", "10.0.0.98") == "10.0.0.98"
     assert host_config.check("peer_host", "10.0.0.99:8080") == "10.0.0.99:8080"
     assert host_config.check("peer_host", "[fd7a:115c::1]") == "[fd7a:115c::1]"
+    assert host_config.check("location", " Mom's house ") == "Mom's house"
+    assert host_config.check("location", "  ") is None
     for setting_id, value in (("role", "boss"), ("node", "two words"), ("digital_adapter", 99),
                               ("primary_host", "http://viviserv"), ("recordings_dir", "relative"),
                               ("peer_host", "http://viviserv2"), ("peer_host", "fd7a::1"),
-                              ("peer_host", "viviserv2:99999"),
+                              ("peer_host", "viviserv2:99999"), ("location", "two\nlines"),
+                              ("location", "x" * 61),
                               ("nothing", "x")):
         with pytest.raises(ValueError):
             host_config.check(setting_id, value)

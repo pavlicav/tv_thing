@@ -806,6 +806,7 @@ def save_reception(scanned, received):
 def local_tuners():
     """This node's digital tuners, in /api/v1/tuners' shape."""
     reception = load_reception()
+    location = node_location()
     result = []
     with lock:
         for lane in DIGITAL_TUNER_LANES:
@@ -814,7 +815,7 @@ def local_tuners():
             unknown = bool(feed_client.lane(lane).get("unknown"))
             stream = payload["stream"]
             result.append({
-                "id": tuner_id(lane), "node": FEED_CONFIG.node, "lane": lane, "kind": "digital",
+                "id": tuner_id(lane), "node": FEED_CONFIG.node, "location": location, "lane": lane, "kind": "digital",
                 "name": payload["name"], "local": True, "reachable": not unknown,
                 "state": "unknown" if unknown else stream["state"],
                 "selection": payload["selection"], "quality": payload["quality"],
@@ -836,15 +837,16 @@ def pool_tuners():
 def peer_payload():
     if peer is None:
         return None
-    return {"url": PEER_URL, "node": peer.node(), "reachable": peer.reachable, "error": peer.last_error}
+    return {"url": PEER_URL, "node": peer.node(), "location": peer.location(), "reachable": peer.reachable,
+            "error": peer.last_error}
 
 
 def api_v1_tuners_payload(local=False):
     """``GET /api/v1/tuners``: the pool. ``local``: this node's tuners only, which is what a
     peer reads."""
     tuners = local_tuners() if local else pool_tuners()
-    return {"api_version": API_VERSION, "node": FEED_CONFIG.node, "peer": peer_payload(),
-            "tuners": tuners, "summary": tuner_pool.summary(tuners)}
+    return {"api_version": API_VERSION, "node": FEED_CONFIG.node, "location": node_location(),
+            "peer": peer_payload(), "tuners": tuners, "summary": tuner_pool.summary(tuners)}
 
 
 def peer_tuner(tuner):
@@ -944,6 +946,66 @@ def pool_lock_request(body, release=False):
 def pool_lock_payload():
     """Every pool tuner's lock, by tuner id (``GET /api/v1/tuner/lock``'s ``pool``)."""
     return {tuner["id"]: tuner["lock"] for tuner in pool_tuners()}
+
+
+def node_location():
+    """Where this box is (the ``location`` setting), read now: the Inputs page sets it, and
+    it waits for no restart. The unit's environment wins, as for every setting."""
+    return HOST.with_environment(os.environ, saved=host_config.read_settings(HOST.path)[0]).value("location")
+
+
+def api_v1_location(body):
+    """``POST /api/v1/location {"location", "node"?}``: name where a box is. Another node's
+    name goes to that node, which saves its own."""
+    if not isinstance(body, dict) or not isinstance(body.get("location"), str):
+        return api_v1_error('Send {"location": "<where this box is>"}', 400, "invalid_location")
+    node = body.get("node") or FEED_CONFIG.node
+    if node != FEED_CONFIG.node:
+        if peer is None or node != peer.node():
+            return api_v1_error(f"no node called {node!r}", 400, "invalid_node")
+        try:
+            payload, status = peer.post("/api/v1/location", {"location": body["location"]})
+        except peers.PeerUnavailable as error:
+            return api_v1_error(f"{node} did not answer: {error}", 503, "peer_unavailable")
+        return payload, status
+    # Not the Config page's whole document, whose hardware list runs ffmpeg: just the name.
+    refused = save_settings({"location": body["location"].strip()})
+    if refused:
+        return refused
+    return {"api_version": API_VERSION, "ok": True, "node": FEED_CONFIG.node, "location": node_location()}, 200
+
+
+# What the Inputs page shows of the peer: the same documents it reads of this node.
+PEER_INPUTS = {"status": "/api/v1/status", "inputs": "/api/v1/inputs", "health": "/api/v1/health",
+               "roku": "/api/v1/roku"}
+
+
+def api_v1_peer_inputs():
+    """``GET /api/v1/peer/inputs``: the peer's status, inputs, health, Roku and signal, read
+    now through its front door, so the Inputs page shows both nodes whatever network the
+    viewer is on. One that does not answer is null; nothing at all is 503."""
+    if peer is None:
+        return api_v1_error("This node has no peer (peer_host on the Config page)", 404, "no_peer")
+    with ThreadPoolExecutor(max_workers=len(PEER_INPUTS)) as pool:
+        futures = {key: pool.submit(peer.get, path, 4.0) for key, path in PEER_INPUTS.items()}
+        read = {}
+        for key, future in futures.items():
+            try:
+                read[key] = future.result()
+            except peers.PeerUnavailable:
+                read[key] = None
+    if read["status"] is None:
+        return api_v1_error(f"The peer at {PEER_URL} did not answer", 503, "peer_unavailable",
+                            {"peer": peer_payload()})
+    # Its signal meter only while its antenna lane streams, as this node's page asks for its own.
+    streaming = any((lane.get("tuner") or {}).get("backend") == "linux-dvb" and (lane.get("stream") or {}).get("ready")
+                    for lane in (read["status"].get("lanes") or {}).values())
+    try:
+        read["signal"] = peer.get("/api/v1/signal", 4.0) if streaming else None
+    except peers.PeerUnavailable:
+        read["signal"] = None
+    return {"api_version": API_VERSION, "ok": True, "peer": peer_payload(),
+            "relay_prefix": peers.RELAY_PREFIX, **read}, 200
 
 
 def load_channels():
@@ -5196,6 +5258,7 @@ def api_v1_inputs():
     return {
         "api_version": API_VERSION,
         "node": FEED_CONFIG.node,
+        "location": node_location(),
         "role": ROLE,
         "feed_epoch": epoch,
         "services": services,
@@ -5275,7 +5338,7 @@ def config_settings(environments, saved_at, started):
         first = setting.services[0]
         resolved = views[first].get(setting.id)
         waiting = [service for service in setting.services
-                   if saved_at is not None and (started.get(service) or 0) < saved_at
+                   if not setting.live and saved_at is not None and (started.get(service) or 0) < saved_at
                    and views[service].value(setting.id) != at_start[service].value(setting.id)]
         pinned = [{"service": service, "unit": CONFIG_UNITS[service], "name": setting.env,
                    "value": environments[service][setting.env]}
@@ -5327,6 +5390,12 @@ def api_v1_config_update(body):
     changes = body.get("settings") if isinstance(body, dict) else None
     if not isinstance(changes, dict) or not changes:
         return api_v1_error('Send {"settings": {"<id>": "<value>"}}', 400, "invalid_settings")
+    refused = save_settings(changes)
+    return refused or ({**api_v1_config(), "ok": True}, 200)
+
+
+def save_settings(changes):
+    """Check and save ``{id: value}`` in the settings file: None, or the refusal."""
     environments = config_environments()
     current, _ = host_config.read_settings(HOST.path)
     updated, fields = dict(current), {}
@@ -5356,7 +5425,7 @@ def api_v1_config_update(body):
     except OSError as error:
         return api_v1_error(f"Could not write {HOST.path}: {error}", 500, "config_unwritable")
     print(f"Config: {', '.join(f'{key}={value!r}' for key, value in changes.items())} saved to {HOST.path}")
-    return {**api_v1_config(), "ok": True}, 200
+    return None
 
 
 def lane_plays(lane, key, value):
@@ -6212,6 +6281,11 @@ class TVHandler(SimpleHTTPRequestHandler):
             ))
             return
 
+        if path == "/api/v1/peer/inputs":
+            payload, status = api_v1_peer_inputs()
+            self.send_json(payload, status=status)
+            return
+
         if path == "/api/v1/tuners":
             local = parse_qs(parsed.query).get("local", ["0"])[0] not in ("", "0", "false")
             self.send_json(api_v1_tuners_payload(local=local))
@@ -6290,6 +6364,16 @@ class TVHandler(SimpleHTTPRequestHandler):
                 self.send_json(payload, status=status)
                 return
             payload, status = api_v1_tune(body)
+            self.send_json(payload, status=status)
+            return
+
+        if parsed.path == "/api/v1/location":
+            try:
+                body = self.read_json_body()
+            except ValueError as error:
+                payload, status = api_v1_error(str(error), 400, "invalid_json")
+            else:
+                payload, status = api_v1_location(body)
             self.send_json(payload, status=status)
             return
 

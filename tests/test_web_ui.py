@@ -286,6 +286,18 @@ def test_player_uses_lane_playlist_instead_of_shared_primary_alias():
     assert 'stream/live.m3u8' not in playback
 
 
+def test_the_inputs_page_shows_both_boxes_and_names_where_each_is():
+    inputs = (STATIC / "inputs.html").read_text()
+    assert 'id="node-template"' in inputs and 'data-part="location-form"' in inputs
+    assert 'get("api/v1/peer/inputs", 8000)' in inputs
+    # Set location saves on the box it names, through this one.
+    assert 'JSON.stringify({ node: node.name, location: field.value })' in inputs
+    # The other box's streams are probed through this node's relay.
+    assert 'path.replace(/^\\/stream\\//, "/stream/peer/")' in inputs
+    # Nothing still writes to one page-wide element per part.
+    assert '$("tuners")' not in inputs and '$("services")' not in inputs
+
+
 def test_the_watch_page_follows_the_tuner_the_pool_chose():
     tune = section(INDEX, "async function tuneTv", "// Playback retries")
     assert "state.tvTuner = data.tuner || null" in tune

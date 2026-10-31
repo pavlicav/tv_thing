@@ -121,6 +121,10 @@ class PeerClient:
         with self._lock:
             return (self._read or {}).get("node")
 
+    def location(self):
+        with self._lock:
+            return (self._read or {}).get("location")
+
     def tuners(self):
         """The peer's tuners as this node shows them: ``local`` false, their streams on the
         relay, and every one unknown and unavailable when the peer has not answered lately."""
@@ -144,6 +148,17 @@ class PeerClient:
                     stream["ready"] = False
             result.append(tuner)
         return result
+
+    def get(self, path, timeout=None):
+        """One of the peer's documents, read now: its JSON, or PeerUnavailable."""
+        status, payload = self._request("GET", path, timeout=timeout)
+        if status != 200:
+            raise PeerUnavailable(f"the peer answered {status} for {path}")
+        return payload
+
+    def post(self, path, body):
+        """One of the peer's own changes: ``(payload, status)``."""
+        return self._command(path, body)
 
     # -- changes -----------------------------------------------------------------------------
     def tune(self, body):
