@@ -179,6 +179,31 @@ once the feed reports it.
 * `disks`: free space where the streams, the web streams and the recordings are written,
   one entry a filesystem: `names`, `paths`, `free_bytes`, `total_bytes`.
 
+### Config
+
+`GET /api/v1/config` is this host's settings and hardware, for the Config page
+(`config.html`, `host_config.py`). Read-only; it opens no device.
+
+* `node`, `node_role` (`primary` or `second`), `process_role` (`all`, `control`),
+  `feed_json` (`path`, and the `node` it describes), `file` (`path`, `exists`,
+  `saved_at`, `problems`: entries of the settings file that were left out).
+* `settings`: one per setting, in page order, each with `id`, `label`, `help`, `choices`
+  (empty for free text), `default`, `services` (who reads it, at start), `saved` (the
+  file's value, or null), `effective`, `source` (`environment`, `file` or `auto`),
+  `reason`, `environment` (the units whose `Environment=` sets it: `service`, `unit`,
+  `name`, `value`), `editable` (false when one does) and `waiting_for` (services that
+  started before the file last changed it).
+* `restart`: the services a saved change waits for, each with `unit`, `command` and
+  `note` (what restarting it drops).
+* `roku_lane` (`config`, `configured`, `running`) and `hardware` (`hostname`, `system`,
+  `dvb`, `video`, `roku_capture`, `gpus`, `encoders`, `tools`).
+
+`POST /api/v1/config` with `{"settings": {"<id>": "<value>"}}` saves them; `"auto"` (or
+null, or the setting's `default`) takes one back out of the file. Every value is checked
+first, and a setting a unit's environment sets is refused: nothing is saved unless all
+are good (400, `invalid_settings`, with `fields`). It answers as GET does. Nothing running
+changes until its service restarts.
+
 ## Integration flow
 
 1. GET `api/v1/sources/digital` (or `sources/cable`) and select an item.

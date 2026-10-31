@@ -6,7 +6,7 @@ import pytest
 
 import lineup
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parent.parent
 
 SECTIONS = [
     {"first": 0, "last": 0, "name": "House channel"},

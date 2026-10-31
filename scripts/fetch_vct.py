@@ -25,7 +25,7 @@ import subprocess
 import time
 from pathlib import Path
 
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 VCT_CACHE = BASE_DIR / "vct_data.json"
 WSCAN_OUTPUT = BASE_DIR / "w_scan_output.txt"
 DEMUX_DEV = "/dev/dvb/adapter0/demux0"

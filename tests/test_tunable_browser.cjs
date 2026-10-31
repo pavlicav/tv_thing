@@ -61,7 +61,7 @@ const path = require('node:path');
           };`});
         if (file === 'live-player.js') return route.fulfill({contentType:'text/javascript',body:`
           window.LivePlayer={livePosition:()=>null,prepare:(m,o)=>{o.onCanPlay();o.onReady();return ()=>{}}};`});
-        const asset = path.join(__dirname,'static',file || 'index.html');
+        const asset = path.join(__dirname,'..','static',file || 'index.html');
         if (fs.existsSync(asset) && fs.statSync(asset).isFile()) return route.fulfill({
           body:fs.readFileSync(asset), contentType:asset.endsWith('.html')?'text/html':asset.endsWith('.js')?'text/javascript':'text/css'});
         unknown.push(file); return route.fulfill({status:404,body:'missing'});

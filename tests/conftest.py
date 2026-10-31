@@ -1,7 +1,19 @@
 """Shared test setup."""
+import os
 import sys
+from pathlib import Path
 
 import pytest
+
+# test_integration.py drives a running server (on :8080 unless TV_THING_URL says otherwise): it
+# tunes, stops and rescans, so against production it retunes what VizelVision is airing. It is
+# collected only when asked for, whatever the command line ignores.
+collect_ignore = [] if os.environ.get("TV_THING_INTEGRATION") == "1" else ["test_integration.py"]
+
+# The suite describes the shipped primary node (feed.json's viviserv), whichever host runs it:
+# never this host's settings file (host_config.py), nor a role read from its hostname.
+os.environ["TV_THING_HOST_CONFIG"] = str(Path(__file__).with_name("no-host-settings.json"))
+os.environ["TV_THING_NODE_ROLE"] = "primary"
 
 
 @pytest.fixture(autouse=True)

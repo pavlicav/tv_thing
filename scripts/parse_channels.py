@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 WSCAN_OUTPUT = BASE_DIR / "w_scan_output.txt"
 CHANNELS_CONF = BASE_DIR / "channels.conf"
 CHANNELS_JSON = BASE_DIR / "channels.json"

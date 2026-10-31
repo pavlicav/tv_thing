@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { catalog } = require('./static/tunable-channels.js');
+const { catalog } = require('../static/tunable-channels.js');
 
 test('one lineup retains distinct ATSC/Roku identities and the station without Roku', () => {
   const channels = [{ id: 'nbc-4', number: '4.1', name: 'NBC', rf_channel: 34 }];

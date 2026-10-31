@@ -8,6 +8,7 @@ import fcntl
 import ipaddress
 import resource
 import shutil
+import shlex
 import json
 import os
 import queue
@@ -38,6 +39,7 @@ import channels
 import epg
 import feed_api
 import feed_node
+import host_config
 import internet_streams
 import lineup
 import recorder
@@ -52,6 +54,10 @@ from roku_control.days import today as games_day
 from roku_control.sports import estimated_end
 
 BASE_DIR = Path(__file__).parent
+# This host's settings (host_config.py, the Config page): the node's role and name, the Roku
+# lane, the digital adapter, the encoder, the recordings folder. Read once, at start. With no
+# settings file, the environment and viviserv's hardware give what the constants below used to.
+HOST = host_config.load()
 PULSE_CLIENT_CONFIG = BASE_DIR / "pulse-client-no-shm.conf"
 STREAMS_DIR = Path(os.environ.get(
     "TV_THING_STREAMS_DIR", str(BASE_DIR / "streams")
@@ -86,7 +92,9 @@ QUALITY_PRESETS = {
 API_VERSION = "v1"
 SOURCE_POLL_INTERVAL_MS = 3000
 VIZELVISION_MEDIA_URL = os.environ.get(
-    "TV_THING_VIZELVISION_MEDIA_URL", "http://127.0.0.1:6970/v1/master/media/"
+    "TV_THING_VIZELVISION_MEDIA_URL",
+    # A second node plays the primary's VizelVision, when it knows the primary's address.
+    HOST.primary_url(6970, "/v1/master/media/") or "http://127.0.0.1:6970/v1/master/media/"
 ).rstrip("/") + "/"
 VIZELVISION_MAX_MEDIA_BYTES = 16 * 1024 * 1024
 
@@ -148,7 +156,7 @@ EPG_REFRESH_TIMES = parse_refresh_times(
 # needs no tuner, so one read a day is enough: it stores two days. A starting
 # server with less than a day left reads at once, and a read that fails is
 # tried again hourly until the next slot.
-YTTV_GUIDE_ENABLED = os.environ.get("TV_THING_YTTV_GUIDE", "1") != "0"
+YTTV_GUIDE_ENABLED = HOST.value("yttv_guide") != "off"    # TV_THING_YTTV_GUIDE=0, or the Config page
 YTTV_GUIDE_REFRESH_TIMES = parse_refresh_times(
     os.environ.get("TV_THING_YTTV_GUIDE_TIMES", "04:30")
 )
@@ -204,7 +212,7 @@ TV_UDP_INPUT = tv_udp_input()
 ALWAYS_ON = os.environ.get("TV_THING_ALWAYS_ON", "1") != "0"
 PLAYBACK_STATE_FILE = STREAMS_DIR / "playback_state.json"
 HLS_SEGMENT_TIME = float(os.environ.get("TV_THING_HLS_SEGMENT_TIME", "0.6"))
-VIDEO_ENCODER = os.environ.get("TV_THING_VIDEO_ENCODER", "cpu").lower()
+VIDEO_ENCODER = HOST.value("video_encoder")    # TV_THING_VIDEO_ENCODER, the Config page, else cpu
 VAAPI_DEVICE = os.environ.get("TV_THING_VAAPI_DEVICE", "/dev/dri/renderD128")
 NVENC_PROBE_ATTEMPTS = int(
     os.environ.get("TV_THING_NVENC_PROBE_ATTEMPTS", "3")
@@ -301,7 +309,9 @@ FEED_URL = os.environ.get("TV_THING_FEED_URL", "http://127.0.0.1:8086/")
 FEED_CONFIG_FILE = Path(os.environ.get(
     "TV_THING_FEED_CONFIG", str(BASE_DIR / "feed.json")
 ))
-FEED_CONFIG = feed_node.load_config(FEED_CONFIG_FILE)
+# feed.json as this host has it: on the primary, as written; a second node names itself and
+# describes its own hardware (host_config.Host.feed_config).
+FEED_CONFIG = HOST.feed_config(feed_node.load_config(FEED_CONFIG_FILE))
 LANE_DIGITAL = "digital"
 LANE_ANALOG = "analog"
 LANE_ROKU = "roku"
@@ -314,6 +324,8 @@ ALL_LANES = tuple(lane.id for lane in FEED_CONFIG.lanes)
 FRONTEND_DIGITAL = FEED_CONFIG.lane(LANE_DIGITAL).device
 FRONTEND_ANALOG = FEED_CONFIG.lane(LANE_ANALOG).device
 FRONTEND_ROKU = FEED_CONFIG.lane(LANE_ROKU).device
+# The DVB adapter the digital lane tunes: feed.json's, unless this host's settings say otherwise.
+DIGITAL_ADAPTER = FEED_CONFIG.device(FRONTEND_DIGITAL).adapter or 0
 LANE_FRONTEND = {lane.id: lane.device for lane in FEED_CONFIG.lanes}
 
 # Each lane owns its own playlist and segment prefix so stopping or
@@ -1541,7 +1553,7 @@ def build_tv_source_command(channel, udp_port=TV_UDP_PORT, tap_ports=()):
     return [
         sys.executable,
         str(BASE_DIR / "dvb_source.py"),
-        "--adapter", "0",
+        "--adapter", str(DIGITAL_ADAPTER),
         "--frequency", str(channel["frequency"]),
         "--service-id", str(channel.get("service_id", 1)),
         "--video-pid", str(channel["video_pid"]),
@@ -1689,7 +1701,7 @@ def start_digital(channel, quality="medium", taps=None):
         "active": True,
         "selection": channel,
         "quality": quality,
-        "tuner": {"backend": TV_SOURCE_BACKEND, "adapter": 0},
+        "tuner": {"backend": TV_SOURCE_BACKEND, "adapter": DIGITAL_ADAPTER},
         "taps": taps,
     })
     publish_legacy_playlist(LANE_DIGITAL)
@@ -1916,11 +1928,13 @@ ROKU_REUSE_MAX_AGE = float(os.environ.get(
     "TV_THING_ROKU_REUSE_MAX_AGE", "900"
 ))
 ROKU_RESTART_BACKOFF = (2, 5, 10, 30)
+V4L2_CTL = host_config.tool("v4l2-ctl", "/usr/bin/v4l2-ctl")
 # A capture that has run this long is steady: its failures are forgotten.
 ROKU_STEADY_SECONDS = 60
 
 # Built in main() from roku.json; None when the lane is not configured. The capture needs only
 # roku.json's feedback section (the HD PVR, its input), which the feed role loads on its own.
+# A host whose settings turn the lane off (host_config: a second node, say) builds neither.
 roku = None
 roku_feedback = None
 roku_wakeup = threading.Event()
@@ -1987,8 +2001,7 @@ def select_roku_input(device, input_index):
         return
     try:
         subprocess.run(
-            ["/usr/bin/v4l2-ctl", "--device", device,
-             f"--set-input={input_index}"],
+            [V4L2_CTL, "--device", device, f"--set-input={input_index}"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
@@ -2123,9 +2136,16 @@ def roku_keeper():
             roku_wakeup.set()
 
 
+def roku_unavailable_message():
+    """Why there is no Roku lane: not configured, or turned off on this host."""
+    setting = HOST.roku(ROKU_CONFIG_FILE)
+    if ROKU_CONFIG_FILE.is_file() and setting.value == "off":
+        return f"The Roku lane is off on {FEED_CONFIG.node} ({setting.reason})"
+    return "The Roku lane is not configured"
+
+
 def roku_unavailable():
-    return api_v1_error("The Roku lane is not configured", 503,
-                        "roku_unavailable")
+    return api_v1_error(roku_unavailable_message(), 503, "roku_unavailable")
 
 
 def roku_call(action):
@@ -4341,7 +4361,7 @@ def api_v1_sports_guide(now=None):
                "channel": next((view for view in slide_views() if view["channel_id"] == "sports-guide"), None)}
     if roku is None:
         return {**payload, "available": False, "games": 0, "sports": [], "errors": [
-            {"message": "The Roku lane is not configured, so TV Thing has no schedules."}]}
+            {"message": f"{roku_unavailable_message()}, so TV Thing has no schedules."}]}
     days = [today]
     night = games_day(eastern - timedelta(hours=SPORTS_GUIDE_LATE_HOURS))
     if night != today:
@@ -4986,6 +5006,161 @@ def api_v1_inputs():
     }
 
 
+# ---------------------------------------------------------------------------
+# Config (config.html): this host's settings and hardware (host_config.py).
+#
+# Each service reads the settings file when it starts, under its own unit's environment, which
+# wins over the file; so each setting is shown as its services will see it. Saving writes the
+# file and nothing else, and the page says which services a change waits for: restarting
+# control drops nothing, restarting the feed drops every stream and recording.
+# ---------------------------------------------------------------------------
+PROCESS_STARTED = time.time()
+CONFIG_UNITS = {service: unit for service, unit, _, _ in INPUT_SERVICES}
+CONFIG_RESTART_NOTES = {
+    "feed": "drops every stream and ends every recording",
+    "control": "drops nothing",
+    "web-basic": "drops only its own web streams",
+}
+
+
+def unit_environments(units, run=subprocess.run):
+    """``{unit: {name: value}}``, each loaded unit's Environment= from ``systemctl show``."""
+    try:
+        shown = run(["systemctl", "show", "-p", "Id,LoadState,Environment", *units],
+                    capture_output=True, text=True, timeout=3).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    found = {}
+    for block in shown.split("\n\n"):
+        values = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
+        unit = values.get("Id", "").removesuffix(".service")
+        if unit not in units or values.get("LoadState") != "loaded":
+            continue
+        try:
+            words = shlex.split(values.get("Environment", ""))
+        except ValueError:
+            words = []
+        found[unit] = dict(word.split("=", 1) for word in words if "=" in word)
+    return found
+
+
+def config_environments():
+    """Each service's environment. One process is every service; split, control's is its own
+    and the others' are their units'."""
+    own = dict(os.environ)
+    if ROLE == "all":
+        return {service: own for service in CONFIG_UNITS}
+    units = unit_environments(tuple(CONFIG_UNITS.values()))
+    return {service: own if service == "control" else units.get(unit, own)
+            for service, unit in CONFIG_UNITS.items()}
+
+
+def config_started():
+    """When each service started (unix seconds), or None when unknown."""
+    if ROLE == "all":
+        return {service: PROCESS_STARTED for service in CONFIG_UNITS}
+    units = systemd_units(tuple(CONFIG_UNITS.values()))
+    started = {service: (units.get(unit) or {}).get("since") for service, unit in CONFIG_UNITS.items()}
+    started["control"] = PROCESS_STARTED
+    return started
+
+
+def config_settings(environments, saved_at, started):
+    """The settings for the page, each as its services see it, and whether one waits for a
+    restart: the file changed after a service started, to a value other than the one this
+    process started with."""
+    views = {service: HOST.with_environment(env, saved=host_config.read_settings(HOST.path)[0])
+             for service, env in environments.items()}
+    at_start = {service: HOST.with_environment(env, saved=HOST.saved) for service, env in environments.items()}
+    out = []
+    for setting in host_config.SETTINGS:
+        first = setting.services[0]
+        resolved = views[first].get(setting.id)
+        waiting = [service for service in setting.services
+                   if saved_at is not None and (started.get(service) or 0) < saved_at
+                   and views[service].value(setting.id) != at_start[service].value(setting.id)]
+        pinned = [{"service": service, "unit": CONFIG_UNITS[service], "name": setting.env,
+                   "value": environments[service][setting.env]}
+                  for service in setting.services if setting.env in environments[service]]
+        value = resolved.value
+        out.append({
+            "id": setting.id, "label": setting.label, "help": setting.help,
+            "choices": list(setting.choices), "default": setting.default,
+            "services": list(setting.services), "saved": views[first].saved.get(setting.id),
+            "effective": str(value) if isinstance(value, Path) else value,
+            "source": resolved.source, "reason": resolved.reason,
+            "environment": pinned, "editable": not pinned,
+            "waiting_for": waiting,
+        })
+    return out
+
+
+def api_v1_config():
+    """This host's settings and what its hardware is, for the Config page. Read-only."""
+    path = HOST.path
+    try:
+        saved_at = path.stat().st_mtime
+    except OSError:
+        saved_at = None
+    settings = config_settings(config_environments(), saved_at, config_started())
+    waiting = [service for service in CONFIG_UNITS
+               if any(service in item["waiting_for"] for item in settings)]
+    _, problems = host_config.read_settings(path)
+    return {
+        "api_version": API_VERSION,
+        "node": FEED_CONFIG.node,
+        "node_role": HOST.value("role"),
+        "process_role": ROLE,
+        "feed_json": {"path": str(FEED_CONFIG_FILE), "node": HOST.primary_node()},
+        "file": {"path": str(path), "exists": saved_at is not None,
+                 "saved_at": saved_at, "problems": problems},
+        "settings": settings,
+        "restart": [{"service": service, "unit": CONFIG_UNITS[service],
+                     "command": f"sudo systemctl restart {CONFIG_UNITS[service]}",
+                     "note": CONFIG_RESTART_NOTES[service]} for service in waiting],
+        "roku_lane": {"config": str(ROKU_CONFIG_FILE), "configured": ROKU_CONFIG_FILE.is_file(),
+                      "running": roku is not None},
+        "hardware": host_config.detect(HOST),
+    }
+
+
+def api_v1_config_update(body):
+    """Save settings: ``{"settings": {id: value}}``, where "auto" (or null) is back to auto."""
+    changes = body.get("settings") if isinstance(body, dict) else None
+    if not isinstance(changes, dict) or not changes:
+        return api_v1_error('Send {"settings": {"<id>": "<value>"}}', 400, "invalid_settings")
+    environments = config_environments()
+    current, _ = host_config.read_settings(HOST.path)
+    updated, fields = dict(current), {}
+    for key, value in changes.items():
+        setting = host_config.BY_ID.get(key)
+        if setting is None:
+            fields[key] = "There is no such setting"
+            continue
+        pinned = [CONFIG_UNITS[service] for service in setting.services if setting.env in environments[service]]
+        if pinned:
+            fields[key] = f"Set by {', '.join(pinned)}'s environment ({setting.env}); change it there"
+            continue
+        try:
+            kept = host_config.check(key, value, saving=True)
+        except ValueError as error:
+            fields[key] = str(error)
+            continue
+        if kept is None:
+            updated.pop(key, None)
+        else:
+            updated[key] = kept
+    if fields:
+        return api_v1_error("Nothing was saved: " + "; ".join(f"{key}: {why}" for key, why in fields.items()),
+                            400, "invalid_settings", {"fields": fields})
+    try:
+        host_config.write_settings(HOST.path, updated)
+    except OSError as error:
+        return api_v1_error(f"Could not write {HOST.path}: {error}", 500, "config_unwritable")
+    print(f"Config: {', '.join(f'{key}={value!r}' for key, value in changes.items())} saved to {HOST.path}")
+    return {**api_v1_config(), "ok": True}, 200
+
+
 def lane_plays(lane, key, value):
     """Whether a lane is streaming the selection whose `key` is `value`, healthily.
 
@@ -5414,6 +5589,12 @@ class TVHandler(SimpleHTTPRequestHandler):
                         "note": "the services, the web streams and where each comes from, "
                                 "and the disks; the tuners are status's lanes and frontends",
                     },
+                    "config": {
+                        "method": "GET", "path": "/api/v1/config",
+                        "note": "this host's settings, what each resolves to and why, and its "
+                                "hardware; POST {\"settings\": {id: value}} saves them, for "
+                                "each service to read when it next starts",
+                    },
                     "channels": {
                         "method": "GET", "path": "/api/v1/channels",
                         "query": {"date": "YYYY-MM-DD (games)"},
@@ -5667,6 +5848,10 @@ class TVHandler(SimpleHTTPRequestHandler):
             self.send_json(api_v1_inputs())
             return
 
+        if path == "/api/v1/config":
+            self.send_json(api_v1_config())
+            return
+
         if path == "/api/v1/channels":
             self.send_json(api_v1_channels(
                 parse_qs(parsed.query).get("date", [None])[0]))
@@ -5901,6 +6086,16 @@ class TVHandler(SimpleHTTPRequestHandler):
                 self.send_json(payload, status=status)
                 return
             payload, status = api_v1_tune(body)
+            self.send_json(payload, status=status)
+            return
+
+        if parsed.path == "/api/v1/config":
+            try:
+                body = self.read_json_body()
+            except ValueError as error:
+                payload, status = api_v1_error(str(error), 400, "invalid_json")
+            else:
+                payload, status = api_v1_config_update(body)
             self.send_json(payload, status=status)
             return
 
@@ -6722,6 +6917,12 @@ def start_roku_lane():
     global roku, roku_feedback
     capture_source = (roku_capture_source if ROLE == "all"
                       else lambda: feed_client.capture_source(LANE_ROKU))
+    setting = HOST.roku(ROKU_CONFIG_FILE)
+    if ROKU_CONFIG_FILE.is_file() and setting.value == "off":
+        # Not even built: nothing here may press a key on a Roku (on a second node, the
+        # primary's, which answers from anywhere on the LAN).
+        print(f"Roku lane off on this host: {setting.reason} ({setting.source})")
+        return
     try:
         roku = roku_lane.load(ROKU_CONFIG_FILE,
                               capture_source=capture_source,
@@ -6747,6 +6948,10 @@ def start_roku_capture_lane():
     from roku_control.config import load_config
     if not ROKU_CONFIG_FILE.is_file():
         print(f"Roku capture not configured ({ROKU_CONFIG_FILE})")
+        return
+    setting = HOST.roku(ROKU_CONFIG_FILE)
+    if setting.value == "off":
+        print(f"Roku capture off on this host: {setting.reason} ({setting.source})")
         return
     try:
         roku_feedback = load_config(ROKU_CONFIG_FILE).feedback

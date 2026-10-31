@@ -4,7 +4,7 @@ import importlib.util
 import unittest
 from pathlib import Path
 
-spec = importlib.util.spec_from_file_location("restart_drill", Path(__file__).with_name("scripts") / "restart_drill.py")
+spec = importlib.util.spec_from_file_location("restart_drill", Path(__file__).resolve().parent.parent / "scripts" / "restart_drill.py")
 drill = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(drill)
 

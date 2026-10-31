@@ -10,7 +10,7 @@ import pytest
 
 import sports_guide_video as video
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def game(title, start=None, live=False, tag="NFL", network="ESPN", number=33, via="channel", **extra):

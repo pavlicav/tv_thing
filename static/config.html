@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Config · TV Thing</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="app.css">
+  <style>
+    body { min-height: 100vh; background: var(--bg); }
+    .page { max-width: 1120px; }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--err); }
+    .mute { color: var(--text-mute); }
+    .mono { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+    .summary { display: flex; flex-wrap: wrap; gap: 8px; margin: -12px 0 28px; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 8px; padding: 6px 11px;
+      border: 1px solid var(--border); border-radius: var(--r-full); background: var(--surface);
+      font-size: 12px; color: var(--text-dim);
+    }
+    .chip strong { color: var(--text); font-weight: 600; }
+    .dot { flex-shrink: 0; }
+    .dot.idle { background: var(--text-mute); box-shadow: none; }
+    .notice {
+      margin-bottom: 18px; padding: 12px 14px; border: 1px solid var(--accent-line); border-radius: var(--r-md);
+      background: var(--accent-soft); color: var(--text-dim); font-size: 13px; line-height: 1.6;
+    }
+    .notice.bad { border-color: rgba(248, 113, 113, .4); background: rgba(248, 113, 113, .08); }
+    .notice code, .setting code { font-family: var(--mono); font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
+    .notice ul { margin: 6px 0 0 18px; }
+    .settings { padding: 0; }
+    .setting {
+      display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 340px); gap: 8px 24px;
+      padding: 16px 18px; border-bottom: 1px solid var(--border);
+    }
+    .setting:last-child { border-bottom: none; }
+    .setting h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-size: 14px; font-weight: 650; }
+    .setting .help { margin: 0; color: var(--text-mute); font-size: 12px; line-height: 1.55; }
+    .setting .now { margin-top: 7px; font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+    .setting .now strong { color: var(--text); font-weight: 600; }
+    .setting .error { margin-top: 6px; font-size: 12px; color: var(--err); }
+    .setting .pinned { margin-top: 6px; font-size: 12px; color: var(--warn); }
+    .setting select.field { appearance: auto; }
+    .setting .field:disabled { opacity: .55; cursor: not-allowed; }
+    .tag {
+      display: inline-block; padding: 2px 8px; border: 1px solid var(--border-strong); border-radius: var(--r-full);
+      color: var(--text-dim); font: 600 10px/1.5 var(--mono); text-transform: uppercase; letter-spacing: .06em;
+    }
+    .tag.ok { border-color: rgba(74, 222, 128, .4); color: var(--ok); }
+    .tag.warn { border-color: rgba(251, 191, 36, .4); color: var(--warn); }
+    .tag.bad { border-color: rgba(248, 113, 113, .4); color: var(--err); }
+    .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+    .actions .mute { font-size: 12px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 14px; }
+    .card h3 { display: flex; align-items: center; gap: 9px; margin: 0; font-size: 15px; font-weight: 650; }
+    .card .detail { margin: 4px 0 14px; color: var(--text-mute); font-size: 12px; line-height: 1.5; }
+    .kv-row dd { overflow-wrap: anywhere; }
+    .item + .item { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+    .item-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 13px; }
+    .item .sub { display: block; margin-top: 4px; color: var(--text-mute); font-size: 12px; overflow-wrap: anywhere; }
+    .foot { margin-top: 28px; color: var(--text-mute); font-size: 12px; }
+    @media (max-width: 760px) {
+      .setting { grid-template-columns: 1fr; }
+      .cards { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./"><span class="brand-mark"></span><span>TV Thing</span></a>
+    <nav class="nav" aria-label="Pages">
+      <a class="navlink" href="./">Watch</a>
+      <a class="navlink" href="guide.html">Guide</a>
+      <a class="navlink" href="vcr.html">VCR</a>
+      <a class="navlink" href="cable.html">Cable</a>
+      <a class="navlink" href="rescan.html">Scan</a>
+      <a class="navlink" href="dx.html">DX</a>
+      <a class="navlink" href="roku.html">Roku</a>
+      <a class="navlink" href="inputs.html">Inputs</a>
+      <a class="navlink" href="config.html" aria-current="page">Config</a>
+      <a class="navlink" href="about.html">About</a>
+    </nav>
+  </header>
+
+  <main class="page">
+    <h1>This server</h1>
+    <p class="lede">What makes this TV Thing server differ from another: its role, its Roku
+      lane, its tuner and encoder, where it files recordings. The settings live in this host's
+      own file, outside git, so each server keeps its own. Auto works each one out from this
+      host's name and hardware.</p>
+
+    <div class="summary" id="summary" aria-live="polite"></div>
+    <div class="notice" id="notice" hidden></div>
+
+    <h2>Settings</h2>
+    <form id="form" novalidate>
+      <div class="card settings" id="settings"><div class="setting mute">Loading…</div></div>
+      <div class="actions">
+        <button class="btn btn-accent" id="save" type="submit" disabled>Save</button>
+        <button class="btn" id="revert" type="button" disabled>Undo changes</button>
+        <span class="mute" id="file"></span>
+      </div>
+    </form>
+    <p class="foot">A service reads these when it starts, and its unit's environment wins over
+      this page. Saving changes nothing that is running: restarting control drops nothing,
+      restarting the feed drops every stream and ends every recording.</p>
+
+    <h2>Hardware</h2>
+    <div class="cards" id="hardware"><div class="card mute">Loading…</div></div>
+    <div class="actions">
+      <button class="btn" id="detect" type="button">Look again</button>
+      <span class="mute" id="updated"></span>
+    </div>
+    <p class="foot">Read from <code>/sys</code> and <code>/dev</code>; no device is opened, so
+      looking never disturbs a stream. Whether an encoder ffmpeg was built with really works is
+      found out by the feed, at its first tune.</p>
+  </main>
+
+  <script>
+  (() => {
+    "use strict";
+    const $ = id => document.getElementById(id);
+    let config = null, errors = {}, saved = null;
+
+    const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    })[c]);
+    const dash = v => (v == null || v === "" ? "—" : v);
+    const tag = (text, cls) => `<span class="tag ${cls || ""}">${esc(text)}</span>`;
+    const dot = cls => `<span class="dot ${cls}" aria-hidden="true"></span>`;
+    function bytes(n) {
+      if (n == null) return null;
+      const units = ["B", "KB", "MB", "GB", "TB"];
+      let i = 0;
+      while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+      return `${n < 10 && i ? n.toFixed(1) : Math.round(n)} ${units[i]}`;
+    }
+    const when = epoch => (epoch ? new Date(epoch * 1000).toLocaleString([], {
+      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : null);
+    function rows(pairs) {
+      return pairs.filter(p => p).map(([key, value, cls, html]) =>
+        `<div class="kv-row"><dt>${esc(key)}</dt>` +
+        `<dd class="${cls || ""}">${html != null ? html : esc(dash(value))}</dd></div>`).join("");
+    }
+
+    const SERVICES = { feed: "the feed", control: "control", "web-basic": "web-basic" };
+    const CHOICE_LABELS = {
+      role: { auto: "Auto", primary: "Primary", second: "Second node" },
+      roku: { auto: "Auto", on: "On", off: "Off" },
+      yttv_guide: { auto: "Auto", off: "Off" },
+      video_encoder: { cpu: "CPU (libx264)", auto: "Auto (the first GPU encoder that works)",
+                       nvenc: "NVIDIA NVENC", vaapi: "VA-API", qsv: "Intel Quick Sync" },
+    };
+    const VALUE_LABELS = { second: "second node", auto: "auto" };
+    const SOURCES = { environment: "set by the service's environment", file: "saved here", auto: "auto" };
+
+    async function request(path, options) {
+      const controller = new AbortController();
+      const stop = setTimeout(() => controller.abort(), 10000);
+      try {
+        const res = await fetch(path, { cache: "no-store", signal: controller.signal, ...options });
+        let body = null;
+        try { body = await res.json(); } catch (_) { /* not JSON */ }
+        return { ok: res.ok, status: res.status, body };
+      } catch (error) {
+        return { ok: false, status: null, body: null, error: String(error) };
+      } finally {
+        clearTimeout(stop);
+      }
+    }
+
+    // ---- Summary and notices ---------------------------------------------------
+    function setting(id) { return (config.settings || []).find(s => s.id === id) || {}; }
+
+    function renderSummary() {
+      const role = config.node_role === "primary" ? "Primary node" : "Second node";
+      const roku = config.roku_lane || {};
+      const rokuText = roku.running ? "running" : !roku.configured ? "not configured"
+        : setting("roku").effective === "off" ? "off" : "not running";
+      const encoder = setting("video_encoder").effective;
+      const adapter = setting("digital_adapter").effective;
+      $("summary").innerHTML = [
+        `<span class="chip">${dot("live")}<strong>${esc(config.node)}</strong> ${esc(role)}</span>`,
+        `<span class="chip">${dot(roku.running ? "live" : "idle")}Roku lane <strong>${esc(rokuText)}</strong></span>`,
+        `<span class="chip">Digital tuner <strong>adapter${esc(adapter)}</strong></span>`,
+        `<span class="chip">Encoder <strong>${esc(encoder)}</strong></span>`,
+        `<span class="chip">Process <strong>${esc(config.process_role === "all" ? "one process" : config.process_role)}</strong></span>`,
+      ].join("");
+      const file = config.file || {};
+      $("file").innerHTML = file.exists
+        ? `<code>${esc(file.path)}</code> · saved ${esc(when(file.saved_at))}`
+        : `<code>${esc(file.path)}</code> · not written yet: every setting is auto or the environment's`;
+    }
+
+    function renderNotice() {
+      const notice = $("notice"), file = config.file || {};
+      const parts = [];
+      if (saved !== null) parts.push(`<strong>Saved.</strong> ${saved}`);
+      if ((config.restart || []).length) {
+        if (config.process_role === "all") {
+          parts.push("Restart the server to apply the saved settings: here one process runs every service.");
+        } else {
+          parts.push("Waiting for a restart:<ul>" + config.restart.map(r =>
+            `<li><code>${esc(r.command)}</code>: ${esc(r.note)}</li>`).join("") + "</ul>");
+        }
+      }
+      if ((file.problems || []).length) {
+        parts.push("The settings file has entries that were left out (they are auto until fixed):<ul>" +
+          file.problems.map(p => `<li>${esc(p)}</li>`).join("") + "</ul>");
+      }
+      notice.hidden = !parts.length;
+      notice.className = "notice" + ((file.problems || []).length ? " bad" : "");
+      notice.innerHTML = parts.join("<br>");
+    }
+
+    // ---- Settings ---------------------------------------------------------------
+    function shown(value, id) {
+      if (id === "digital_adapter" && typeof value === "number") return `adapter${value}`;
+      if (value === true) return "on";
+      if (value === false) return "off";
+      return VALUE_LABELS[value] || (value === "" ? "none" : String(value));
+    }
+
+    function control(item) {
+      const disabled = item.editable ? "" : " disabled";
+      const current = item.saved == null ? item.default : String(item.saved);
+      if (item.id === "digital_adapter") {
+        const adapters = ((config.hardware || {}).dvb || []).map(d => d.adapter);
+        if (current !== item.default && !adapters.includes(Number(current))) adapters.push(Number(current));
+        const options = [["auto", "Auto"], ...adapters.sort((a, b) => a - b).map(n => {
+          const found = ((config.hardware || {}).dvb || []).find(d => d.adapter === n);
+          return [String(n), `adapter${n}${found ? `: ${found.description}` : " (not on this host)"}`];
+        })];
+        return `<select class="field" name="${esc(item.id)}"${disabled}>` + options.map(([value, label]) =>
+          `<option value="${esc(value)}"${value === current ? " selected" : ""}>${esc(label)}</option>`).join("") + "</select>";
+      }
+      if (item.choices.length) {
+        const labels = CHOICE_LABELS[item.id] || {};
+        return `<select class="field" name="${esc(item.id)}"${disabled}>` + item.choices.map(value =>
+          `<option value="${esc(value)}"${value === current ? " selected" : ""}>${esc(labels[value] || value)}</option>`).join("") +
+          "</select>";
+      }
+      const placeholder = item.source === "auto" ? `Auto: ${shown(item.effective)}` : "Auto";
+      return `<input class="field" name="${esc(item.id)}" value="${esc(item.saved == null ? "" : item.saved)}"` +
+        ` placeholder="${esc(placeholder)}" spellcheck="false" autocomplete="off"${disabled}>`;
+    }
+
+    function renderSettings() {
+      $("settings").innerHTML = config.settings.map(item => {
+        const waiting = item.waiting_for.length
+          ? tag(`waits for ${item.waiting_for.map(s => SERVICES[s] || s).join(" + ")}`, "warn") : "";
+        const pinned = item.environment.length
+          ? `<div class="pinned">Set by ${item.environment.map(e =>
+              `${esc(e.unit)}'s <code>${esc(e.name)}=${esc(e.value)}</code>`).join(", ")}; change it there.</div>` : "";
+        const why = item.source === "auto" ? `auto: ${esc(item.reason)}` : esc(SOURCES[item.source] || item.source);
+        return `<div class="setting" data-id="${esc(item.id)}">
+          <div><h3>${esc(item.label)} ${waiting}</h3><p class="help">${esc(item.help)}</p></div>
+          <div>${control(item)}
+            <div class="now">Now <strong>${esc(shown(item.effective, item.id))}</strong> · ${why}</div>
+            <div class="now mute">Read by ${esc(item.services.map(s => SERVICES[s] || s).join(", "))}</div>
+            ${pinned}<div class="error" hidden></div>
+          </div></div>`;
+      }).join("");
+      showErrors();
+      changed();
+    }
+
+    // A refused save keeps every edit: the reasons appear beside the fields.
+    function showErrors() {
+      for (const row of document.querySelectorAll(".setting[data-id]")) {
+        const box = row.querySelector(".error"), why = errors[row.dataset.id];
+        box.hidden = !why;
+        box.textContent = why || "";
+      }
+    }
+
+    function edits() {
+      const out = {};
+      for (const item of config.settings) {
+        const field = $("form").elements[item.id];
+        if (!field || field.disabled) continue;
+        const value = field.value.trim();
+        const was = item.saved == null ? item.default : String(item.saved);
+        const now = value === "" ? item.default : value;
+        if (now !== was) out[item.id] = now;
+      }
+      return out;
+    }
+
+    function changed() {
+      const count = Object.keys(edits()).length;
+      $("save").disabled = !count;
+      $("revert").disabled = !count;
+      $("save").textContent = count ? `Save ${count} change${count === 1 ? "" : "s"}` : "Save";
+    }
+
+    // ---- Hardware ---------------------------------------------------------------
+    function renderHardware() {
+      const hw = config.hardware || {}, sys = hw.system || {};
+      const usedAdapter = setting("digital_adapter").effective;
+      const dvb = (hw.dvb || []).map(d => `<div class="item"><div class="item-head"><strong>/dev/dvb/adapter${d.adapter}</strong>` +
+        `${d.adapter === usedAdapter ? tag("digital lane", "ok") : tag("unused")}</div>` +
+        `<span class="sub">${esc(d.description)}</span>` +
+        `<span class="sub">front-end${d.frontends.length > 1 ? "s" : ""} ${esc(d.frontends.join(", "))}</span></div>`).join("")
+        || `<p class="detail">No DVB adapter: the digital lane has nothing to tune.</p>`;
+      const kinds = { analog: ["analog tuner", "ok"], capture: ["HD PVR", "ok"], other: ["other", ""] };
+      const video = (hw.video || []).map(v => `<div class="item"><div class="item-head"><strong>${esc(v.name || v.device)}</strong>` +
+        `${tag(...kinds[v.kind])}</div><span class="sub mono">${esc(v.by_id || v.device)}</span>` +
+        `<span class="sub">${esc([v.driver, v.bus && `${v.bus.toUpperCase()} ${v.id}`].filter(Boolean).join(" · "))}</span></div>`).join("")
+        || `<p class="detail">No V4L2 capture device: no analog lane and no HD PVR.</p>`;
+      const capture = hw.roku_capture;
+      const roku = config.roku_lane || {};
+      const rokuRows = rows([
+        ["Roku config", roku.configured ? roku.config : `${roku.config} (absent)`, roku.configured ? "" : "mute"],
+        ["Capture device", capture ? `${capture.name} · ${capture.path}` : "none on this host", capture ? "ok" : "mute"],
+        capture && !capture.named ? ["Note", "An HD PVR, but not the one roku.json names", "warn"] : null,
+        ["Lane", roku.running ? "running" : "not running", roku.running ? "ok" : "mute"],
+      ]);
+      const gpus = (hw.gpus || []).map(g => [g.render_node, [g.name || g.maker, g.driver].filter(Boolean).join(" · ")]);
+      const encoders = hw.encoders == null ? "ffmpeg not found" : hw.encoders.join(", ") || "none";
+      const tools = Object.entries(hw.tools || {}).map(([name, path]) =>
+        [name, path || "missing", path ? "mono" : "warn"]);
+      $("hardware").innerHTML = [
+        `<div class="card"><h3>Digital tuners</h3><p class="detail">Each DVB adapter this host has.</p>${dvb}</div>`,
+        `<div class="card"><h3>Video capture</h3><p class="detail">Analog tuners' encoders and HD PVRs.</p>${video}</div>`,
+        `<div class="card"><h3>Roku input</h3><p class="detail">The Roku lane needs its capture device on this host.</p><dl class="kv">${rokuRows}</dl></div>`,
+        `<div class="card"><h3>GPUs and encoders</h3><p class="detail">The H.264 encoders this host's ffmpeg was built with.</p>` +
+          `<dl class="kv">${rows([...gpus, ["ffmpeg encoders", encoders]])}</dl></div>`,
+        `<div class="card"><h3>System</h3><p class="detail">${esc(hw.hostname)}; feed.json describes ` +
+          `${esc((config.feed_json || {}).node)}.</p><dl class="kv">${rows([
+            ["CPU", sys.cpu], ["Threads", sys.threads], ["Memory", bytes(sys.memory_bytes)],
+            ["OS", sys.os], ["Kernel", sys.kernel], ["Python", `${dash(sys.python)} · ${dash(sys.python_path)}`],
+          ])}</dl></div>`,
+        `<div class="card"><h3>Tools</h3><p class="detail">On this service's PATH.</p><dl class="kv">${rows(tools)}</dl></div>`,
+      ].join("");
+      $("updated").textContent = `Looked ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+    }
+
+    function render() {
+      renderSummary();
+      renderNotice();
+      renderSettings();
+      renderHardware();
+    }
+
+    async function load() {
+      const res = await request("api/v1/config");
+      if (!res.ok || !res.body || !res.body.settings) {
+        $("notice").hidden = false;
+        $("notice").className = "notice bad";
+        $("notice").textContent = `Could not read this server's settings (${res.status || res.error || "no answer"}).`;
+        return;
+      }
+      config = res.body;
+      render();
+    }
+
+    $("form").addEventListener("input", changed);
+    $("form").addEventListener("change", changed);
+    $("revert").addEventListener("click", () => { errors = {}; renderSettings(); });
+    $("form").addEventListener("input", event => {
+      const row = event.target.closest(".setting[data-id]");
+      if (row && errors[row.dataset.id]) { delete errors[row.dataset.id]; showErrors(); }
+    });
+    $("detect").addEventListener("click", () => { saved = null; load(); });
+    $("form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const settings = edits();
+      if (!Object.keys(settings).length) return;
+      $("save").disabled = true;
+      const res = await request("api/v1/config", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings }),
+      });
+      if (!res.ok || !res.body || !res.body.settings) {
+        errors = (res.body && res.body.fields) || {};
+        saved = null;
+        if (!Object.keys(errors).length) {
+          $("notice").hidden = false;
+          $("notice").className = "notice bad";
+          $("notice").textContent = (res.body && res.body.error && res.body.error.message) || "Could not save.";
+        }
+        showErrors();
+        changed();
+        return;
+      }
+      errors = {};
+      config = res.body;
+      saved = (config.restart || []).length ? "" : "Nothing running needs a restart for it.";
+      render();
+    });
+
+    load();
+  })();
+  </script>
+</body>
+</html>

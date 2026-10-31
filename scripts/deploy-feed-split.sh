@@ -218,7 +218,7 @@ precheck() {
     done
     say "Front door: Apache's modules, the LAN addresses and the ports are ready"
     say "The fast suite (about 2 minutes)"
-    as_vivian bash -c "cd '$TV_WORKTREE' && '$PY' -m pytest -q -m 'not slow and not api and not hardware and not resource' --ignore=test_integration.py" \
+    as_vivian bash -c "cd '$TV_WORKTREE' && '$PY' -m pytest -q -m 'not slow and not api and not hardware and not resource' --ignore=tests/test_integration.py" \
         > "$LOGDIR/fast-suite.log" 2>&1 || fail "the fast suite failed: $LOGDIR/fast-suite.log"
     tail -1 "$LOGDIR/fast-suite.log"
     say "The staged split check (about a minute, no hardware, scratch ports)"
@@ -298,7 +298,7 @@ gate() {  # name, url, stream_sanity_check args (--server-pid for each service).
     # the VCR's next tick (the headroom check's did not, 2026-10-25).
     wait_for 60 "Every lane is unlocked" locks_clear "$url" || { say "a lane is still locked at $url"; return 1; }
     say "Gate: $name"
-    as_vivian "$PY" "$STAGE/stream_sanity_check.py" --url "$url" "$@" 2>&1 | tee "$LOGDIR/gate-$name.log"
+    as_vivian "$PY" "$STAGE/scripts/stream_sanity_check.py" --url "$url" "$@" 2>&1 | tee "$LOGDIR/gate-$name.log"
     return "${PIPESTATUS[0]}"
 }
 

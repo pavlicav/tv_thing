@@ -95,9 +95,12 @@ Antenna → DVB frontend → minimal DVB source → localhost UDP
 | `dvb_source.py` | Minimal direct DVB demux-to-UDP source used for TV |
 | `fm_tuner.py` | FM radio: V4L2 radio-node ioctls, signal strength, band sweep |
 | `tuner.py` | Low-level DVB frontend tuning via ioctl (diagnostic use) |
-| `fetch_vct.py` | Reads PSIP VCT from DVB section filter to get virtual channel numbers |
-| `parse_channels.py` | Parses `w_scan` output into `channels.json` |
-| `scan_channels.sh` | Runs `w_scan` to detect active ATSC frequencies |
+| `host_config.py` | This host's settings (the Config page) and what its hardware is: node role, Roku lane, digital adapter, encoder, recordings |
+| `tests/` | The test suite (`pytest`); `test_integration.py` there runs only with `TV_THING_INTEGRATION=1` |
+| `scripts/stream_sanity_check.py` | The real-stream resource gate (AGENTS.md) |
+| `scripts/fetch_vct.py` | Reads PSIP VCT from DVB section filter to get virtual channel numbers |
+| `scripts/parse_channels.py` | Parses `w_scan` output into `channels.json` |
+| `scripts/scan_channels.sh` | Runs `w_scan` to detect active ATSC frequencies |
 | `channels.json` | Channel database: name, virtual ch #, RF ch #, frequency, SID |
 | `epg.json` | Stored programme guide, rebuilt on a schedule from the broadcast |
 | `yttv_epg.json` | Stored YouTube TV guide, two days ahead, rebuilt daily from the web |
@@ -318,6 +321,34 @@ The route lives in
 into `/etc/apache2/conf-available/viviserv-dashboard.conf` by
 `install-apache-proxies.sh`; edit the fragment, not the generated file.
 
+### This host's settings, and a second node
+
+One checkout runs on more than one server. `viviserv` is the primary node: `feed.json`,
+`roku.json` and the lineup describe its tuners, its HD PVR and the house Roku. A second
+node (such as `viviserv2`) runs the same code on its own hardware. What differs between
+them is in `~/.config/tv-thing/host.json` (or `TV_THING_HOST_CONFIG`), outside git,
+which the **Config** page (`config.html`) shows and writes. Each service reads it when
+it starts. Its unit's environment wins over the file, and with neither, each setting is
+**auto**:
+
+| Setting | Environment | Auto |
+|---|---|---|
+| Node role | `TV_THING_NODE_ROLE` | primary when the host's name is `feed.json`'s `node`, else a second node |
+| Node name | `TV_THING_NODE` | `feed.json`'s on the primary, the host's name on a second node |
+| Roku lane | `TV_THING_ROKU` (`on`, `off`) | on on the primary; on a second node, only when `roku.json`'s capture device is plugged into it |
+| YouTube TV guide | `TV_THING_YTTV_GUIDE` (`0`) | whenever the Roku lane runs |
+| Digital tuner | `TV_THING_DIGITAL_ADAPTER` | `feed.json`'s adapter, or the host's first |
+| Video encoder | `TV_THING_VIDEO_ENCODER` | `cpu` (libx264) |
+| Recordings folder | `TV_THING_RECORDINGS_DIR` | `/mnt/sda1/media/TV Recordings` where that disk is mounted, else `~/tv-recordings` |
+| Primary's address | `TV_THING_PRIMARY_HOST` | none; a second node with one plays the primary's Cairo Radio and VizelVision |
+
+On `viviserv` every setting resolves to what TV Thing did before the file existed. A
+second node needs no copy of `feed.json`: it names itself and describes the hardware it
+finds in `/sys` and `/dev` (its DVB adapters, analog tuners, HD PVR, GPUs). It never
+drives the primary's Roku, which answers from anywhere on the LAN: its Roku lane is
+off unless its own capture device is there, or it is turned on in so many words.
+Turning the Roku lane off anywhere builds no lane at all, so nothing presses a key.
+
 ### Run at boot (systemd): three services
 
 `scripts/deploy-feed-split.sh` installs the units in `deploy/systemd/` and the
@@ -456,14 +487,11 @@ python3 fm_tuner.py 88.5       # tune and hold, showing live signal
 ## Tests
 
 ```bash
-pytest test_server.py -q                     # streaming command/GPU unit tests
-pytest test_epg.py -q                        # PSIP guide parsers, no hardware
-pytest test_yttv_epg.py -q                   # YouTube TV listings parsers and map, no network
-pytest test_fm.py -q -m "not api"          # FM unit tests, no server/hardware
-pytest -q --ignore=test_integration.py -m "not slow and not api and not hardware and not resource"  # the fast suite
-pytest test_integration.py -q              # retunes the running server: never against production
-TV_THING_URL=http://localhost:8099 pytest test_fm.py -q -m api  # target a dev instance
-TV_THING_URL=http://localhost:8080 pytest test_fm.py -q -m hardware  # includes non-silence check
+pytest tests/test_server.py -q               # streaming command/GPU unit tests
+pytest tests/test_epg.py -q                  # PSIP guide parsers, no hardware
+pytest tests/test_yttv_epg.py -q             # YouTube TV listings parsers and map, no network
+pytest -q --ignore=tests/test_integration.py -m "not slow and not api and not hardware and not resource"  # the fast suite
+TV_THING_INTEGRATION=1 TV_THING_URL=http://localhost:8099 pytest tests/test_integration.py -q  # retunes that server: never production
 ```
 
 The request-to-stream latency and glitchiness checks need the running ATSC
@@ -473,7 +501,7 @@ generation, then checks segment availability/duration, MPEG-TS sync, transport
 error flags, and continuity counters:
 
 ```bash
-TV_THING_URL=http://localhost:8080 pytest test_integration.py -q -m hardware
+TV_THING_INTEGRATION=1 TV_THING_URL=http://localhost:8099 pytest tests/test_integration.py -q -m hardware
 ```
 
 The default limits are 8 seconds request-to-stream, 3 seconds maximum segment
@@ -858,7 +886,7 @@ streams directory. After the fast suite passes, run the bounded gate on
 ```bash
 # $CANDIDATE_PID is the staged server's pid -- the gate drives that server,
 # so it must already be running on the non-production port.
-python3 stream_sanity_check.py \
+python3 scripts/stream_sanity_check.py \
   --url http://127.0.0.1:8099 \
   --server-pid "$CANDIDATE_PID" \
   --retunes 3 --dwell-seconds 10 \
@@ -1144,8 +1172,8 @@ Ticket rows lie in between), so a channel that has moved up the guide is still
 walked onto. `navigation.fast_seek_*` in `roku.json` tunes it; `fast_seek_rows: 0`
 turns it off.
 
-Additional fast checks: `node --test test_tunable_channels.cjs test_live_player.cjs`
-and `node test_tunable_browser.cjs /path/to/playwright`. The browser check mocks
+Additional fast checks: `node --test tests/test_tunable_channels.cjs tests/test_live_player.cjs`
+and `node tests/test_tunable_browser.cjs /path/to/playwright`. The browser check mocks
 source APIs and covers both URL layouts, combined search, source routing,
 station playback, declined locks, delayed retunes, keyboard focus and mobile
 layout. UI-only changes need just these checks and the fast suite; changes to

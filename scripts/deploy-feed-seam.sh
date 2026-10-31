@@ -171,7 +171,7 @@ precheck() {
         say "On air, to be put back afterwards: $on_air"
     fi
     say "The fast suite (about 2 minutes)"
-    as_vivian bash -c "cd '$TV_WORKTREE' && '$PY' -m pytest -q -m 'not slow and not api and not hardware and not resource' --ignore=test_integration.py" \
+    as_vivian bash -c "cd '$TV_WORKTREE' && '$PY' -m pytest -q -m 'not slow and not api and not hardware and not resource' --ignore=tests/test_integration.py" \
         > "$LOGDIR/fast-suite.log" 2>&1 || fail "the fast suite failed: $LOGDIR/fast-suite.log"
     tail -1 "$LOGDIR/fast-suite.log"
     say "The drill on today's build (30 s, read-only)"
@@ -247,7 +247,7 @@ gate() {  # name, url, pid, args...
     # the VCR's next tick (the headroom check's did not, 2026-10-25).
     wait_for 60 "Every lane is unlocked" locks_clear "$url" || { say "a lane is still locked at $url"; return 1; }
     say "Gate: $name"
-    as_vivian "$PY" "$STAGE/stream_sanity_check.py" --url "$url" --server-pid "$pid" "$@" \
+    as_vivian "$PY" "$STAGE/scripts/stream_sanity_check.py" --url "$url" --server-pid "$pid" "$@" \
         2>&1 | tee "$LOGDIR/gate-$name.log"
     return "${PIPESTATUS[0]}"
 }

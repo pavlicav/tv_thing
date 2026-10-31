@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -27,6 +28,10 @@ from .capture_stream import CaptureStream
 from .config import FeedbackConfig
 from .errors import NavigationError
 from .feedback import PpmFrame, VisualFeedback
+
+# Debian's v4l2-ctl, or wherever PATH finds one on a host without /usr/bin (NixOS).
+V4L2_CTL = ("/usr/bin/v4l2-ctl" if os.path.exists("/usr/bin/v4l2-ctl")
+            else shutil.which("v4l2-ctl") or "/usr/bin/v4l2-ctl")
 
 
 class LaneCaptureFeedback(VisualFeedback):
@@ -241,7 +246,7 @@ class LaneCaptureFeedback(VisualFeedback):
             return {"state": "unavailable", "label": "Capture device unavailable"}
         try:
             probe = subprocess.run(
-                ["/usr/bin/v4l2-ctl", "--device", str(self.device), "--query-dv-timings"],
+                [V4L2_CTL, "--device", str(self.device), "--query-dv-timings"],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=2,
             )
             return self._parse_input_signal(probe.returncode, probe.stdout + probe.stderr)

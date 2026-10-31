@@ -35,6 +35,7 @@ from urllib.error import URLError
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
+import host_config
 import internet_streams
 import slide_stream
 
@@ -129,8 +130,12 @@ def sports_guide_renderer_command(control_url):
 
 # -- Cairo Radio (channel 197) ------------------------------------------------------------
 # hazel's station: its audio, and what it plays now (Apache's /radio/, its master control).
-CAIRO_RADIO_AUDIO = os.environ.get("TV_THING_CAIRO_RADIO_AUDIO", "http://127.0.0.1:1615/cairo.mp3")
-CAIRO_RADIO_INFO = os.environ.get("TV_THING_CAIRO_RADIO_INFO", "http://127.0.0.1/radio")
+# A second node reaches the primary's, when its settings know the primary's address.
+_HOST = host_config.load()
+CAIRO_RADIO_AUDIO = os.environ.get("TV_THING_CAIRO_RADIO_AUDIO", _HOST.primary_url(1615, "/cairo.mp3")
+                                   or "http://127.0.0.1:1615/cairo.mp3")
+CAIRO_RADIO_INFO = os.environ.get("TV_THING_CAIRO_RADIO_INFO", _HOST.primary_url(80, "/radio")
+                                  or "http://127.0.0.1/radio")
 # A title card that changes with the song: one frame a second is all it needs.
 CAIRO_FPS = 1
 

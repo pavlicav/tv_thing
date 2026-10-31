@@ -44,9 +44,10 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-RECORDINGS_DIR = Path(os.environ.get(
-    "TV_THING_RECORDINGS_DIR", "/mnt/sda1/media/TV Recordings"
-))
+import host_config
+
+# TV_THING_RECORDINGS_DIR, else this host's settings, else viviserv's disk where it is mounted.
+RECORDINGS_DIR = host_config.load().value("recordings_dir")
 PART_SUFFIX = ".part"
 LIBRARY_EXTENSIONS = (".mp4", ".ts")
 # The ad stripper (ad_detection/strip_watch.py, outside TV Thing) files

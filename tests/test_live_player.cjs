@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { bufferedAhead, livePosition, prepare } = require('./static/live-player.js');
+const { bufferedAhead, livePosition, prepare } = require('../static/live-player.js');
 
 function ranges(items) {
   return { length: items.length, start: i => items[i][0], end: i => items[i][1] };
@@ -79,7 +79,7 @@ test('fatal play failure is reported once and detaches listeners', async () => {
 
 function pollHarness() {
   const fs = require('node:fs'), vm = require('node:vm');
-  const html = fs.readFileSync(require('node:path').join(__dirname, 'static/index.html'), 'utf8');
+  const html = fs.readFileSync(require('node:path').join(__dirname, '..', 'static/index.html'), 'utf8');
   const source = html.slice(html.indexOf('    let streamPollBusy = false;'), html.indexOf('    async function tuneTv('));
   const calls = [];
   const state = { playing: 'tv', tuning: false, tuneSerial: 1, streamId: 'old', needsReconnect: false };

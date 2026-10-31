@@ -1,9 +1,10 @@
 # TV Thing change and deployment rules
 
 All repository changes must pass the fast local test suite before deployment:
-`pytest -q --ignore=test_integration.py -m "not slow and not api and not
-hardware and not resource"`. Bare `pytest` also runs `test_integration.py`,
-which retunes production.
+`pytest -q --ignore=tests/test_integration.py -m "not slow and not api and not
+hardware and not resource"`. The tests live in `tests/`. `tests/test_integration.py`
+retunes the server it is pointed at (production unless `TV_THING_URL` says
+otherwise), so it runs only with `TV_THING_INTEGRATION=1`, never by accident.
 
 Production is three services, all run from this checkout (`INVARIANTS.md`,
 `RUNBOOK.md`), behind Apache's front door on `:8080` (`deploy/apache/`):
@@ -92,7 +93,7 @@ The gate:
    split candidate is a feed, a control and a private front door, as
    `scripts/deploy-feed-split.sh` builds one; ports 8088, 8090 and 8096
    belong to other services.
-4. Run `stream_sanity_check.py` against at least three real retunes, including
+4. Run `scripts/stream_sanity_check.py` against at least three real retunes, including
    request-to-stream latency, MPEG-TS integrity, segment size/duration and
    write-rate checks, process CPU/RSS, GPU utilization, and GPU temperature.
 5. Do not promote the candidate if any check fails. Never waive a resource

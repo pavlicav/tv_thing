@@ -13,7 +13,7 @@ import pytest
 import feed_api
 import feed_node
 
-CONFIG = feed_node.parse_config(json.loads((Path(__file__).parent / "feed.json").read_text()))
+CONFIG = feed_node.parse_config(json.loads((Path(__file__).resolve().parent.parent / "feed.json").read_text()))
 
 
 def blank():

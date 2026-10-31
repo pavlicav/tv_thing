@@ -17,7 +17,7 @@ import time
 import urllib.error
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from stream_sanity_check import claim_lane, http_json, wait_roku_idle  # noqa: E402
 
 

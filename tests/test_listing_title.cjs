@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { listingTitle, namesTeams } = require('./static/listing-title.js');
+const { listingTitle, namesTeams } = require('../static/listing-title.js');
 
 test('a game is called by its teams, its league in brackets', () => {
   const game = { title: 'College Football', episode_title: 'Michigan State at UCLA' };

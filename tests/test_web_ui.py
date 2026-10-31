@@ -3,7 +3,7 @@
 from pathlib import Path
 
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static" if (ROOT / "static").is_dir() else ROOT
 INDEX = (STATIC / "index.html").read_text()
 ABOUT = (STATIC / "about.html").read_text()
@@ -317,7 +317,7 @@ def test_live_player_runtime():
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is required for live player runtime tests")
-    subprocess.run([node, "--test", str(ROOT / "test_live_player.cjs")],
+    subprocess.run([node, "--test", str(Path(__file__).with_name("test_live_player.cjs"))],
                    check=True, capture_output=True, text=True, timeout=15)
 
 
@@ -329,7 +329,7 @@ def test_listing_titles_name_the_game():
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is required for listing title runtime tests")
-    subprocess.run([node, "--test", str(ROOT / "test_listing_title.cjs")],
+    subprocess.run([node, "--test", str(Path(__file__).with_name("test_listing_title.cjs"))],
                    check=True, capture_output=True, text=True, timeout=15)
     for page in (GUIDE, INDEX):
         assert '<script src="listing-title.js"></script>' in page
@@ -554,7 +554,7 @@ def test_watch_page_shows_what_is_on_youtube_tv():
 # Shared chrome
 # ---------------------------------------------------------------------------
 
-PAGES = ("index", "guide", "vcr", "cable", "rescan", "dx", "about", "roku", "inputs")
+PAGES = ("index", "guide", "vcr", "cable", "rescan", "dx", "about", "roku", "inputs", "config")
 
 
 def test_every_page_has_the_same_nav_in_the_same_place():

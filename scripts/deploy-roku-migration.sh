@@ -133,7 +133,7 @@ rollback() {
 gate() {  # name, url, pid, args...
     local name=$1 url=$2 pid=$3; shift 3
     say "Gate: $name"
-    as_vivian "$PY" "$STAGE/stream_sanity_check.py" --url "$url" --server-pid "$pid" "$@" \
+    as_vivian "$PY" "$STAGE/scripts/stream_sanity_check.py" --url "$url" --server-pid "$pid" "$@" \
         2>&1 | tee "$LOGDIR/gate-$name.log"
     return "${PIPESTATUS[0]}"
 }

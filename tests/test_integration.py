@@ -6,9 +6,9 @@ Requires the server to be running:
 
 Requires DVB hardware (Hauppauge HVR-1600) for tune and rescan tests.
 
-Usage:
-    pytest test_integration.py -v           # all tests (rescan takes ~5 min)
-    pytest test_integration.py -v -m "not slow"  # skip rescan
+It is never collected unless asked for (tests/conftest.py):
+    TV_THING_INTEGRATION=1 pytest tests/test_integration.py -v           # all tests (rescan takes ~5 min)
+    TV_THING_INTEGRATION=1 pytest tests/test_integration.py -v -m "not slow"  # skip rescan
 """
 
 import json
@@ -19,13 +19,18 @@ import time
 from pathlib import Path
 
 import pytest
-import requests
+
+if os.environ.get("TV_THING_INTEGRATION") != "1":
+    pytest.skip("drives a running server: set TV_THING_INTEGRATION=1 to run it", allow_module_level=True)
+
+import requests  # noqa: E402
 
 # Override to point the suite at a development instance:
-#     TV_THING_URL=http://localhost:8099 pytest test_integration.py
+#     TV_THING_INTEGRATION=1 TV_THING_URL=http://localhost:8099 pytest tests/test_integration.py
 BASE_URL = os.environ.get("TV_THING_URL", "http://localhost:8080")
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
+sys.path.insert(0, str(BASE_DIR / "scripts"))   # fetch_vct, parse_channels
 TUNE_TIMEOUT = 45   # seconds to wait for first HLS segment after tuning
 SEGMENT_MIN = 1_000  # minimum bytes for a valid .ts segment (some subchannels are low-bitrate)
 CHANNEL_CHANGE_MAX_SECONDS = float(

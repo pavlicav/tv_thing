@@ -85,7 +85,7 @@ wait_ready() {                        # url lane seconds
 
 ```bash
 # The branch passes the fast suite. Never bare pytest: test_integration.py retunes production.
-(cd "$WT" && "$PY" -m pytest -q -m "not slow and not api and not hardware and not resource" --ignore=test_integration.py)
+(cd "$WT" && "$PY" -m pytest -q -m "not slow and not api and not hardware and not resource" --ignore=tests/test_integration.py)
 
 # Production is on master at the branch's base, and the branch fast-forwards it.
 git -C "$TV" rev-parse --abbrev-ref HEAD                      # master
@@ -178,7 +178,7 @@ Each gate passes when it exits 0. All three must pass.
 ```bash
 # a. Three real digital retunes. Covers latency, MPEG-TS integrity, segment size, duration and
 #    write rate, CPU/RSS, GPU utilization and temperature.
-"$PY" "$STAGE/stream_sanity_check.py" --url $C --server-pid "$CPID" --retunes 3 \
+"$PY" "$STAGE/scripts/stream_sanity_check.py" --url $C --server-pid "$CPID" --retunes 3 \
     | tee "$LOG/gate-candidate-digital.log"
 
 # b. A Roku navigation while the VCR records the digital lane, with no task refused by TasksMax.
@@ -190,7 +190,7 @@ Each gate passes when it exits 0. All three must pass.
 #    A gate locks every lane, and b's cancelled recording lets go of the digital lane's lock
 #    only on the VCR's next tick, so wait for every lock to clear first.
 until [ "$(j $C/api/v1/tuner/lock "all(v is None for v in d['locks'].values())")" = True ]; do sleep 2; done
-"$PY" "$STAGE/stream_sanity_check.py" --url $C --server-pid "$CPID" \
+"$PY" "$STAGE/scripts/stream_sanity_check.py" --url $C --server-pid "$CPID" \
     --roku-target youtube-tv:ESPN --roku-target youtube-tv:NBC --retunes 3 \
     | tee "$LOG/gate-candidate-roku.log"
 ```
@@ -274,9 +274,9 @@ journalctl -u tv-thing --since -5min --no-pager | grep -E 'Reaped|Traceback|Feed
 These are the same gates, against `:8080`. VizelVision is still stopped, so it cannot take a lock mid-gate.
 
 ```bash
-"$PY" "$TV/stream_sanity_check.py" --url $P --server-pid "$PPID_TV" --retunes 3 \
+"$PY" "$TV/scripts/stream_sanity_check.py" --url $P --server-pid "$PPID_TV" --retunes 3 \
     | tee "$LOG/gate-production-digital.log"
-"$PY" "$TV/stream_sanity_check.py" --url $P --server-pid "$PPID_TV" \
+"$PY" "$TV/scripts/stream_sanity_check.py" --url $P --server-pid "$PPID_TV" \
     --roku-target youtube-tv:ESPN --roku-target youtube-tv:NBC --retunes 3 \
     | tee "$LOG/gate-production-roku.log"
 awk '$1 == "max" {print "TasksMax refusals:", $2}' /sys/fs/cgroup/system.slice/tv-thing.service/pids.events   # expect 0

@@ -3,12 +3,13 @@ epoch, and commands applied once each, only at the state they were issued agains
 import copy
 import json
 import threading
+from pathlib import Path
 
 import pytest
 
 import feed_node
 
-CONFIG = json.loads(open(__file__.replace("test_feed_node.py", "feed.json")).read())
+CONFIG = json.loads((Path(__file__).resolve().parent.parent / "feed.json").read_text())
 
 
 def node(clock=None):
