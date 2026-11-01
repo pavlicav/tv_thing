@@ -3,8 +3,11 @@
 viviserv2 is a NixOS machine on the same LAN as **viviserv**, which still runs production. It
 runs TV Thing as a **second node**: the same three services as viviserv (`tv-thing-feed`,
 `tv-thing` control, `tv-thing-web-basic`) behind an Apache front door on `:8080`, declared in
-NixOS rather than installed from `deploy/systemd/`. There is one digital lane, on the
-WinTV-dualHD's tuner A. The analog and Roku lanes are absent.
+NixOS rather than installed from `deploy/systemd/`. The WinTV-dualHD's two tuners are two digital
+lanes: tuner A (`digital`, always on) and tuner B (`digital-b`, live only). The analog and Roku
+lanes are absent. Its tuners and viviserv's are **one pool on one dial** (section 4): a live
+tune on either box takes whichever tuner is free, and a stream from the other box is relayed
+through this one's front door.
 
 It has been running since 2026-10-31, from the `host-config` branch (`e3b8379`). This file says
 how it was set up, how it is run, and what does not work here.
@@ -23,12 +26,12 @@ how it was set up, how it is run, and what does not work here.
 | Python | `~/miniconda3/bin/python3` | `python3.withPackages` (numpy, pillow, scipy, requests, pytest, jsonschema), 3.13, from `/etc/nixos/tv-thing.nix` |
 | Tuner | HVR-1600 PCIe: S5H1409 digital + CX23418 analog | **Hauppauge WinTV-dualHD 01595** (USB `2040:826d`, `em28xx`): two digital tuners, each an LGDT3306A + Si2157, at `/dev/dvb/adapter0` and `adapter1`. No analog under Linux |
 | Roku lane | HD PVR + the house Roku at `10.0.0.240` | None: no HD PVR. That Roku answers from here, so the lane is pinned off (hazard 1) |
-| GPU | Quadro K4200 (encoder pinned to `cpu`) | Intel UHD 630 (`i915`). Encoder `cpu` (libx264) |
+| GPU | Quadro K4200 (encoder pinned to `cpu`) | Intel UHD 630 (`i915`). Encoder `vaapi` (h264_vaapi, iHD driver) |
 | CPU / RAM | 14 cores / 28 threads at 2.6 GHz | i5-9500: 6 cores / 6 threads, 3.0–4.4 GHz; 15 GiB |
 | Disk | Nearly full boot SSD + 4 TB `/mnt/sda1` for recordings | One 225 GB NVMe. Recordings in `~/tv-recordings` |
 | Address | `10.0.0.98` (static) | `10.0.0.99` on `eno1`, DHCP; also `viviserv2.local` (avahi) |
-| Front door | Apache, explicit addresses on `:8080` | Apache, `*:8080`, sharing the dashboard's Apache on `:80` |
-| Neighbours | VizelVision, Trains, Cairo Radio's audio, main site `/tv/` | None. Cairo Radio and VizelVision media come from viviserv |
+| Front door | Apache, explicit addresses on `:8080`; the main site's `/tv/` proxies to it | Apache, `*:8080`, sharing the dashboard's Apache on `:80`, whose `/tv/` proxies to it (the dashboard's TV Thing card links there) |
+| Neighbours | VizelVision, Trains, Cairo Radio's audio | None. Cairo Radio and VizelVision media come from viviserv |
 
 ## How this host knows it is viviserv2
 
@@ -43,9 +46,12 @@ Here that gives:
 | Roku lane | **off** | the units' environment, `TV_THING_ROKU=off` (hazard 1). Auto would also say off: roku.json's HD PVR is not plugged in here |
 | YouTube TV guide | off | auto: follows the Roku lane |
 | Digital tuner | adapter 0 | auto: feed.json's |
-| Video encoder | cpu | the feed's environment |
+| Video encoder | vaapi | the feed's environment (`tv-thing.nix`) |
 | Recordings folder | `~/tv-recordings` | auto: no `/mnt/sda1/media` here |
 | Primary's address | `10.0.0.98` | `~/.config/tv-thing/host.json` |
+| Peer's address | `10.0.0.98` | auto: a second node pools with its primary (section 4) |
+| Second digital tuner | adapter 1 (`digital-b`) | auto: the first DVB adapter besides the digital tuner's |
+| Location | (unset) | the Inputs page's Set location; read on every use, no restart |
 
 So the tracked `feed.json` and `roku.json` are used as they are: nothing host-specific is in
 the checkout. The digital lane describes itself from sysfs ("ATSC digital television (LGDT3306A
@@ -60,11 +66,18 @@ the checkout. The digital lane describes itself from sysfs ("ATSC digital televi
 
 2. **The checkout is shared with production.** `origin` is `github.com/pavlicav/tv_thing`,
    which viviserv pulls. This host's settings live outside it: in `/etc/nixos/tv-thing.nix`
-   and `~/.config/tv-thing/host.json`. A rescan from the server rewrites the tracked
-   `channels.json`, so this checkout has `git update-index --skip-worktree channels.json`:
-   this box's scan never reaches viviserv. A pull that changes `channels.json` then refuses
-   to overwrite it; `git update-index --no-skip-worktree channels.json` and
-   `git checkout channels.json` take viviserv's, and rescanning makes it this box's again.
+   and `~/.config/tv-thing/host.json`. The tracked `channels.json` is the **channel plan both
+   boxes share**, and a rescan here never rewrites it: it writes only this box's reception,
+   `state/reception.json` (git-ignored). The plan is the primary's (viviserv's rescan writes
+   it). Until 2026-10-31 this checkout kept its own `channels.json` under `skip-worktree`;
+   that is undone, and the old scans are kept in `~/tv_thing-host/`.
+
+5. **A staged run is not in the pool unless told.** A copy started by hand reads
+   `~/.config/tv-thing/host.json` and the auto settings like the services do, so it would
+   pool with viviserv and hand its tunes to viviserv's real tuner when its own is locked or
+   unknown, and grow tuner B on the real adapter 1. Give every staged run
+   `TV_THING_PEER_HOST=off`, and `TV_THING_TUNER_B=off` unless tuner B is what it gates
+   (AGENTS.md).
 
 3. **The old procedures are viviserv's.** Never run `scripts/deploy-*.sh`, `RUNBOOK.md`, or
    `scripts/staged_split_check.sh` unmodified here. They hard-code `~/miniconda3`,
@@ -128,9 +141,18 @@ in
   # /dev/dvb/adapter*/* are root:video 0660.
   users.users.vivian.extraGroups = [ "video" ];
 
+  # The UHD 630's VA-API driver (iHD), for the feed's h264_vaapi encoder: libva finds it under
+  # /run/opengl-driver. The gate passed on it, both tuners at once (VIVISERV2_SETUP.md, section 3).
+  # Its packagers trip at 90 C on the CPU package's sensor, the iGPU being on the CPU's die.
+  hardware.graphics = {
+    enable = true;
+    extraPackages = [ pkgs.intel-media-driver ];
+  };
+
   environment.systemPackages = [
     python
     pkgs.tesseract   # only the fast suite's Roku OCR tests use it on this host
+    pkgs.libva-utils # vainfo: whether the iGPU encoder is there
   ];
 
   systemd.services.tv-thing-feed = unit // {
@@ -141,7 +163,8 @@ in
     # every recording. Restart it yourself, deliberately.
     restartIfChanged = false;
     environment = hostEnvironment // {
-      TV_THING_VIDEO_ENCODER = "cpu";
+      TV_THING_VIDEO_ENCODER = "vaapi";   # h264_vaapi on the iGPU; "cpu" for libx264
+      LIBVA_DRIVER_NAME = "iHD";   # the UHD 630's driver, not the older i965
       TV_THING_CONTROL_URL = "http://127.0.0.1:8087";
     };
     serviceConfig = service // {
@@ -204,7 +227,25 @@ in
     extraConfig = ''
       Define TV_THING_FEED_PORT 8086
       Define TV_THING_CONTROL_PORT 8087
+      Define TV_THING_PEER_URL http://10.0.0.98:8080
     '' + builtins.readFile "${tv}/deploy/apache/tv-thing-routes.conf";
+  };
+  # TV Thing at http://viviserv2/tv/ too, on the dashboard's site, as viviserv's main site has it:
+  # the dashboard's TV Thing card links there. A <Location>, not viviserv's vhost-level ProxyPass:
+  # the dashboard proxies <Location />, and mod_proxy tries a Location's ProxyPass before the
+  # vhost's, so a vhost-level /tv/ would never match. Locations are written in name order, so
+  # /tv/ follows / and wins for its paths. flushpackets for the rescan's events and HLS; the
+  # timeout so a scan is not cut off. The bare /tv redirects by mod_rewrite, which translates
+  # before mod_proxy (a RedirectMatch would lose /tv to the dashboard's proxy).
+  services.httpd.virtualHosts.viviserv2 = {
+    extraConfig = ''
+      RewriteEngine On
+      RewriteRule ^/tv$ /tv/ [R=301,L]
+    '';
+    locations."/tv/".extraConfig = ''
+      ProxyPass http://127.0.0.1:8080/ flushpackets=on timeout=3600
+      ProxyPassReverse http://127.0.0.1:8080/
+    '';
   };
   systemd.services.httpd = {
     # NixOS restarts Apache whenever its config changes, which drops every viewer. Reload it
@@ -247,12 +288,14 @@ Both tuners have their own antenna. A sweep of RF 2–36 on each (2026-10-31,
 `channels.json`, with the same virtual numbers and PIDs, so this box sees viviserv's market and
 the shipped `channels.json`, `lineup.json` and `networks.json` apply unchanged.
 
-A rescan from the Rescan page (2026-10-31 16:15) missed RF 9, which both sweeps had locked at
-20 dB, and the server kept its result: 63 services, without WUSA's 9.1–9.5, AltaVsn 68.1 and
-DEFY 68.2. That is this box's `channels.json` now (copy in
-`~/tv_thing-host/channels-rescan-2026-10-31.json`). The dial leaves out the seven numbers it
-has no service for (19, 243, 247–249, 263, 270), and CBS (`networks.json`: antenna 9.1) does
-not tune here. A rescan that locks RF 9 brings them back.
+Rescans here have been uneven: the Rescan page's 16:15 scan missed RF 9, and the 17:34 one
+got RF 9 but missed RF 24 (WDCO 10.1). Neither changes the dial any more. The plan is the
+shared `channels.json` (70 services), and the latest scan is this box's reception:
+`state/reception.json` holds RF 7, 9, 14, 15, 20, 21, 31, 32, 34, 35 and 36, seeded from the
+17:34 scan (copies of both scans in `~/tv_thing-host/`). The pool never sends a channel to a
+tuner whose box did not receive its RF, so WDCO 10.1 plays here from viviserv's tuner until a
+rescan here locks RF 24. The two tuners have their own antennas but share one reception record,
+the box's.
 
 ```bash
 cd ~/tv_thing
@@ -322,6 +365,22 @@ Results, 2026-10-31, with the default limits:
 
 The GPU checks read `nvidia-smi` only, so they read 0 here, which is right for libx264.
 
+**Tuner B and VA-API, 2026-11-01.** `~/tv_thing-host/gate-igpu.sh` gates a staged candidate
+(branch `station-ids`) with both tuners on the UHD 630 (`TV_THING_VIDEO_ENCODER=vaapi`, the
+system iHD driver): each tuner alone, then tuner B retuned while tuner A holds WETA, with
+`--max-dvb-sources 2` (two streams on purpose). With no NVIDIA card the gate reads the CPU
+package temperature as the GPU's; the iGPU's utilization needs root and goes unmeasured.
+
+| Gate | Result |
+|---|---|
+| Tuner A alone, 3 retunes, VA-API | PASSED: request-to-stream 2.9–3.2 s; CPU 102% average, 144% peak; 3/3 clean |
+| Tuner B alone, 3 retunes, VA-API | PASSED: request-to-stream 2.3–3.6 s; CPU 100% average, 143% peak; 3/3 clean |
+| Tuner B with tuner A streaming, VA-API | PASSED: request-to-stream 1.7–2.8 s; CPU 137% average, 171% peak; 3/3 clean; package 50 C at most |
+| The same on libx264 | FAILED: CPU 304% average, 372% peak (limits 200 / 350), so this host encodes on the iGPU |
+| Tuner B unwatched | OK: stopped 60 s after its last fetch (`TV_THING_EXTRA_TUNER_IDLE_SECONDS=60` staged; 300 s in production) |
+
+What CPU is left is decoding and deinterlacing the broadcast MPEG-2, about one core a stream.
+
 **The Sports Guide's music on ffmpeg 7.1 and 8.1.** As shipped, the encoder plays its music with
 `-stream_loop -1 -ss <wall clock's place>`. On this host's ffmpeg 8.1.3 (and nixpkgs' 7.1.5) that
 fails: the accurate seek's trim ends the audio filter with `No space left on device` (−28) a
@@ -334,6 +393,44 @@ samples (`-af asetpts=N/SR/TB`): in bounded repros, flat memory across the loop 
 within 16 ms of video. Two other fixes failed the same way (an `atrim` filter, and the
 `concat` filter over the track's remainder and the looped track); ffmpeg's concat demuxer with
 an `inpoint` also worked, but needs a playlist file per generation.
+
+## 4. Two nodes, one dial (the tuner pool)
+
+viviserv and viviserv2 pool their digital tuners: viviserv's one, and this box's tuner A and
+tuner B. Each box still owns its own tuners, locks and feed; neither ever commands the other's
+feed. They talk only through each other's public front door on `:8080`, so moving to Tailscale
+means changing `peer_host` (Config, both boxes) and the `TV_THING_PEER_URL` Define (here, in
+`/etc/nixos/tv-thing.nix`; on viviserv, in `deploy/apache/tv-thing-front-door.conf`).
+
+- **A live tune** takes, in order: a tuner already playing that channel (watching along, even a
+  locked one); a free tuner of this box's, an idle one before a running one; a free tuner of the
+  other box's. "Free" means known, unlocked and not scanning. A **lock** is what moves a tune:
+  locking a tuner sends the next tune to another one.
+- **The other box's stream** plays here at `/stream/peer/...`: Apache proxies it to the other
+  box's `/stream/`. A viewer only ever talks to the box it opened.
+- **A box that stops answering** for 6 s reads every tuner `unknown`, never free.
+- **Locks** on the other box's tuner (`lane: "viviserv:digital"`) are forwarded to that box,
+  which issues and checks the token.
+- **The Watch page** shows a tuner strip ("Tuners 2/3"). The **Inputs page** shows both boxes
+  in full, and each box's location is set there.
+- **The same channel twice.** One channel normally occupies one tuner: a tune for a channel any
+  tuner already plays healthily joins that stream instead of tuning another, whichever box asked,
+  so ten viewers of WRC on both boxes cost one tuner and one encoder. Two tuners end up on the
+  same channel only when someone asks for that: a tune naming a tuner, an override, a lock
+  holder's tune on its own tuner (VizelVision, the VCR), or two tunes racing. Each relayed
+  viewer fetches its own copy across the link (Apache does not cache), which matters only once
+  the boxes are on different networks.
+- **Tuner B** (`digital-b`, adapter 1, `tunerb.m3u8`) is live only: started by a tune, it feeds
+  no recording, is not the always-on channel and never `live.m3u8`. Control stops it once nobody
+  has fetched one of its segments for five minutes (`TV_THING_EXTRA_TUNER_IDLE_SECONDS`) and it
+  is unlocked, which leaves it idle: the pool's first choice for the next tune here. The scan,
+  the guide read, the DX meter and the VCR stay on tuner A. `TV_THING_TUNER_B=off` in a unit's
+  environment, or `tuner_b: off` on the Config page, takes it away.
+
+```bash
+curl -s http://127.0.0.1:8080/api/v1/tuners | python3 -m json.tool      # the pool, as this box sees it
+curl -s http://127.0.0.1:8080/api/v1/peer/inputs | python3 -c 'import json,sys; print(json.load(sys.stdin)["peer"])'
+```
 
 ## Operating it
 
@@ -379,10 +476,5 @@ curl -s http://127.0.0.1:8080/api/v1/status | python3 -m json.tool | less
 - **Cairo Radio and VizelVision media** come from viviserv (`primary_host`), so they work only
   while viviserv is up.
 - **The lineup card PDF.** It needs `tectonic` (`pkgs.tectonic`).
-- **Tuner B (`adapter1`).** It works (see the scan) but TV Thing tunes one adapter. Using it as
-  a second digital lane, or as the guide and scan tuner so the guide reads stop interrupting
-  live TV, is a core-stream-stack change under AGENTS.md's gate.
-- **VA-API on the UHD 630.** ffmpeg has `h264_vaapi`, but the packager's temperature trip and
-  the gate's GPU checks read `nvidia-smi` only, so an Intel GPU would run unmeasured. Stay on
-  libx264 until an Intel probe is added (also a gated change). libx264 has room: the gate's
-  average CPU above is about a fifth of this box's six cores.
+- **Tuner B as the guide and scan tuner**, so the 03:00 and 15:00 guide reads stop interrupting
+  live TV on tuner A: not done. Tuner B is a live lane (section 4).
