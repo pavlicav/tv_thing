@@ -243,6 +243,20 @@ each tuner's lock by tuner id.
 A second node's rescan writes only its reception: the plan (`channels.json`, tracked) is
 the primary's, and its rescan writes both.
 
+A box with a second DVB adapter has **tuner B**, lane `digital-b` (Config's `tuner_b`; auto:
+the first adapter besides the digital tuner's), playlist `tunerb.m3u8`. It is in `lanes`,
+`frontends` and `tuners` like any lane, and is tuned with `tuner: "<node>:digital-b"` or by the
+pool. It is live only: no recording taps, not the always-on channel, never `live.m3u8`, and the
+scan, the guide read and the DX meter stay on tuner A. Each lane's feed state carries
+`fetched_at`, when a player last fetched one of its segments; control stops an unlocked tuner
+B nobody has fetched for `TV_THING_EXTRA_TUNER_IDLE_SECONDS` (300). The pool prefers an idle
+tuner of this box's to a running one, so a stopped tuner B takes the next tune here before
+tuner A is retuned.
+
+One channel occupies one tuner: a tune for a channel any pool tuner already plays healthily
+joins that stream (the response's `stream_reused`), whichever box asked. Two tuners carry the
+same channel only when asked for: a `tuner` named, an `override`, a lock holder's own tune.
+
 Each box has a `location` (Config, or the Inputs page's Set location): a short name for where
 it is, read on every use, so it waits for no restart. It is in `/api/v1/inputs`, in
 `/api/v1/tuners` (top level and on each tuner) and in `peer.location`. `POST

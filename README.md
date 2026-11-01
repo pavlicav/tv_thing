@@ -826,7 +826,9 @@ other), the digital tuners of both join one pool (`tuner_pool.py`, `peers.py`, A
 "Tuner pool"). Both run the same channel plan. A live tune that finds this node's tuner
 locked takes the peer's instead, and the front door relays it at `/stream/peer/`. The Watch
 page's tuner strip shows each tuner free, locked or not answering. A lock still holds only
-its own tuner: locking one moves the next tune to another.
+its own tuner: locking one moves the next tune to another. A box with a second DVB adapter
+(viviserv2's WinTV-dualHD) adds tuner B, a live-only lane stopped once nobody watches it for
+five minutes.
 
 A deferred guide refresh is **retried**, not dropped. Skipping to the next slot
 would cost twelve hours, which is the guide's entire span, so it would run dry
