@@ -726,6 +726,43 @@ def test_oversized_open_segment_terminates_packager(monkeypatch, tmp_path):
     assert "grew to 11 bytes" in health["reason"]
 
 
+def test_an_intel_gpus_temperature_is_the_cpu_packages(tmp_path, monkeypatch):
+    """The UHD 630 is on the CPU's die: VA-API and Quick Sync read the package's sensor."""
+    for index, (kind, millidegrees) in enumerate([("acpitz", "30000"), ("x86_pkg_temp", "44000")]):
+        zone = tmp_path / f"thermal_zone{index}"
+        zone.mkdir()
+        (zone / "type").write_text(kind + "\n")
+        (zone / "temp").write_text(millidegrees + "\n")
+    assert server.read_package_temperature(tmp_path) == 44.0
+    assert server.read_package_temperature(tmp_path / "none") is None
+    monkeypatch.setattr(server, "read_package_temperature", lambda: 61.0)
+    monkeypatch.setattr(server, "read_nvidia_temperature", lambda: 70.0)
+    assert [server.read_gpu_temperature({"codec": codec}) for codec in
+            ("h264_vaapi", "h264_qsv", "h264_nvenc", "libx264")] == [61.0, 61.0, 70.0, None]
+
+
+def test_a_hot_intel_gpu_trips_its_packager(monkeypatch, tmp_path):
+    class FakePackager:
+        running = True
+
+        def poll(self):
+            return None if self.running else 255
+
+        def terminate(self):
+            self.running = False
+
+    monkeypatch.setattr(server, "STREAMS_DIR", tmp_path)
+    monkeypatch.setattr(server, "TV_HEALTH_POLL_SECONDS", 0)
+    monkeypatch.setattr(server, "TV_SEGMENT_STARTUP_TIMEOUT", 60)
+    monkeypatch.setattr(server, "process_rss_mib", lambda pid: None)
+    monkeypatch.setattr(server, "read_package_temperature", lambda: 93.0)
+    health = server.new_stream_health("hot")
+    packager = FakePackager()
+    server.watch_tv_packager(packager, {"codec": "h264_vaapi"}, "hot", health)
+    assert packager.running is False and health["ok"] is False
+    assert health["reason"] == "GPU reached 93 C (limit 90 C)" and health["max_gpu_temp_c"] == 93.0
+
+
 def test_stream_ids_are_unique(monkeypatch):
     monkeypatch.setattr(server.time, "time_ns", lambda: 123)
     monkeypatch.setattr(server, "_stream_serial", 0)

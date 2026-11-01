@@ -267,7 +267,8 @@ TV_SEGMENT_STARTUP_TIMEOUT = float(os.environ.get(
 TV_SEGMENT_STALL_TIMEOUT = float(os.environ.get(
     "TV_THING_SEGMENT_STALL_TIMEOUT", "5"
 ))
-# The NVENC packagers trip here: below the card's 97 C slowdown (owner, 2026-10-06).
+# The GPU packagers trip here: below the Quadro's 97 C slowdown (owner, 2026-10-06), and
+# below the 100 C at which an Intel CPU, and so its integrated GPU, throttles.
 TV_MAX_GPU_TEMP_C = float(os.environ.get(
     "TV_THING_MAX_GPU_TEMP_C", "90"
 ))
@@ -1422,9 +1423,35 @@ def read_nvidia_temperature():
     return None
 
 
+# The CPU package's sensor (thermal zone "x86_pkg_temp"): an Intel integrated GPU is on the
+# CPU's die, so this is its temperature too.
+THERMAL_ZONES = Path("/sys/class/thermal")
+
+
+def read_package_temperature(zones=THERMAL_ZONES):
+    """Return the Intel CPU package's temperature, or None when there is no such sensor."""
+    try:
+        for zone in sorted(zones.glob("thermal_zone*")):
+            if (zone / "type").read_text().strip() == "x86_pkg_temp":
+                return int((zone / "temp").read_text()) / 1000
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def read_gpu_temperature(encoder):
+    """The temperature of the GPU ``encoder`` runs on, or None: NVIDIA's for NVENC, the CPU
+    package's for Quick Sync and VA-API (an Intel integrated GPU), none for libx264."""
+    if encoder["codec"] == "h264_nvenc":
+        return read_nvidia_temperature()
+    if encoder["codec"] in ("h264_qsv", "h264_vaapi"):
+        return read_package_temperature()
+    return None
+
+
 def watch_hls_packager(packager, encoder, stream_id, health,
                        lane=LANE_DIGITAL):
-    """Enforce bounded HLS growth, progress, and NVIDIA temperature.
+    """Enforce bounded HLS growth, progress, and the GPU's temperature.
 
     Each lane is watched against its own playlist and segment prefix, so a
     stalled analog stream never trips the digital one and vice versa.
@@ -1490,10 +1517,10 @@ def watch_hls_packager(packager, encoder, stream_id, health,
             )
             return
 
-        if (encoder["codec"] == "h264_nvenc"
+        if (encoder["codec"] in ("h264_nvenc", "h264_qsv", "h264_vaapi")
                 and TV_MAX_GPU_TEMP_C > 0
                 and now >= next_temperature_check):
-            temperature = read_nvidia_temperature()
+            temperature = read_gpu_temperature(encoder)
             next_temperature_check = now + 2
             if temperature is not None:
                 previous = health["max_gpu_temp_c"]

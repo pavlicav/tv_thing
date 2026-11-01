@@ -241,7 +241,34 @@ def process_group_sample(root_pids):
     }
 
 
+def package_temperature():
+    """The Intel CPU package's temperature (thermal zone x86_pkg_temp), or None. An Intel
+    integrated GPU (VA-API, Quick Sync) is on the CPU's die: this is its temperature."""
+    try:
+        for zone in sorted(os.listdir("/sys/class/thermal")):
+            base = os.path.join("/sys/class/thermal", zone)
+            with open(os.path.join(base, "type")) as handle:
+                if handle.read().strip() != "x86_pkg_temp":
+                    continue
+            with open(os.path.join(base, "temp")) as handle:
+                return int(handle.read()) / 1000
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 def gpu_sample():
+    """NVIDIA's utilization, temperature and memory; else, on an Intel host, the package
+    temperature alone (its GPU's utilization needs root to read, so it goes unmeasured)."""
+    sample = nvidia_sample()
+    if sample is None:
+        temperature = package_temperature()
+        if temperature is not None:
+            sample = {"util_percent": None, "temp_c": temperature, "memory_mib": None}
+    return sample
+
+
+def nvidia_sample():
     try:
         result = subprocess.run(
             [
@@ -846,7 +873,7 @@ def main(argv=None):
     cpu_values = [item["cpu_percent"] for item in samples["process"]
                   if item["cpu_percent"] is not None]
     rss_values = [item["rss_mib"] for item in samples["process"]]
-    gpu_values = [item["util_percent"] for item in samples["gpu"]]
+    gpu_values = [item["util_percent"] for item in samples["gpu"] if item["util_percent"] is not None]
     temp_values = [item["temp_c"] for item in samples["gpu"]]
     ffmpeg_counts = [item["ffmpeg_count"] for item in samples["process"]]
     source_counts = [item["source_count"] for item in samples["process"]]
