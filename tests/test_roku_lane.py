@@ -497,6 +497,41 @@ def test_the_nhl_catalog_lists_espn_unlimited_games_and_the_roku_finds_them(lane
     assert selection["resolved_source"]["provider"] == "espn_unlimited"
 
 
+def _nwsl(game_id, away, home, *names):
+    """An NWSL game as ESPN's scoreboard normalizes it."""
+    return {**_nhl(game_id, away, home, *(("national", name) for name in names)), "league": "nwsl"}
+
+
+NWSL_SLATE = [_nwsl(11, "BOS", "LA", "ESPN+"), _nwsl(12, "UTA", "GFC", "ESPN"), _nwsl(13, "WAS", "KC", "ION"),
+              _nwsl(14, "CHI", "DEN", "ESPN2", "ESPN Unlmtd"), _nwsl(15, "POR", "HOU", "NWSL+")]
+
+
+def test_the_nwsl_catalog_lists_its_espn_unlimited_games_and_the_roku_finds_them(lane):
+    by_id = {game["game_id"]: game for game in NWSL_SLATE}
+    asked = []
+    lane.sports = SimpleNamespace(
+        games=lambda league, day: {
+            "date": day, "games": [dict(game) for game in NWSL_SLATE] if league == "nwsl" else []},
+        game=lambda league, game_id, day: asked.append(league) or dict(by_id[game_id]))
+    items = lane.catalog(roku_lane.NWSL, "2026-11-01")["items"]
+    assert [item["id"] for item in items] == ["11", "14"]
+    assert items[0]["espn_unlimited"] == {"exclusive": True, "blackout": {}, "home": [], "away": []}
+    # On ION or NWSL+: not on the ESPN page, whatever the channel.
+    with pytest.raises(ConfigError, match="This NWSL game is not on ESPN Unlimited"):
+        lane.tune({"source_id": roku_lane.NWSL, "channel_id": "13", "date": "2026-11-01"})
+    status, _ = lane.tune({"source_id": roku_lane.NWSL, "channel_id": "11", "date": "2026-11-01"})
+    assert status == 202
+    settle(lane)
+    assert lane.controller.plays == ["BOS at LA"]
+    assert asked == ["nwsl", "nwsl"]
+    selection = lane.selection_view()
+    assert (selection["source_id"], selection["channel_id"]) == ("nwsl", "11")
+    assert selection["resolved_source"]["provider"] == "espn_unlimited"
+    source = next(source for source in lane.source_list(True) if source["id"] == "nwsl")
+    assert source["dated"] and source["name"] == "NWSL on ESPN Unlimited"
+    assert source["typical_seconds"] == 115 * 60
+
+
 def test_status_never_waits_for_a_slow_roku(lane):
     lane.controller.ecp.slow = threading.Event()
     started = time.monotonic()

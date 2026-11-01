@@ -161,5 +161,83 @@ class SportRowTests(unittest.TestCase):
         self.assertIsNone(feedback.blackout_card(frame('playing-away-stream')))
 
 
+TORONTO_EDMONTON = {'league': 'nhl', 'game_id': 401802800, 'title': 'Toronto Maple Leafs at Edmonton Oilers',
+                    'away': team('Toronto Maple Leafs', 'Maple Leafs', 'TOR'),
+                    'home': team('Edmonton Oilers', 'Oilers', 'EDM')}
+
+
+class LastCardTests(unittest.TestCase):
+    """A row stops scrolling at its last card, which stays in the second place: on 2026-10-24
+    Maple Leafs at Oilers sat there, focused and live, at the end of four failed walks of the row."""
+
+    def test_the_last_card_is_read_in_the_second_place(self):
+        card = espn_unlimited.read_card(SimpleNamespace(ocr=LocalOcr()), frame('nhl-last-card-maple-leafs-oilers'),
+                                        TORONTO_EDMONTON)
+        self.assertEqual((card['place'], card['matched'], card['blocked']), (1, True, False))
+        self.assertEqual(card['caption'], 'ESPN+ Toronto Maple Leafs vs. Edmonton Oilers')
+
+    def test_the_card_before_it_is_not_taken_for_it(self):
+        card = espn_unlimited.read_card(SimpleNamespace(ocr=LocalOcr()), frame('nhl-last-card-maple-leafs-oilers'), {
+            'away': team('Vegas Golden Knights', 'Golden Knights', 'VGK'),
+            'home': team('Columbus Blue Jackets', 'Blue Jackets', 'CBJ')})
+        self.assertFalse(card['matched'])
+
+    def test_the_last_card_plays_with_no_key_past_it(self):
+        result, keys, _ = open_game(['menu-live', 'nhl-last-card-maple-leafs-oilers'], game=TORONTO_EDMONTON)
+        # Right from the last card moves nothing, and Left would leave it.
+        self.assertEqual(keys, ['Select', 'Down', 'Right'])
+        self.assertEqual((result['stream'], result['streams'], result['position']), (None, 1, 0))
+
+    def test_field_hockey_is_not_the_nhls_row(self):
+        ocr = SimpleNamespace(ocr=LocalOcr())
+        label = espn_unlimited.read_row_label(ocr, frame('row-field-hockey-last-card'))
+        self.assertIn('NCAA Field Hockey', label)
+        self.assertFalse(espn_unlimited.league_row('nhl', label))
+        # 2026-10-31: the row just above the NHL's, Blues at Red Wings just below.
+        result, keys, events = open_game(['menu-live', 'row-field-hockey-last-card',
+                                          'nhl-last-card-maple-leafs-oilers'], game=TORONTO_EDMONTON)
+        self.assertEqual(keys, ['Select', 'Down', 'Right', 'Down'])
+        self.assertEqual(result['caption'], 'ESPN+ Toronto Maple Leafs vs. Edmonton Oilers')
+
+
+BOSTON_ANGEL_CITY = {'league': 'nwsl', 'game_id': 401854095, 'title': 'Boston Legacy FC at Angel City FC',
+                     'away': team('Boston Legacy FC', 'Boston Legacy FC', 'BOS'),
+                     'home': team('Angel City FC', 'Angel City FC', 'LA')}
+
+
+class NwslTests(unittest.TestCase):
+    """No NWSL card has been seen on the page yet; these are the other sports' forms."""
+
+    def test_the_rows_that_can_list_its_games(self):
+        for label, row in (('NWSL', True), ('NWSL 7LIVE', True), ('Soccer', True), ('Also Live', True),
+                           ('On Now', True), ('NCAAW Soccer', False), ('NCAAM Soccer 3LIVE', False),
+                           ('NHL', False), ('NCAA Football', False)):
+            with self.subTest(label=label):
+                self.assertIs(espn_unlimited.league_row('nwsl', label), row)
+        self.assertTrue(espn_unlimited.league_row('nhl', 'NHL (itive)'))
+        self.assertFalse(espn_unlimited.league_row('nhl', 'NWSL'))
+
+    def test_a_club_is_named_with_or_without_its_fc(self):
+        from roku_control.prime_video import teams_match
+        for caption, matched in (('ESPN+ Boston Legacy FC vs. Angel City FC', True),
+                                 ('ESPN+ Boston Legacy vs. Angel City', True),
+                                 ('ESPN+ Angel City FC vs. Boston Legacy FC', True),
+                                 ('ESPN+ Boston Legacy FC vs. Bay FC', False),
+                                 ('ESPN+ Boston vs. Angel City', False)):
+            with self.subTest(caption=caption):
+                self.assertIs(teams_match(caption, BOSTON_ANGEL_CITY), matched)
+
+    def test_another_leagues_soccer_row_is_passed_over(self):
+        with self.assertRaisesRegex(NavigationError, 'lists no NWSL games') as error:
+            open_game(['menu-live', 'row-ncaaw-soccer', 'row-ncaaw-soccer'], game=BOSTON_ANGEL_CITY)
+        self.assertEqual(error.exception.details['code'], 'espn_game_not_listed')
+
+    def test_a_league_with_no_rows_is_refused_before_a_key(self):
+        page = Page([])
+        with self.assertRaisesRegex(NavigationError, 'not browsed'):
+            espn_unlimited.open_game(controller(page), {'league': 'wnba', 'title': 'A at B'}, [])
+        self.assertEqual(page.keys, [])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -34,6 +34,8 @@ def teams_match(text, game):
     for side in ('away', 'home'):
         team = game.get(side) or {}
         names = [team.get('nickname'), team.get('name')]
+        # A soccer club may be listed without its "FC": "Gotham", "Angel City".
+        names += [re.sub(r'\s+fc$', '', name, flags=re.IGNORECASE) for name in names if name]
         if not any(name and (' ' + re.sub(r'[^a-z0-9]+', ' ', name.lower()).strip() + ' ')
                    in ' ' + text + ' ' for name in names):
             return False

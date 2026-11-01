@@ -15,10 +15,17 @@ card, and leaves it focused: the caller presses the only key that plays.
 
 By 2026-10-22 Live had one row per sport instead ("NHL", "NCAAW Soccer",
 "NCAAW Volleyball", ..., "Also Live"), each labelled above its focused card;
-Down moves to the next row's first card in the same place. Rows labelled
-neither NHL nor On Now are passed over. A card YouTube TV blacks out where
-the Roku is carries a crossed-out eye at its centre (Red Wings at Canucks,
-in Lansing's market): such a stream is never selected.
+Down moves to the next row's first card in the same place. Only the game's
+league's row and the mixed rows are walked; others are passed over. A card
+YouTube TV blacks out where the Roku is carries a crossed-out eye at its centre
+(Red Wings at Canucks, in Lansing's market): such a stream is never selected.
+
+A row stops scrolling at its last card, which stays in the second place with
+its focus ring and caption there (Maple Leafs at Oilers, 2026-10-24).
+
+The NWSL has not been seen on the page yet. Its rows and captions are assumed
+to follow the others': a row "NWSL", cards "ESPN+ Boston Legacy FC vs. Angel
+City FC", one stream each.
 """
 from __future__ import annotations
 
@@ -26,6 +33,7 @@ import re
 
 from .errors import NavigationError
 from .prime_video import teams_match
+from .sports import LEAGUES
 
 # Fractions of the frame, measured on 1280x720 captures of 2026-10-19.
 CAPTION = (.12, .665, .425, .80)       # the focused card's label and title
@@ -35,11 +43,19 @@ LIVE_PILL = (190 / 1280, 212 / 720)    # inside the white pill of a focused "Liv
 # The focused card's ring: its left and right edges halfway down, and its top.
 RING = ((166 / 1280, 330 / 720), (527 / 1280, 330 / 720), (300 / 1280, 267 / 720))
 RING_LUMA = 150
+# From a card's place in the row to the next one's: 378 pixels of 1280.
+PLACE_WIDTH = 378 / 1280
+LAST_PLACE = 1
 # The On Now row seldom holds more than a few dozen events at once.
 MAX_CARDS = 60
 # Sport rows above NHL's; 2026-10-22 had NHL first of five.
 MAX_ROWS = 12
 FEEDS = ("home", "away")
+# The rows that can list a league's games, as OCR reads their names. "NCAA Field Hockey" is
+# not the NHL's: on 2026-10-31 it stopped the walk one row above the NHL's, six times over.
+LEAGUE_ROWS = {"nhl": r"\bnhl\b|(?<!field )\bhockey\b",
+               "nwsl": r"\bnwsl\b|(?<!ncaaw )(?<!ncaam )\bsoccer\b"}
+MIXED_ROWS = r"\bon now\b|\balso live\b"
 # The blacked-out card's crossed-out eye, white, centred on the focused card:
 # 1280x720 pixels 318-372 by 340-394 in steps of 2 (from 2026-10-22).
 BLOCKED_ORIGIN, BLOCKED_STEP = (318, 340), 2
@@ -63,14 +79,21 @@ def _crop(frame, box):
             int(frame.width * box[2]), int(frame.height * box[3]))
 
 
-def card_focused(frame):
-    """Whether the leftmost On Now card has the white focus ring."""
-    return all(frame.luma(round(frame.width * x), round(frame.height * y)) >= RING_LUMA for x, y in RING)
+def card_focused(frame, place=0):
+    """Whether the card in that place of the row has the white focus ring."""
+    return all(frame.luma(round(frame.width * (x + place * PLACE_WIDTH)), round(frame.height * y)) >= RING_LUMA
+               for x, y in RING)
 
 
-def card_blocked(frame):
-    """Whether the focused card shows the crossed-out eye of a blackout."""
+def focused_place(frame):
+    """Which place of the row the focused card is in: 0, or LAST_PLACE at the row's end; None without one."""
+    return next((place for place in (0, LAST_PLACE) if card_focused(frame, place)), None)
+
+
+def card_blocked(frame, place=0):
+    """Whether the card in that place shows the crossed-out eye of a blackout."""
     x0, y0 = BLOCKED_ORIGIN
+    x0 += round(place * PLACE_WIDTH * 1280)
     sx, sy = frame.width / 1280, frame.height / 720
     seen = expected = both = 0
     for row, line in enumerate(BLOCKED_ICON):
@@ -87,12 +110,15 @@ def card_blocked(frame):
 
 def read_card(feedback, frame, game):
     """The focused card's caption, and whether it names the game."""
-    text = feedback.ocr.read(frame, crop=_crop(frame, CAPTION), psm=6).text
+    place = focused_place(frame)
+    shift = (place or 0) * PLACE_WIDTH
+    box = (CAPTION[0] + shift, CAPTION[1], CAPTION[2] + shift, CAPTION[3])
+    text = feedback.ocr.read(frame, crop=_crop(frame, box), psm=6).text
     caption = " ".join(text.split())
-    return {"caption": caption, "focused": card_focused(frame),
+    return {"caption": caption, "focused": place is not None, "place": place,
             "espn_plus": bool(re.search(r"\bespn\s*[+t]", caption, re.I)),
-            "matched": card_focused(frame) and teams_match(caption, game),
-            "blocked": card_blocked(frame)}
+            "matched": place is not None and teams_match(caption, game),
+            "blocked": card_blocked(frame, place or 0)}
 
 
 def read_row_label(feedback, frame):
@@ -100,9 +126,9 @@ def read_row_label(feedback, frame):
     return " ".join(feedback.ocr.read(frame, crop=_crop(frame, ROW_LABEL), psm=6).text.split())
 
 
-def hockey_row(label):
-    """Whether a Live row can list NHL games: its own row, or the old mixed On Now."""
-    return bool(re.search(r"\bnhl\b|\bhockey\b|\bon now\b", label, re.I))
+def league_row(league, label):
+    """Whether a Live row can list a league's games: its own row, or a mixed one."""
+    return bool(re.search(f"{LEAGUE_ROWS[league]}|{MIXED_ROWS}", label, re.I))
 
 
 # The menu's other sections, as fragments OCR keeps ("Upcoming" has read "Jpcoming").
@@ -132,6 +158,10 @@ def open_game(controller, game, events, *, feed="home"):
     if feed not in FEEDS:
         raise NavigationError(f"feed must be one of {', '.join(FEEDS)}")
     title = str(game.get("title") or "the game")
+    league = str(game.get("league") or "nhl")
+    if league not in LEAGUE_ROWS:
+        raise NavigationError(f"The ESPN page is not browsed for {league} games")
+    league_name = LEAGUES[league]
     controller._publish_operation(phase="opening_espn_page", message="Opening the ESPN page")
     events.append({"event": "espn_tile_focus", "result": controller._focus_network_tile(events)})
     controller.ecp.keypress("Select")
@@ -157,16 +187,16 @@ def open_game(controller, game, events, *, feed="home"):
             raise NavigationError("The ESPN page's Live section did not come into focus")
     controller._publish_operation(phase="finding_espn_game", message=f"Looking for {title} on ESPN: On Now")
     frame = _step(controller, "Right", events, "espn_on_now")
-    # Down past other sports' rows to NHL's (or the old mixed On Now).
+    # Down past other sports' rows to the league's (or a mixed one).
     label, last_label = read_row_label(feedback, frame), None
     for _ in range(MAX_ROWS):
         events.append({"event": "espn_row", "label": label})
-        if hockey_row(label) or label == last_label:
+        if league_row(league, label) or label == last_label:
             break  # The last row repeats: Down moved nothing.
         frame = _step(controller, "Down", events, "espn_next_row")
         label, last_label = read_row_label(feedback, frame), label
-    if not hockey_row(label):
-        raise NavigationError(f"The ESPN page lists no NHL games live; {title} may not have started",
+    if not league_row(league, label):
+        raise NavigationError(f"The ESPN page lists no {league_name} games live; {title} may not have started",
                               details={"code": "espn_game_not_listed", "row": label})
 
     previous, repeats, found = None, 0, None
@@ -183,15 +213,16 @@ def open_game(controller, game, events, *, feed="home"):
         previous = card["caption"]
         frame = _step(controller, "Right", events, "espn_next_card")
     if found is None:
-        raise NavigationError(f"{title} is not among the ESPN page's live NHL games; it may not have started, "
-                              "or be blacked out", details={"code": "espn_game_not_listed"})
+        raise NavigationError(f"{title} is not among the ESPN page's live {league_name} games; it may not "
+                              "have started, or be blacked out", details={"code": "espn_game_not_listed"})
 
     # A game's streams are adjacent cards, away then home; an exclusive has one.
-    first = card
-    frame = _step(controller, "Right", events, "espn_second_stream")
-    second = read_card(feedback, frame, game)
-    events.append({"event": "espn_card", "position": found + 1, **second})
-    two = second["matched"]
+    first, second, two = card, None, False
+    if first["place"] != LAST_PLACE:  # In the last place, nothing is to its right.
+        frame = _step(controller, "Right", events, "espn_second_stream")
+        second = read_card(feedback, frame, game)
+        events.append({"event": "espn_card", "position": found + 1, **second})
+        two = second["matched"]
     # The preferred stream unless it is blacked out where the Roku is.
     if two and not second["blocked"] and (feed == "home" or first["blocked"]):
         choice = "second"
@@ -202,6 +233,8 @@ def open_game(controller, game, events, *, feed="home"):
                               details={"code": "espn_game_blacked_out", "streams": 2 if two else 1})
     if choice == "second":
         chosen, stream, position = second, "home", found + 1
+    elif second is None:
+        chosen, stream, position = first, None, found
     else:
         frame = _step(controller, "Left", events, "espn_first_stream")
         chosen = read_card(feedback, frame, game)
@@ -212,4 +245,4 @@ def open_game(controller, game, events, *, feed="home"):
         raise NavigationError(f"Lost focus on {title}'s card on the ESPN page")
     return {"matched": True, "surface": "espn_on_now_card", "network_page": page,
             "caption": chosen["caption"], "first_caption": first["caption"],
-            "stream": stream, "streams": 2 if second["matched"] else 1, "position": position}
+            "stream": stream, "streams": 2 if two else 1, "position": position}

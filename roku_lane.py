@@ -34,7 +34,7 @@ import feed_node
 from roku_control import days
 from roku_control.errors import (ConfigError, ControlBusyError, CueCancelledError, EcpError,
                                  NavigationError, RokuStreamError, SundayTicketBlackoutError)
-from roku_control.sports import TYPICAL, nhl_on_espn_unlimited
+from roku_control.sports import LEAGUES, TYPICAL, nhl_on_espn_unlimited, nwsl_on_espn_unlimited
 
 LANE = "roku"
 YOUTUBE_TV = "youtube-tv"
@@ -43,6 +43,9 @@ THURSDAY_NIGHT_FOOTBALL = "thursday-night-football"
 SUNDAY_TICKET = "sunday-ticket"
 MANUAL = "roku-manual"
 NHL = "nhl"
+NWSL = "nwsl"
+# ESPN Unlimited's game sources, each named for its league, and how a game is known to stream there.
+ESPN_UNLIMITED = {NHL: nhl_on_espn_unlimited, NWSL: nwsl_on_espn_unlimited}
 
 # Source id -> (name, what its items are). The ids match vizelVision's, so
 # its saved queue and schedule targets keep working unchanged.
@@ -51,18 +54,19 @@ SOURCES = {
     MLB: ("Baseball", "games"),
     THURSDAY_NIGHT_FOOTBALL: ("Thursday Night Football", "games"),
     SUNDAY_TICKET: ("NFL Sunday Ticket", "games"),
-    # The NHL games ESPN Unlimited streams inside YouTube TV, found on its ESPN
-    # page (roku_control.espn_unlimited). TV Thing's own: vizelVision has no such source.
+    # The games ESPN Unlimited streams inside YouTube TV, found on its ESPN
+    # page (roku_control.espn_unlimited).
     NHL: ("NHL on ESPN Unlimited", "games"),
+    NWSL: ("NWSL on ESPN Unlimited", "games"),
     MANUAL: ("Manual Roku", "manual"),
 }
-GAME_SOURCES = (MLB, THURSDAY_NIGHT_FOOTBALL, SUNDAY_TICKET, NHL)
+GAME_SOURCES = (MLB, THURSDAY_NIGHT_FOOTBALL, SUNDAY_TICKET, NHL, NWSL)
 # Games the lineup numbers and the guide lists though the Roku cannot be sent
 # to them, so they are in no source list and refused by tune(). None now: the
 # NHL's were, until the ESPN page could be browsed (2026-10-19).
 LISTED_SOURCES = {}
 # The league each game source lists, for how long its games usually run.
-GAME_LEAGUES = {MLB: "mlb", THURSDAY_NIGHT_FOOTBALL: "nfl", SUNDAY_TICKET: "nfl", NHL: "nhl"}
+GAME_LEAGUES = {MLB: "mlb", THURSDAY_NIGHT_FOOTBALL: "nfl", SUNDAY_TICKET: "nfl", NHL: "nhl", NWSL: "nwsl"}
 # How long the Roku can take to reach a target and verify it: YouTube TV
 # took 39-124 s and Sunday Ticket 93-205 s when measured on 2026-10-06.
 NAVIGATION_SECONDS = 210
@@ -249,10 +253,10 @@ class RokuLane:
             if route.get("provider") not in ("youtube_tv", "mlb"):
                 raise ConfigError("No controllable source is listed for this game")
             return target, game
-        if source == NHL:
-            game = self.sports.game("nhl", int(channel), target["date"])
-            if nhl_on_espn_unlimited(game) is None:
-                raise ConfigError("This NHL game is not on ESPN Unlimited; watch its channel instead")
+        if source in ESPN_UNLIMITED:
+            game = self.sports.game(source, int(channel), target["date"])
+            if ESPN_UNLIMITED[source](game) is None:
+                raise ConfigError(f"This {LEAGUES[source]} game is not on ESPN Unlimited; watch its channel instead")
             return target, game
         game = self.sports.game("nfl", int(channel), target["date"])
         if source == THURSDAY_NIGHT_FOOTBALL:
@@ -378,7 +382,7 @@ class RokuLane:
                 result = self.controller.play_prime_game(game)
             elif source == MLB:
                 result = self.controller.play_baseball_game(game)
-            elif source == NHL:
+            elif source in ESPN_UNLIMITED:
                 result = self.controller.play_espn_game(game)
             else:
                 result = self.controller.play(target["channel_id"])
@@ -649,11 +653,11 @@ class RokuLane:
                       "playable": bool(game.get("preferred_source")), "route": game.get("preferred_source"),
                       "game": game} for game in games]
             return {"date": catalog["date"], "items": items}
-        if source_id == NHL:
-            catalog = self.sports.games("nhl", day)
+        if source_id in ESPN_UNLIMITED:
+            catalog = self.sports.games(source_id, day)
             items = []
             for game in catalog["games"]:
-                stream = nhl_on_espn_unlimited(game)
+                stream = ESPN_UNLIMITED[source_id](game)
                 if stream is None:
                     continue  # On ESPN, ABC, TNT or NHL Network: in the guide there.
                 state = {"pre": "preview", "in": "live", "post": "final"}.get(game.get("state"), game.get("state"))

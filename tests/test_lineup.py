@@ -303,7 +303,7 @@ def test_the_card_reads_like_a_cable_lineup():
     assert all(by_number[n].startswith("youtube-tv/") for n in range(40, 70))
     assert by_number[60] == "youtube-tv/CNN" and by_number[64] == "youtube-tv/The Weather Channel"
     # Live Sports: one block of games after VizelVision on 70.
-    for source in ("sunday-ticket", "thursday-night-football", "mlb", "nhl"):
+    for source in ("sunday-ticket", "thursday-night-football", "mlb", "nhl", "nwsl"):
         assert [(s.first, s.last, s.name) for s in plan.games_sections(source)] == [(71, 99, "Live Sports")]
     assert by_number[109] == "roku-manual/manual"
     assert (by_number[134], by_number[144], by_number[246]) == (

@@ -28,7 +28,7 @@
     {"first": 40, "last": 59, "name": "Sports"},
     {"first": 60, "last": 69, "name": "News & more"},
     {"first": 70, "last": 70, "name": "House channel"},
-    {"first": 71, "last": 99, "name": "Live Sports", "games": ["sunday-ticket", "thursday-night-football", "mlb", "nhl"]},
+    {"first": 71, "last": 99, "name": "Live Sports", "games": ["sunday-ticket", "thursday-night-football", "mlb", "nhl", "nwsl"]},
     {"first": 100, "last": 109, "name": "Roku", "new": ["*"]},
     {"first": 110, "last": 129, "name": "News & business"},
     {"first": 130, "last": 149, "name": "Learning & lifestyle"},

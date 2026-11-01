@@ -79,6 +79,9 @@ ESPN_EXCLUSIVE_ALSO = frozenset({'DISNEY+', 'HULU'})
 # Teams ESPN Unlimited blacks out, and where: YouTube TV's market for the Roku moves
 # between DC and Lansing, so their games may or may not be watchable.
 NHL_LOCAL_TEAMS = {team: market.label for market in NETWORKS.markets.values() for team in market.nhl_teams}
+# The NWSL's games on ESPN Unlimited: "ESPN+" alone (7 of the last day's 8 in 2026) or beside
+# another broadcast, which ESPN's scoreboard also writes "ESPN Unlmtd" (ESPN2, ESPN Unlmtd).
+ESPN_UNLIMITED_NWSL = frozenset({'ESPN+', 'ESPN UNLMTD'})
 # ESPN network labels that differ from a configured channel name or alias.
 NETWORK_ALIASES = {'NFL NET': 'NFL Network', 'NFL NETWORK': 'NFL Network', 'ESPN 2': 'ESPN2',
                    'FOX SPORTS 1': 'FS1', 'NBA TV': 'NBA TV', 'NHL NET': 'NHL Network',
@@ -139,6 +142,16 @@ def nhl_on_espn_unlimited(game):
     teams = [(game.get(side) or {}).get('abbreviation') for side in ('away', 'home')]
     blackout = {} if exclusive else {team: NHL_LOCAL_TEAMS[team] for team in teams if team in NHL_LOCAL_TEAMS}
     return {'exclusive': exclusive, 'blackout': blackout, **feeds}
+
+
+def nwsl_on_espn_unlimited(game):
+    """How an NWSL game streams on ESPN Unlimited, in nhl_on_espn_unlimited's terms, or None when
+    it does not. No regional broadcast or local team to black it out is known of."""
+    names = {str(b.get('name') or '').upper() for b in game.get('broadcasts') or []
+             if b.get('market') in (None, 'national')}
+    if not names & ESPN_UNLIMITED_NWSL:
+        return None
+    return {'exclusive': True, 'blackout': {}, 'home': [], 'away': []}
 
 
 def matchup(title):
