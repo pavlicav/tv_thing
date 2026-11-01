@@ -64,7 +64,7 @@ Exactly one writer process per file.
 | File | Writer |
 |---|---|
 | `recordings.json`, `tuner_locks.json`, `playback_state.json` (always-on intent), `channels.json` (scan results), `epg.json`, `yttv_epg.json`, `lineup_state.json`, `roku_state/` | control |
-| `state/reception.json` (this node's antenna, by RF channel) | control |
+| `state/reception.json` (this node's antenna: RF channels and the TSID heard on each) | control |
 | `state/feed/recordings-journal.jsonl` (git-ignored; one place for both builds, so a rollback reads it), lane playlists and segments in `streams/` | feed |
 
 ## The failure matrix

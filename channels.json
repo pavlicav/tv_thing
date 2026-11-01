@@ -8,7 +8,8 @@
     "modulation": "VSB_8",
     "id": "wrc_hd_4_1",
     "number": "4.1",
-    "rf_channel": 34
+    "rf_channel": 34,
+    "tsid": 529
   },
   {
     "name": "WTTG",
@@ -19,7 +20,8 @@
     "modulation": "VSB_8",
     "id": "wttg_5_1",
     "number": "5.1",
-    "rf_channel": 36
+    "rf_channel": 36,
+    "tsid": 531
   },
   {
     "name": "WJLA",
@@ -30,7 +32,8 @@
     "modulation": "VSB_8",
     "id": "wjla_7_1",
     "number": "7.1",
-    "rf_channel": 7
+    "rf_channel": 7,
+    "tsid": 533
   },
   {
     "name": "WUSA-HD",
@@ -41,7 +44,8 @@
     "modulation": "VSB_8",
     "id": "wusa_hd_9_1",
     "number": "9.1",
-    "rf_channel": 9
+    "rf_channel": 9,
+    "tsid": 535
   },
   {
     "name": "WDCO",
@@ -63,7 +67,8 @@
     "modulation": "VSB_8",
     "id": "wfdc_dt_14_1",
     "number": "14.1",
-    "rf_channel": 15
+    "rf_channel": 15,
+    "tsid": 3013
   },
   {
     "name": "WDCA",
@@ -74,7 +79,8 @@
     "modulation": "VSB_8",
     "id": "wdca_20_1",
     "number": "20.1",
-    "rf_channel": 36
+    "rf_channel": 36,
+    "tsid": 531
   },
   {
     "name": "MPT-HD",
@@ -85,7 +91,8 @@
     "modulation": "VSB_8",
     "id": "mpt_hd_22_1",
     "number": "22.1",
-    "rf_channel": 21
+    "rf_channel": 21,
+    "tsid": 1397
   },
   {
     "name": "WDVM-SD",
@@ -96,7 +103,8 @@
     "modulation": "VSB_8",
     "id": "wdvm_sd_25_1",
     "number": "25.1",
-    "rf_channel": 15
+    "rf_channel": 15,
+    "tsid": 3013
   },
   {
     "name": "WETA-HD",
@@ -107,7 +115,8 @@
     "modulation": "VSB_8",
     "id": "weta_hd_26_1",
     "number": "26.1",
-    "rf_channel": 31
+    "rf_channel": 31,
+    "tsid": 539
   },
   {
     "name": "HSN2",
@@ -118,7 +127,8 @@
     "modulation": "VSB_8",
     "id": "hsn2_31_1",
     "number": "31.1",
-    "rf_channel": 32
+    "rf_channel": 32,
+    "tsid": 38801
   },
   {
     "name": "WHUT",
@@ -129,7 +139,8 @@
     "modulation": "VSB_8",
     "id": "whut_32_1",
     "number": "32.1",
-    "rf_channel": 7
+    "rf_channel": 7,
+    "tsid": 533
   },
   {
     "name": "WZDC",
@@ -140,7 +151,8 @@
     "modulation": "VSB_8",
     "id": "wzdc_44_1",
     "number": "44.1",
-    "rf_channel": 34
+    "rf_channel": 34,
+    "tsid": 529
   },
   {
     "name": "LATV",
@@ -151,7 +163,8 @@
     "modulation": "VSB_8",
     "id": "latv_47_1",
     "number": "47.1",
-    "rf_channel": 14
+    "rf_channel": 14,
+    "tsid": 7067
   },
   {
     "name": "MeTV",
@@ -162,7 +175,8 @@
     "modulation": "VSB_8",
     "id": "metv_48_1",
     "number": "48.1",
-    "rf_channel": 20
+    "rf_channel": 20,
+    "tsid": 6081
   },
   {
     "name": "WDCW-DT",
@@ -173,7 +187,8 @@
     "modulation": "VSB_8",
     "id": "wdcw_dt_50_1",
     "number": "50.1",
-    "rf_channel": 15
+    "rf_channel": 15,
+    "tsid": 3013
   },
   {
     "name": "CWWNUV",
@@ -184,7 +199,8 @@
     "modulation": "VSB_8",
     "id": "cwwnuv_54_1",
     "number": "54.1",
-    "rf_channel": 21
+    "rf_channel": 21,
+    "tsid": 1397
   },
   {
     "name": "ION",
@@ -195,7 +211,8 @@
     "modulation": "VSB_8",
     "id": "ion_66_1",
     "number": "66.1",
-    "rf_channel": 35
+    "rf_channel": 35,
+    "tsid": 3043
   },
   {
     "name": "AltaVsn",
@@ -206,7 +223,8 @@
     "modulation": "VSB_8",
     "id": "altavsn_68_1",
     "number": "68.1",
-    "rf_channel": 9
+    "rf_channel": 9,
+    "tsid": 535
   },
   {
     "name": "COZI",
@@ -217,7 +235,8 @@
     "modulation": "VSB_8",
     "id": "cozi_4_2",
     "number": "4.2",
-    "rf_channel": 34
+    "rf_channel": 34,
+    "tsid": 529
   },
   {
     "name": "CRIMES",
@@ -228,7 +247,8 @@
     "modulation": "VSB_8",
     "id": "crimes_4_3",
     "number": "4.3",
-    "rf_channel": 34
+    "rf_channel": 34,
+    "tsid": 529
   },
   {
     "name": "Oxygen",
@@ -239,7 +259,8 @@
     "modulation": "VSB_8",
     "id": "oxygen_4_4",
     "number": "4.4",
-    "rf_channel": 34
+    "rf_channel": 34,
+    "tsid": 529
   },
   {
     "name": "Buzzr",
@@ -250,7 +271,8 @@
     "modulation": "VSB_8",
     "id": "buzzr_5_2",
     "number": "5.2",
-    "rf_channel": 36
+    "rf_channel": 36,
+    "tsid": 531
   },
   {
     "name": "Start",
@@ -261,7 +283,8 @@
     "modulation": "VSB_8",
     "id": "start_5_3",
     "number": "5.3",
-    "rf_channel": 36
+    "rf_channel": 36,
+    "tsid": 531
   },
   {
     "name": "Charge!",
@@ -272,7 +295,8 @@
     "modulation": "VSB_8",
     "id": "charge_7_2",
     "number": "7.2",
-    "rf_channel": 7
+    "rf_channel": 7,
+    "tsid": 533
   },
   {
     "name": "Comet",
@@ -283,7 +307,8 @@
     "modulation": "VSB_8",
     "id": "comet_7_3",
     "number": "7.3",
-    "rf_channel": 7
+    "rf_channel": 7,
+    "tsid": 533
   },
   {
     "name": "ROAR",
@@ -294,7 +319,8 @@
     "modulation": "VSB_8",
     "id": "roar_7_4",
     "number": "7.4",
-    "rf_channel": 7
+    "rf_channel": 7,
+    "tsid": 533
   },
   {
     "name": "Crime",
@@ -305,7 +331,8 @@
     "modulation": "VSB_8",
     "id": "crime_9_2",
     "number": "9.2",
-    "rf_channel": 9
+    "rf_channel": 9,
+    "tsid": 535
   },
   {
     "name": "Quest",
@@ -316,7 +343,8 @@
     "modulation": "VSB_8",
     "id": "quest_9_3",
     "number": "9.3",
-    "rf_channel": 9
+    "rf_channel": 9,
+    "tsid": 535
   },
   {
     "name": "NEST",
@@ -327,7 +355,8 @@
     "modulation": "VSB_8",
     "id": "nest_9_4",
     "number": "9.4",
-    "rf_channel": 9
+    "rf_channel": 9,
+    "tsid": 535
   },
   {
     "name": "QVC",
@@ -338,7 +367,8 @@
     "modulation": "VSB_8",
     "id": "qvc_9_5",
     "number": "9.5",
-    "rf_channel": 9
+    "rf_channel": 9,
+    "tsid": 535
   },
   {
     "name": "GREAT",
@@ -349,7 +379,8 @@
     "modulation": "VSB_8",
     "id": "great_14_2",
     "number": "14.2",
-    "rf_channel": 15
+    "rf_channel": 15,
+    "tsid": 3013
   },
   {
     "name": "GRIT",
@@ -360,7 +391,8 @@
     "modulation": "VSB_8",
     "id": "grit_14_3",
     "number": "14.3",
-    "rf_channel": 15
+    "rf_channel": 15,
+    "tsid": 3013
   },
   {
     "name": "UniMas",
@@ -371,7 +403,8 @@
     "modulation": "VSB_8",
     "id": "unimas_14_4",
     "number": "14.4",
-    "rf_channel": 15
+    "rf_channel": 15,
+    "tsid": 3013
   },
   {
     "name": "Movies",
@@ -382,7 +415,8 @@
     "modulation": "VSB_8",
     "id": "movies_20_2",
     "number": "20.2",
-    "rf_channel": 36
+    "rf_channel": 36,
+    "tsid": 531
   },
   {
     "name": "Heros",
@@ -393,7 +427,8 @@
     "modulation": "VSB_8",
     "id": "heros_20_3",
     "number": "20.3",
-    "rf_channel": 36
+    "rf_channel": 36,
+    "tsid": 531
   },
   {
     "name": "FoxWx",
@@ -404,7 +439,8 @@
     "modulation": "VSB_8",
     "id": "foxwx_20_4",
     "number": "20.4",
-    "rf_channel": 36
+    "rf_channel": 36,
+    "tsid": 531
   },
   {
     "name": "MPT-2",
@@ -415,7 +451,8 @@
     "modulation": "VSB_8",
     "id": "mpt_2_22_2",
     "number": "22.2",
-    "rf_channel": 21
+    "rf_channel": 21,
+    "tsid": 1397
   },
   {
     "name": "MPTKIDS",
@@ -426,7 +463,8 @@
     "modulation": "VSB_8",
     "id": "mptkids_22_3",
     "number": "22.3",
-    "rf_channel": 21
+    "rf_channel": 21,
+    "tsid": 1397
   },
   {
     "name": "NHK-WLD",
@@ -437,7 +475,8 @@
     "modulation": "VSB_8",
     "id": "nhk_wld_22_4",
     "number": "22.4",
-    "rf_channel": 21
+    "rf_channel": 21,
+    "tsid": 1397
   },
   {
     "name": "WETA UK",
@@ -448,7 +487,8 @@
     "modulation": "VSB_8",
     "id": "weta_uk_26_2",
     "number": "26.2",
-    "rf_channel": 31
+    "rf_channel": 31,
+    "tsid": 539
   },
   {
     "name": "KIDS",
@@ -459,7 +499,8 @@
     "modulation": "VSB_8",
     "id": "kids_26_3",
     "number": "26.3",
-    "rf_channel": 31
+    "rf_channel": 31,
+    "tsid": 539
   },
   {
     "name": "WORLD",
@@ -470,7 +511,8 @@
     "modulation": "VSB_8",
     "id": "world_26_4",
     "number": "26.4",
-    "rf_channel": 31
+    "rf_channel": 31,
+    "tsid": 539
   },
   {
     "name": "METRO",
@@ -481,7 +523,8 @@
     "modulation": "VSB_8",
     "id": "metro_26_5",
     "number": "26.5",
-    "rf_channel": 31
+    "rf_channel": 31,
+    "tsid": 539
   },
   {
     "name": "ShopLC",
@@ -492,7 +535,8 @@
     "modulation": "VSB_8",
     "id": "shoplc_31_2",
     "number": "31.2",
-    "rf_channel": 32
+    "rf_channel": 32,
+    "tsid": 38801
   },
   {
     "name": "MovieSp",
@@ -503,7 +547,8 @@
     "modulation": "VSB_8",
     "id": "moviesp_31_3",
     "number": "31.3",
-    "rf_channel": 32
+    "rf_channel": 32,
+    "tsid": 38801
   },
   {
     "name": "Newsmax",
@@ -514,7 +559,8 @@
     "modulation": "VSB_8",
     "id": "newsmax_31_4",
     "number": "31.4",
-    "rf_channel": 32
+    "rf_channel": 32,
+    "tsid": 38801
   },
   {
     "name": "PBSKids",
@@ -525,7 +571,8 @@
     "modulation": "VSB_8",
     "id": "pbskids_32_2",
     "number": "32.2",
-    "rf_channel": 7
+    "rf_channel": 7,
+    "tsid": 533
   },
   {
     "name": "XITOS",
@@ -536,7 +583,8 @@
     "modulation": "VSB_8",
     "id": "xitos_44_2",
     "number": "44.2",
-    "rf_channel": 34
+    "rf_channel": 34,
+    "tsid": 529
   },
   {
     "name": "STORY",
@@ -547,7 +595,8 @@
     "modulation": "VSB_8",
     "id": "story_48_2",
     "number": "48.2",
-    "rf_channel": 20
+    "rf_channel": 20,
+    "tsid": 6081
   },
   {
     "name": "CATCHY",
@@ -558,7 +607,8 @@
     "modulation": "VSB_8",
     "id": "catchy_48_3",
     "number": "48.3",
-    "rf_channel": 20
+    "rf_channel": 20,
+    "tsid": 6081
   },
   {
     "name": "MeTV+",
@@ -569,7 +619,8 @@
     "modulation": "VSB_8",
     "id": "metv_48_4",
     "number": "48.4",
-    "rf_channel": 20
+    "rf_channel": 20,
+    "tsid": 6081
   },
   {
     "name": "TOONS",
@@ -580,7 +631,8 @@
     "modulation": "VSB_8",
     "id": "toons_48_5",
     "number": "48.5",
-    "rf_channel": 20
+    "rf_channel": 20,
+    "tsid": 6081
   },
   {
     "name": "DABL",
@@ -591,7 +643,8 @@
     "modulation": "VSB_8",
     "id": "dabl_48_6",
     "number": "48.6",
-    "rf_channel": 20
+    "rf_channel": 20,
+    "tsid": 6081
   },
   {
     "name": "WEST",
@@ -602,7 +655,8 @@
     "modulation": "VSB_8",
     "id": "west_48_7",
     "number": "48.7",
-    "rf_channel": 20
+    "rf_channel": 20,
+    "tsid": 6081
   },
   {
     "name": "EMLW",
@@ -613,7 +667,8 @@
     "modulation": "VSB_8",
     "id": "emlw_48_12",
     "number": "48.12",
-    "rf_channel": 20
+    "rf_channel": 20,
+    "tsid": 6081
   },
   {
     "name": "HSN2",
@@ -624,7 +679,8 @@
     "modulation": "VSB_8",
     "id": "hsn2_49_2",
     "number": "49.2",
-    "rf_channel": 14
+    "rf_channel": 14,
+    "tsid": 7067
   },
   {
     "name": "QVC2",
@@ -635,7 +691,8 @@
     "modulation": "VSB_8",
     "id": "qvc2_49_3",
     "number": "49.3",
-    "rf_channel": 14
+    "rf_channel": 14,
+    "tsid": 7067
   },
   {
     "name": "NTDTV",
@@ -646,7 +703,8 @@
     "modulation": "VSB_8",
     "id": "ntdtv_49_4",
     "number": "49.4",
-    "rf_channel": 14
+    "rf_channel": 14,
+    "tsid": 7067
   },
   {
     "name": "SonLife",
@@ -657,7 +715,8 @@
     "modulation": "VSB_8",
     "id": "sonlife_49_5",
     "number": "49.5",
-    "rf_channel": 14
+    "rf_channel": 14,
+    "tsid": 7067
   },
   {
     "name": "ShopLC",
@@ -668,7 +727,8 @@
     "modulation": "VSB_8",
     "id": "shoplc_49_6",
     "number": "49.6",
-    "rf_channel": 14
+    "rf_channel": 14,
+    "tsid": 7067
   },
   {
     "name": "Antenna",
@@ -679,7 +739,8 @@
     "modulation": "VSB_8",
     "id": "antenna_50_2",
     "number": "50.2",
-    "rf_channel": 15
+    "rf_channel": 15,
+    "tsid": 3013
   },
   {
     "name": "Bounce",
@@ -690,7 +751,8 @@
     "modulation": "VSB_8",
     "id": "bounce_66_2",
     "number": "66.2",
-    "rf_channel": 35
+    "rf_channel": 35,
+    "tsid": 3043
   },
   {
     "name": "CourtTV",
@@ -701,7 +763,8 @@
     "modulation": "VSB_8",
     "id": "courttv_66_3",
     "number": "66.3",
-    "rf_channel": 35
+    "rf_channel": 35,
+    "tsid": 3043
   },
   {
     "name": "Laff",
@@ -712,7 +775,8 @@
     "modulation": "VSB_8",
     "id": "laff_66_4",
     "number": "66.4",
-    "rf_channel": 35
+    "rf_channel": 35,
+    "tsid": 3043
   },
   {
     "name": "IONPlus",
@@ -723,7 +787,8 @@
     "modulation": "VSB_8",
     "id": "ionplus_66_5",
     "number": "66.5",
-    "rf_channel": 35
+    "rf_channel": 35,
+    "tsid": 3043
   },
   {
     "name": "BUSTED",
@@ -734,7 +799,8 @@
     "modulation": "VSB_8",
     "id": "busted_66_6",
     "number": "66.6",
-    "rf_channel": 35
+    "rf_channel": 35,
+    "tsid": 3043
   },
   {
     "name": "GameSho",
@@ -745,7 +811,8 @@
     "modulation": "VSB_8",
     "id": "gamesho_66_7",
     "number": "66.7",
-    "rf_channel": 35
+    "rf_channel": 35,
+    "tsid": 3043
   },
   {
     "name": "HSN",
@@ -756,7 +823,8 @@
     "modulation": "VSB_8",
     "id": "hsn_66_8",
     "number": "66.8",
-    "rf_channel": 35
+    "rf_channel": 35,
+    "tsid": 3043
   },
   {
     "name": "DEFY",
@@ -767,6 +835,7 @@
     "modulation": "VSB_8",
     "id": "defy_68_2",
     "number": "68.2",
-    "rf_channel": 9
+    "rf_channel": 9,
+    "tsid": 535
   }
 ]

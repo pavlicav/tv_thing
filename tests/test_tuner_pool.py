@@ -13,10 +13,10 @@ WUSA = {"id": "wusa_hd_9_1", "number": "9.1", "rf_channel": 9}
 
 
 def tuner(node, local, *, lock=None, active=True, ready=True, playing=None, reachable=True,
-          rf=None, lane="digital"):
+          rf=None, tsids=None, lane="digital"):
     return {
         "id": f"{node}:{lane}", "node": node, "lane": lane, "kind": "digital", "local": local,
-        "reachable": reachable, "lock": lock, "rf_channels": rf,
+        "reachable": reachable, "lock": lock, "rf_channels": rf, "tsids": tsids or {},
         "available": reachable and lock is None,
         "selection": {"id": playing} if playing else None, "quality": "low",
         "stream": {"id": f"{node}-1", "active": active, "ready": ready, "error": None,
@@ -72,6 +72,32 @@ def test_a_tuner_whose_antenna_misses_the_rf_is_passed_over():
     assert tuner_pool.choose([tuner("viviserv2", False)], WUSA)[1] == "retune"
 
 
+def test_another_citys_station_on_the_same_rf_is_not_this_one():
+    """WUSA is RF 9 with its own TSID. A node in another city that heard RF 9 there heard
+    another station: another TSID, so it never plays WUSA."""
+    wusa = {**WUSA, "tsid": 0x0412}
+    here = tuner("viviserv", True, lock=LOCK, rf=[9], tsids={"9": 0x0412})
+    away = tuner("viviserv2", False, rf=[9], tsids={"9": 0x0A2E})
+    assert tuner_pool.choose([here, away], wusa) == (None, "locked")
+    # The same station heard on both: both may play it.
+    there = tuner("viviserv2", False, rf=[9], tsids={"9": 0x0412})
+    assert tuner_pool.choose([here, there], wusa) == (there, "retune")
+    # A TSID missing on either side: the RF channel alone decides, as before TSIDs.
+    assert tuner_pool.receives(tuner("viviserv2", False, rf=[9]), wusa)
+    assert tuner_pool.receives(away, WUSA)
+
+
+def test_a_second_node_never_scanned_gets_nothing_and_the_primary_its_plan(monkeypatch):
+    monkeypatch.setattr(server, "load_reception", lambda: None)
+    primary = server.local_tuners()
+    assert {t["rf_channels"] for t in primary} == {None} and not any(t["unscanned"] for t in primary)
+    monkeypatch.setattr(server.HOST, "_cache", {**server.HOST._cache,
+                                                "role": server.host_config.Resolved("second", "auto", "")})
+    second = server.local_tuners()
+    assert all(t["rf_channels"] == [] and t["unscanned"] for t in second)
+    assert tuner_pool.choose(second, WUSA) == (None, "none")
+
+
 def test_the_summary_counts_the_free_tuners():
     tuners = [tuner("viviserv", True, lock=LOCK), tuner("viviserv2", False),
               tuner("viviserv2", False, lane="digital-b", reachable=False)]
@@ -91,11 +117,20 @@ def test_every_plan_channel_has_its_own_number_on_the_dial():
 def test_a_scan_replaces_only_the_reception_of_what_it_scanned(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "load_channels", lambda: [{"rf_channel": rf} for rf in (7, 9, 14)])
     assert server.load_reception() is None
-    server.save_reception([9, 10], {10})      # never scanned: the rest of the plan's kept
-    assert server.load_reception() == [7, 10, 14]
-    server.save_reception([7], set())
-    assert server.load_reception() == [10, 14]
+    assert server.load_reception() is None and server.load_tsids() == {}
+    server.save_reception([9, 10], {10: 0x0412})      # never scanned: the rest of the plan's kept
+    assert server.load_reception() == [7, 10, 14] and server.load_tsids() == {10: 0x0412}
+    server.save_reception([7, 10], {10: None})        # received, no TSID read: none on record
+    assert server.load_reception() == [10, 14] and server.load_tsids() == {}
+    server.save_reception([14], {14: 0x0A2E})
+    assert server.load_tsids() == {14: 0x0A2E}
     assert json.loads(server.RECEPTION_FILE.read_text())["node"] == server.FEED_CONFIG.node
+
+
+def test_a_reception_from_before_tsids_still_reads(monkeypatch):
+    server.RECEPTION_FILE.parent.mkdir(parents=True, exist_ok=True)
+    server.RECEPTION_FILE.write_text(json.dumps({"rf_channels": [7, 9]}))
+    assert server.load_reception() == [7, 9] and server.load_tsids() == {}
 
 
 def test_a_second_nodes_rescan_keeps_the_shared_plan(monkeypatch):
@@ -105,7 +140,7 @@ def test_a_second_nodes_rescan_keeps_the_shared_plan(monkeypatch):
     monkeypatch.setattr(server, "save_channels", saved.append)
     monkeypatch.setattr(server, "save_reception", lambda scanned, got: received.append((list(scanned), got)))
     _run_rescan(monkeypatch)
-    assert saved == [] and received == [([7, 8], {8})]
+    assert saved == [] and received == [([7, 8], {8: None})]
 
 
 def _run_rescan(monkeypatch):
@@ -306,3 +341,19 @@ def test_the_peers_inputs_are_read_through_this_node(monkeypatch):
     monkeypatch.setattr(server, "peer", Silent([]))
     payload, code = server.api_v1_peer_inputs()
     assert code == 503 and payload["error"]["code"] == "peer_unavailable"
+
+
+def test_the_backfill_stamps_only_a_station_that_matches_the_plan():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("backfill_tsid", ROOT / "scripts" / "backfill_tsid.py")
+    backfill = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(backfill)
+    plan = [{"number": "9.1", "service_id": 1, "rf_channel": 9},
+            {"number": "9.2", "service_id": 2, "rf_channel": 9},
+            {"number": "4.1", "service_id": 3, "rf_channel": 34},
+            {"number": "7.1", "service_id": 3, "rf_channel": 7}]
+    report = backfill.stamp(plan, {9: (0x0412, {("9.1", 1), ("9.2", 2), ("9.3", 3)}),
+                                   34: (0x0AA0, {("10.1", 3)}), 7: (None, set())})
+    assert report[9] == (0x0412, "stamped") and report[7] == (None, "no lock")
+    assert report[34][1] == "mismatch: the station has no 4.1"
+    assert [row.get("tsid") for row in plan] == [0x0412, 0x0412, None, None]

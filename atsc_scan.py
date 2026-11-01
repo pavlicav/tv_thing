@@ -461,6 +461,10 @@ def parse_tvct_section(data):
     if len(data) < 10 or data[0] != TVCT_TABLE_ID:
         return []
 
+    # The section's table_id_extension is the multiplex's transport stream ID (TSID). The
+    # FCC gives each station its own, nationwide: another city's station on the same RF
+    # channel has another one, so RF and TSID together name a station anywhere.
+    tsid = struct.unpack_from(">H", data, 3)[0]
     channels = []
     pos = 10
     for _ in range(data[9]):
@@ -485,6 +489,7 @@ def parse_tvct_section(data):
                 "minor": minor,
                 "service_id": service_id,
                 "source_id": source_id,
+                "tsid": tsid,
                 "number": f"{major}.{minor}",
             })
         pos += 32 + desc_len
@@ -519,6 +524,7 @@ def scan_channel(channel, adapter=0, lock_timeout=2.0, vct_timeout=4.0,
             "lower_edge_mhz": rf_channel_lower_edge_mhz(channel),
             "repacked": int(channel) > LAST_RF_CHANNEL_IN_USE,
             "virtual_channels": [],
+            "tsid": None,
             **sample,
         }
         if sample["locked"] and read_vct:
@@ -537,6 +543,8 @@ def scan_channel(channel, adapter=0, lock_timeout=2.0, vct_timeout=4.0,
                     item["video_pid"] = entry.get("video_pid")
                     item["audio_pid"] = entry.get("audio_pid")
                 result["virtual_channels"] = services
+                if services:
+                    result["tsid"] = services[0]["tsid"]
             except OSError as exc:
                 result["vct_error"] = str(exc)
         return result

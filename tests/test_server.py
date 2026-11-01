@@ -410,6 +410,9 @@ def test_scan_results_become_channel_records(monkeypatch):
         "modulation": "VSB_8", "id": "wusa_hd_9_1",
         "number": "9.1", "rf_channel": 9,
     }
+    # The station's TSID, when the scan read one, goes with each of its channels.
+    results[0]["tsid"] = 0x0412
+    assert {c["tsid"] for c in server.channels_from_scan(results)} == {0x0412}
 
 
 def test_channels_sort_primaries_before_subchannels():

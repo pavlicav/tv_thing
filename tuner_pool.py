@@ -1,6 +1,7 @@
 """Which digital tuner a live tune uses, of this node's and its peer's (peers.py).
 
-Every node shows the same dial; any tuner that receives a channel's RF may play it. A
+Every node shows the same dial; any tuner that receives a channel's station (its RF channel
+and TSID, ``receives``) may play it. A
 tuner is a dict in ``/api/v1/tuners``' shape. ``choose`` takes, in order:
 
 1. a tuner already playing the channel, healthily: watching along changes nothing, so
@@ -18,11 +19,24 @@ is never chosen at all.
 from __future__ import annotations
 
 
-def receives(tuner, rf_channel):
-    """Whether a tuner's antenna gets ``rf_channel``. A node with no reception on record
-    is taken to receive everything: the channel plan is its best guess."""
-    rf = tuner.get("rf_channels")
-    return rf is None or rf_channel is None or rf_channel in rf
+def receives(tuner, channel):
+    """Whether a tuner's antenna gets ``channel``.
+
+    A station is its RF channel and its transport stream ID (TSID), which the FCC gives each
+    station once, nationwide: a node in another city whose scan found another station on
+    the same RF channel heard another TSID there, and never plays this one. Where either
+    side has no TSID on record (a plan row or a reception from before TSIDs), the RF
+    channel alone decides, as it did before. A tuner with no reception at all is taken to
+    get everything (local_tuners decides which ones may say so).
+    """
+    rf, tsid = channel.get("rf_channel"), channel.get("tsid")
+    got = tuner.get("rf_channels")
+    if got is None or rf is None:
+        return True
+    if rf not in got:
+        return False
+    heard = (tuner.get("tsids") or {}).get(str(rf))
+    return tsid is None or heard is None or heard == tsid
 
 
 def plays(tuner, channel_id):
@@ -35,7 +49,7 @@ def plays(tuner, channel_id):
 def candidates(tuners, channel):
     """The tuners that could play ``channel`` (a channels.json row) at all."""
     return [tuner for tuner in tuners if tuner.get("kind", "digital") == "digital"
-            and receives(tuner, channel.get("rf_channel"))]
+            and receives(tuner, channel)]
 
 
 def choose(tuners, channel):

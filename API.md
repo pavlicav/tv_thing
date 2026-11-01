@@ -215,24 +215,33 @@ feed. A peer's stream reaches a viewer through the viewer's own node, at `/strea
 `GET /api/v1/tuners` (`?local=1`: this node's own only, what a peer reads) is
 `{node, peer: {url, node, reachable, error} | null, tuners, summary: {total, reachable,
 available}}`. Each tuner is `{id: "<node>:<lane>", node, lane, kind, name, local, reachable,
-state, selection, quality, lock, scanning, available, rf_channels, stream: {id, state,
+state, selection, quality, lock, scanning, available, rf_channels, tsids, unscanned, stream: {id, state,
 active, ready, error, playlist_path, playback, revision}}`. A peer's tuner has `local:
 false` and its `playlist_path` under `/stream/peer/`. `available` means a change may take
 it: known, unlocked, not scanning. A peer that has not answered for 6 s reads every tuner
 `reachable: false`, `state: "unknown"`, never available. `rf_channels` is what the node's
-antenna got at its scans (`state/reception.json`), or null (never scanned there: taken to
-get the whole plan). `GET /api/v1/status` carries the same `tuners`, `tuners_available`
+antenna got at its scans (`state/reception.json`), and `tsids` (`{"<rf>": tsid}`) the
+station's transport stream ID heard on each. Never scanned, the primary's `rf_channels` is
+null (taken to get its whole plan) and a second node's is `[]` with `unscanned: true`: it
+plays nothing for anyone until it is rescanned, since its antenna may be in another city.
+
+A tuner gets a channel when its node received the channel's `rf_channel` and, where both
+the plan row (`channels.json`'s `tsid`) and the reception have a TSID for it, the same
+TSID. The FCC gives each station its own TSID nationwide, so RF and TSID together name one
+station: a node elsewhere that hears another station on RF 9 never plays WUSA. Where either
+TSID is missing, the RF channel alone decides. `scripts/backfill_tsid.py` adds TSIDs to the
+plan's rows off the air without a rescan (production stopped). `GET /api/v1/status` carries the same `tuners`, `tuners_available`
 and `peer`; its `lanes` stay this node's own.
 
 A digital `POST /api/v1/tune` goes through the pool. It takes a tuner already playing the
 channel (watching along, even a locked one), else an unlocked tuner of this node's, else
-an unlocked one of the peer's whose antenna gets the channel's RF. The response adds
+an unlocked one of the peer's whose antenna gets the channel's station. The response adds
 `tuner`, `node` and `relayed`; on a relay, `lane` is the tuner id and `stream.playlist_path`
 is under `/stream/peer/`. A tune stays on this node, as before the pool, when it carries
 this node's lock `token`, `override: true` without a `tuner`, or `local_only: true` (what
 a node sends its peer, so a tune never bounces back). `tuner: "<id>"` asks for that tuner
 alone. Every tuner locked is 423 `locked` with the `lock` and `tuner` of one of them and
-all `tuners`. No antenna that gets the RF is 409 `not_received`. A peer that stops answering
+all `tuners`. No antenna that gets the station is 409 `not_received`, naming any node never scanned. A peer that stops answering
 mid-tune is 503 `peer_unavailable`.
 
 Locks: `POST /api/v1/tuner/lock` and `/release` with `lane: "<peer node>:digital"` are the

@@ -54,7 +54,7 @@ def test_bands_are_labelled():
     assert bands[14] == "UHF"
 
 
-def _tvct_section(entries):
+def _tvct_section(entries, tsid=0):
     """Build a minimal Terrestrial VCT section for parsing.
 
     Entries are ``(name, major, minor, service_id)`` or the same with a
@@ -71,7 +71,7 @@ def _tvct_section(entries):
         body += bytes(2)                       # ETM_location, service_type
         body += struct.pack(">H", source_id)   # source_id at +28
         body += struct.pack(">H", 0)           # descriptors_length at +30
-    return bytes([atsc_scan.TVCT_TABLE_ID]) + bytes(8) \
+    return bytes([atsc_scan.TVCT_TABLE_ID]) + bytes(2) + struct.pack(">H", tsid) + bytes(4) \
         + bytes([len(entries)]) + body
 
 
@@ -89,6 +89,12 @@ def test_tvct_parsing_reads_the_source_id_the_guide_needs():
                              ("Crime", 9, 2, 2, 1002)])
     channels = atsc_scan.parse_tvct_section(section)
     assert [c["source_id"] for c in channels] == [1001, 1002]
+
+
+def test_tvct_parsing_reads_the_stations_tsid():
+    """The table_id_extension is the multiplex's TSID: with the RF channel, the station."""
+    section = _tvct_section([("WUSA-HD", 9, 1, 1), ("Crime", 9, 2, 2)], tsid=0x0412)
+    assert [c["tsid"] for c in atsc_scan.parse_tvct_section(section)] == [0x0412, 0x0412]
 
 
 def test_tvct_parsing_rejects_a_foreign_table():

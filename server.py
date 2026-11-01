@@ -800,33 +800,61 @@ def tuner_id(lane, node=None):
     return f"{node or FEED_CONFIG.node}:{lane}"
 
 
-def load_reception():
-    """The RF channels this node's antenna got at its scans, or None: never scanned here,
-    so taken to get the whole plan."""
+def _reception():
     try:
-        return sorted({int(rf) for rf in json.loads(RECEPTION_FILE.read_text())["rf_channels"]})
-    except (OSError, ValueError, KeyError, TypeError):
+        return json.loads(RECEPTION_FILE.read_text())
+    except (OSError, ValueError):
         return None
 
 
+def load_reception():
+    """The RF channels this node's antenna got at its scans, or None: never scanned here."""
+    try:
+        return sorted({int(rf) for rf in _reception()["rf_channels"]})
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def load_tsids():
+    """``{rf: TSID}``: the station each RF channel this node received carried when scanned.
+    An RF channel received with no TSID read (a reception from before TSIDs) has none."""
+    try:
+        return {int(rf): int(tsid) for rf, tsid in (_reception().get("tsids") or {}).items()}
+    except (AttributeError, TypeError, ValueError):
+        return {}
+
+
 def save_reception(scanned, received):
-    """A scan's reception: the RF channels it ``scanned`` are replaced by those it ``received``.
-    Never scanned before, the rest of the plan's are kept, as load_reception took them."""
+    """A scan's reception: the RF channels it ``scanned`` are replaced by those it ``received``,
+    ``{rf: TSID or None}``. Never scanned before, the rest of the plan's are kept, as the
+    primary takes them (local_tuners)."""
     known = load_reception()
     if known is None:
         known = {channel.get("rf_channel") for channel in load_channels()} - {None}
     kept = (set(known) - set(scanned)) | set(received)
+    tsids = {rf: tsid for rf, tsid in load_tsids().items() if rf not in scanned}
+    tsids.update((rf, tsid) for rf, tsid in received.items() if tsid is not None)
     path = RECEPTION_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(".tmp")
     temp.write_text(json.dumps({"node": FEED_CONFIG.node, "scanned_at": round(time.time()),
-                                "rf_channels": sorted(kept)}, indent=2) + "\n")
+                                "rf_channels": sorted(kept),
+                                "tsids": {str(rf): tsids[rf] for rf in sorted(tsids)}}, indent=2) + "\n")
     os.replace(temp, path)
 
 
 def local_tuners():
-    """This node's digital tuners, in /api/v1/tuners' shape."""
-    reception = load_reception()
+    """This node's digital tuners, in /api/v1/tuners' shape.
+
+    Reception says which channels a tuner may play (tuner_pool.receives). The primary,
+    never scanned, gets its own plan, as it always has. A second node never scanned gets
+    nothing: its antenna may be anywhere, and the plan's RF channels there are other
+    stations, so it plays nothing for anyone until a rescan says what it gets.
+    """
+    reception, tsids = load_reception(), load_tsids()
+    unscanned = reception is None and not HOST.primary
+    if unscanned:
+        reception = []
     location = node_location()
     result = []
     with lock:
@@ -844,7 +872,8 @@ def local_tuners():
                 "lock": lock_view(held), "scanning": bool(scanning) and lane == LANE_DIGITAL,
                 # Free for a change: known, unlocked and not sweeping the band.
                 "available": not unknown and held is None and not (scanning and lane == LANE_DIGITAL),
-                "rf_channels": reception,
+                "rf_channels": reception, "tsids": {str(rf): tsid for rf, tsid in tsids.items()},
+                "unscanned": unscanned,
                 "stream": {key: stream[key] for key in (
                     "id", "state", "active", "ready", "error", "playlist_path", "playback", "revision")},
             })
@@ -947,8 +976,12 @@ def api_v1_digital_tune(body, quality):
     chosen, why = tuner_pool.choose(tuners, channel)
     if chosen is None:
         if why == "none":
+            unscanned = sorted({tuner["node"] for tuner in tuners if tuner.get("unscanned")})
             return api_v1_error(f"No tuner's antenna gets RF {channel.get('rf_channel')} "
-                                f"({channel.get('number')})", 409, "not_received", extra={"tuners": tuners})
+                                f"({channel.get('number')})"
+                                + (f"; {', '.join(unscanned)} gets nothing until it is rescanned"
+                                   if unscanned else ""),
+                                409, "not_received", extra={"tuners": tuners})
         if why == "locked":
             held = sorted((tuner for tuner in tuner_pool.candidates(tuners, channel) if tuner.get("lock")),
                           key=lambda tuner: not tuner["local"])[0]
@@ -1225,6 +1258,8 @@ def channels_from_scan(results):
                 "id": f"{slug.lower()}_{number.replace('.', '_')}",
                 "number": number,
                 "rf_channel": result["rf_channel"],
+                # RF and TSID together name the station (tuner_pool.receives).
+                **({"tsid": result["tsid"]} if result.get("tsid") is not None else {}),
             })
     channels.sort(key=channel_sort_key)
     return channels
@@ -2740,7 +2775,8 @@ RECORDER_STOP_TIMEOUT = 8.0
 # in production, split or not, so either build reads what the other wrote.
 STATE_DIR = Path(os.environ.get("TV_THING_STATE_DIR", str(BASE_DIR / "state")))
 RECORDINGS_JOURNAL = STATE_DIR / "feed" / "recordings-journal.jsonl"
-# What this node's antenna gets, by RF channel: its scans write it (save_reception).
+# What this node's antenna gets, by RF channel and the TSID heard there: its scans write it
+# (save_reception).
 RECEPTION_FILE = STATE_DIR / "reception.json"
 # The feed's recorder processes (feed_node.Recorders); the timers, pieces and
 # finalizing below are control's.
@@ -6780,7 +6816,7 @@ class TVHandler(SimpleHTTPRequestHandler):
             elapsed = time.monotonic() - scan_started
             channels = channels_from_scan(found)
             if channels:
-                save_reception(channels_to_scan, {result["rf_channel"] for result in found})
+                save_reception(channels_to_scan, {result["rf_channel"]: result.get("tsid") for result in found})
                 # The plan is the primary's: a second node's scan says what its antenna
                 # gets (its reception), and leaves the dial both nodes share as it is.
                 if HOST.primary:
