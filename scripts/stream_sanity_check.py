@@ -648,6 +648,11 @@ def main(argv=None):
         help="Encoders allowed at once. Two lanes may stream concurrently, "
              "so the default tolerates the other lane's encoder.",
     )
+    parser.add_argument(
+        "--max-dvb-sources", type=int, default=1,
+        help="DVB sources allowed at once. One, unless the gate means a second tuner "
+             "(tuner B) to stream alongside the one it changes.",
+    )
     parser.add_argument("--min-segments-per-round", type=int, default=3)
     parser.add_argument(
         "--roku-target", action="append", default=[],
@@ -895,11 +900,12 @@ def main(argv=None):
         (max(ffmpeg_counts, default=0) <= args.max_ffmpeg_processes,
          f"concurrent ffmpeg processes max {max(ffmpeg_counts, default=0)} "
          f"(limit {args.max_ffmpeg_processes})"),
-        # At most one DVB source at a time. Testing the analog lane does not
-        # imply zero: the always-on digital lane keeps running alongside it.
-        # Two or more means a previous tune leaked its source.
-        (max(source_counts, default=0) <= 1,
-         f"concurrent DVB sources max {max(source_counts, default=0)}"),
+        # At most one DVB source per tuner streaming. Testing the analog lane does
+        # not imply zero: the always-on digital lane keeps running alongside it.
+        # More than --max-dvb-sources means a previous tune leaked its source.
+        (max(source_counts, default=0) <= args.max_dvb_sources,
+         f"concurrent DVB sources max {max(source_counts, default=0)} "
+         f"(limit {args.max_dvb_sources})"),
         (mean(gpu_values) <= args.max_gpu_average,
          f"GPU utilization average {mean(gpu_values):.1f}%"),
         (max(temp_values, default=0) <= args.max_gpu_temp,
