@@ -101,6 +101,11 @@ The gate:
 6. After promotion, run the same gate against the production services and roll
    back/stop them immediately if the production gate fails.
 
+A staged run never joins the tuner pool: give it `TV_THING_PEER_HOST=off` (and
+`TV_THING_TUNER_B=off` unless tuner B is what it gates). Otherwise it reads this host's
+`peer_host` and sends its tunes to the real peer whenever its own tuner is locked or
+unknown (`scripts/staged_split_check.sh` sets both).
+
 Do not run an unbounded FFmpeg experiment. Every hardware test must have a
 time limit, a separate output directory, and cleanup/stop handling. Never use
 the nearly-full production filesystem for synthetic or long-duration media.

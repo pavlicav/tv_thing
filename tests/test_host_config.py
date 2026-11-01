@@ -149,8 +149,24 @@ def test_viviserv2_describes_its_own_hardware(viviserv2, tmp_path):
     assert lanes["analog"].description == "Analog NTSC cable television (not fitted on viviserv2)"
     assert lanes["roku"].description == "Source Roku via an HD PVR (not on viviserv2)"
     # Everything else about the lanes is feed.json's: their files, processes and devices.
+    # Its second tuner is one lane more, tuner B (the tuner_b setting, auto).
     assert [(l.id, l.device, l.playlist, l.process) for l in config.lanes] == \
-        [(l.id, l.device, l.playlist, l.process) for l in SHIPPED.lanes]
+        [(l.id, l.device, l.playlist, l.process) for l in SHIPPED.lanes] + \
+        [("digital-b", "digital-b", "tunerb.m3u8", "digital_b_packager")]
+    assert devices["digital-b"].adapter == 1 and devices["digital-b"].kind == "dvb"
+    assert devices["digital-b"].detail.endswith("via /dev/dvb/adapter1")
+    assert lanes["digital-b"].backend == "linux-dvb" and lanes["digital-b"].files == ("tunerb", "tunerbseg")
+
+
+def test_tuner_b_shares_no_file_prefix_with_tuner_a_and_can_be_turned_off(viviserv2, tmp_path):
+    config = host(viviserv2, "viviserv2", tmp_path).feed_config(SHIPPED)
+    a, b = config.lane("digital"), config.lane("digital-b")
+    # Stopping a lane clears every stream file starting with one of its files' names.
+    assert not any(name.startswith(prefix) for name in (b.playlist, b.segment_prefix) for prefix in a.files)
+    assert not any(name.startswith(prefix) for name in (a.playlist, a.segment_prefix) for prefix in b.files)
+    off = host(viviserv2, "viviserv2", tmp_path, {"TV_THING_TUNER_B": "off"})
+    assert off.value("tuner_b") == "off" and "digital-b" not in [l.id for l in off.feed_config(SHIPPED).lanes]
+    assert host_config.check("tuner_b", "1") == 1 and host_config.check("tuner_b", "off") == "off"
 
 
 def test_viviserv2_sees_both_tuners_and_may_use_the_second(viviserv2, tmp_path):

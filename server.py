@@ -341,6 +341,26 @@ LANE_FILES = {lane.id: lane.files for lane in FEED_CONFIG.lanes}
 # whichever video lane was most recently tuned.
 LEGACY_PLAYLIST = "live.m3u8"
 
+# The digital lanes. Tuner A (LANE_DIGITAL) is the always-on one, and the one the scan, the
+# guide read, the DX meter and the VCR use; a further tuner (host_config's tuner_b, a second
+# DVB adapter) is a live lane only, for the tuner pool: started by a tune, stopped when nobody
+# has watched it for a while (extra_tuner_worker).
+DIGITAL_LANES = tuple(lane.id for lane in FEED_CONFIG.lanes if lane.backend == "linux-dvb")
+EXTRA_DIGITAL_LANES = tuple(lane for lane in DIGITAL_LANES if lane != LANE_DIGITAL)
+DIGITAL_ADAPTERS = {lane: FEED_CONFIG.device(LANE_FRONTEND[lane]).adapter or 0 for lane in DIGITAL_LANES}
+EXTRA_TUNER_IDLE_SECONDS = float(os.environ.get("TV_THING_EXTRA_TUNER_IDLE_SECONDS", 300))
+
+
+def digital_roles(lane):
+    """A digital lane's two process slots in ``procs``: its tuner source and its encoder."""
+    packager = FEED_CONFIG.lane(lane).process
+    return packager.replace("_packager", "_source"), packager
+
+
+# When each lane's stream was last fetched (wall clock), by the feed's /stream/ handler: a
+# viewer here or one relayed to the peer. An extra tuner nobody fetches is stopped.
+lane_fetched = {}
+
 
 def new_lane_state():
     return {
@@ -380,6 +400,7 @@ procs = {
     "digital_packager": None,
     "analog_packager": None,
     "roku_capture": None,
+    **{role: None for lane in EXTRA_DIGITAL_LANES for role in digital_roles(lane)},
 }
 
 # The video lane whose playlist /stream/live.m3u8 currently mirrors.
@@ -770,8 +791,8 @@ def tuner_lock_payload():
 # unlocked one of the peer's, whose stream the front door relays (/stream/peer/). Each node
 # keeps its own locks: a lock on a peer's tuner is the peer's, asked for through its API.
 # ---------------------------------------------------------------------------
-# The digital lanes whose tuners join the pool.
-DIGITAL_TUNER_LANES = (LANE_DIGITAL,)
+# The digital lanes whose tuners join the pool: tuner A, and tuner B where this host has one.
+DIGITAL_TUNER_LANES = DIGITAL_LANES
 
 
 def tuner_id(lane, node=None):
@@ -819,14 +840,41 @@ def local_tuners():
                 "name": payload["name"], "local": True, "reachable": not unknown,
                 "state": "unknown" if unknown else stream["state"],
                 "selection": payload["selection"], "quality": payload["quality"],
-                "lock": lock_view(held), "scanning": bool(scanning),
+                # A scan sweeps tuner A alone.
+                "lock": lock_view(held), "scanning": bool(scanning) and lane == LANE_DIGITAL,
                 # Free for a change: known, unlocked and not sweeping the band.
-                "available": not unknown and held is None and not scanning,
+                "available": not unknown and held is None and not (scanning and lane == LANE_DIGITAL),
                 "rf_channels": reception,
                 "stream": {key: stream[key] for key in (
                     "id", "state", "active", "ready", "error", "playlist_path", "playback", "revision")},
             })
     return result
+
+
+def extra_tuner_idle(lane, state, now):
+    """Whether an extra tuner (tuner B) is running for nobody: unlocked, and no player has
+    fetched its stream for EXTRA_TUNER_IDLE_SECONDS."""
+    if lane == LANE_DIGITAL or not state.get("running") or state.get("unknown") or lane in tuning_lanes:
+        return False
+    if active_lock(lane):
+        return False
+    seen = state.get("fetched_at") or state.get("started_at")
+    return seen is not None and now - seen > EXTRA_TUNER_IDLE_SECONDS
+
+
+def extra_tuner_worker():
+    """Stop an extra tuner nobody watches: unlike tuner A it is not always on, and an idle
+    one is the pool's best choice for the next tune."""
+    while not shutting_down.wait(30):
+        for lane in EXTRA_DIGITAL_LANES:
+            try:
+                with lock:
+                    if not extra_tuner_idle(lane, feed_client.lane(lane), time.time()):
+                        continue
+                    print(f"Pool: stopping {lane}, unwatched for {EXTRA_TUNER_IDLE_SECONDS:.0f} s")
+                    feed_client.stop(lane)
+            except Exception as error:   # noqa: BLE001 - the next pass tries again
+                print(f"Pool: could not stop {lane}: {error}")
 
 
 def pool_tuners():
@@ -857,35 +905,45 @@ def peer_tuner(tuner):
 
 
 def api_v1_digital_tune(body, quality):
-    """A digital tune through the pool: on this node's tuner, or relayed from the peer's.
+    """A digital tune through the pool: on one of this node's tuners, or relayed from the
+    peer's.
 
-    A tune with ``local_only`` (the peer's own request), or naming this node's tuner, or
-    overriding, or carrying this node's lock token, is this node's alone, as before the pool.
+    A tune naming a tuner (``tuner``) takes that one. One carrying a lock token takes the
+    tuner it holds; one overriding, tuner A. ``local_only`` (the peer's own request) chooses
+    among this node's tuners only. With one tuner and no peer, it is tuner A, as before the
+    pool.
     """
     channel_id = body.get("channel_id")
     token, override = body.get("token"), bool(body.get("override"))
     wanted = body.get("tuner") or None
+    here_ids = {tuner_id(lane): lane for lane in DIGITAL_TUNER_LANES}
 
-    def here():
-        result, status = perform_digital_tune(channel_id, quality, token=token, override=override)
-        response, status = lane_tune_response(result, status, LANE_DIGITAL)
+    def here(lane=LANE_DIGITAL):
+        result, status = perform_digital_tune(channel_id, quality, token=token, override=override,
+                                              **({} if lane == LANE_DIGITAL else {"lane": lane}))
+        response, status = lane_tune_response(result, status, lane)
         if status == 200:
-            response.update(tuner=tuner_id(LANE_DIGITAL), node=FEED_CONFIG.node, relayed=False)
+            response.update(tuner=tuner_id(lane), node=FEED_CONFIG.node, relayed=False)
         return response, status
 
-    holds_here = bool(token and active_lock(LANE_DIGITAL) and lock_holder(LANE_DIGITAL, token) is None)
-    if (peer is None or body.get("local_only") or wanted == tuner_id(LANE_DIGITAL)
-            or (wanted is None and (override or holds_here))):
-        return here()
+    if wanted in here_ids:
+        return here(here_ids[wanted])
     if wanted is not None:
         chosen = peer_tuner(wanted)
         if chosen is None:
             return api_v1_error(f"no tuner called {wanted!r}", 400, "invalid_tuner")
         return relay_tune(chosen, body, quality)
+    holding = next((lane for lane in DIGITAL_TUNER_LANES
+                    if token and active_lock(lane) and lock_holder(lane, token) is None), None)
+    if holding or override:
+        return here(holding or LANE_DIGITAL)
+    local_only = bool(body.get("local_only")) or peer is None
+    if local_only and len(DIGITAL_TUNER_LANES) == 1:
+        return here()
     channel = next((item for item in load_channels() if item["id"] == channel_id), None)
     if channel is None:
         return here()               # 404, in the usual words
-    tuners = pool_tuners()
+    tuners = local_tuners() if local_only else pool_tuners()
     chosen, why = tuner_pool.choose(tuners, channel)
     if chosen is None:
         if why == "none":
@@ -902,7 +960,7 @@ def api_v1_digital_tune(body, quality):
         return api_v1_error("No tuner is free: the others are scanning or not answering",
                             503, "no_tuner", extra={"tuners": tuners})
     if chosen["local"]:
-        return here()
+        return here(chosen["lane"])
     return relay_tune(chosen, body, quality)
 
 
@@ -1415,9 +1473,9 @@ def watch_hls_packager(packager, encoder, stream_id, health,
                     return
 
 
-def watch_tv_packager(packager, encoder, stream_id, health):
+def watch_tv_packager(packager, encoder, stream_id, health, lane=LANE_DIGITAL):
     """Compatibility wrapper for the digital packager resource watcher."""
-    watch_hls_packager(packager, encoder, stream_id, health, LANE_DIGITAL)
+    watch_hls_packager(packager, encoder, stream_id, health, lane)
 
 
 def clear_streams(prefixes):
@@ -1435,6 +1493,15 @@ def clear_streams(prefixes):
 
 def lane_playlist_path(lane):
     return STREAMS_DIR / LANE_PLAYLIST[lane]
+
+
+def note_lane_fetch(filename):
+    """A player fetched ``filename`` from /stream/: if it is a digital lane's segment, that
+    lane is being watched now."""
+    for lane in DIGITAL_LANES:
+        if filename.startswith(LANE_SEGMENT_PREFIX[lane] + "_"):
+            lane_fetched[lane] = time.time()
+            return
 
 
 def lane_stream_ready(lane):
@@ -1470,8 +1537,7 @@ def lane_is_running(lane):
 def lane_processes_alive(lane):
     """Whether every process the lane needs is alive: the digital lane is its tuner
     source and its encoder, the others one process each."""
-    roles = ("digital_source", "digital_packager") if lane == LANE_DIGITAL \
-        else (FEED_CONFIG.lane(lane).process,)
+    roles = digital_roles(lane) if lane in DIGITAL_LANES else (FEED_CONFIG.lane(lane).process,)
     return all(procs[role] is not None and procs[role].poll() is None for role in roles)
 
 
@@ -1491,19 +1557,20 @@ def publish_legacy_playlist(lane):
         primary_video_lane = lane
 
 
-def stop_digital():
-    """Stop the digital lane and release the DVB frontend."""
-    feed.transition(LANE_DIGITAL, "stopping")
-    source = procs["digital_source"]
-    procs["digital_source"] = None
+def stop_digital(lane=LANE_DIGITAL):
+    """Stop a digital lane and release its DVB frontend."""
+    source_role, packager_role = digital_roles(lane)
+    feed.transition(lane, "stopping")
+    source = procs[source_role]
+    procs[source_role] = None
     kill_process(source, timeout=TV_SOURCE_STOP_TIMEOUT)
 
-    packager = procs["digital_packager"]
-    procs["digital_packager"] = None
+    packager = procs[packager_role]
+    procs[packager_role] = None
     kill_process(packager, timeout=TV_PACKAGER_STOP_TIMEOUT)
 
-    reset_lane(LANE_DIGITAL)
-    clear_streams(LANE_FILES[LANE_DIGITAL])
+    reset_lane(lane)
+    clear_streams(LANE_FILES[lane])
 
 
 def stop_analog():
@@ -1520,6 +1587,8 @@ def stop_analog():
 def stop_lane(lane):
     if lane == LANE_DIGITAL:
         stop_digital()
+    elif lane in DIGITAL_LANES:
+        stop_digital(lane)
     elif lane == LANE_ANALOG:
         stop_analog()
     elif lane == LANE_ROKU:
@@ -1531,6 +1600,8 @@ def stop_lane(lane):
 def stop_all():
     stop_analog()
     stop_digital()
+    for lane in EXTRA_DIGITAL_LANES:
+        stop_digital(lane)
     stop_lane(LANE_ROKU)
 
 
@@ -1630,14 +1701,14 @@ def select_video_encoder():
 
 
 def build_tv_packager_command(quality, encoder=None, stream_id="test",
-                              udp_port=TV_UDP_PORT):
-    """Build one tune-scoped ffmpeg command for the digital lane."""
+                              udp_port=TV_UDP_PORT, lane=LANE_DIGITAL):
+    """Build one tune-scoped ffmpeg command for a digital lane."""
     encoder = encoder or select_video_encoder()
     preset = QUALITY_PRESETS.get(quality, QUALITY_PRESETS["medium"])
-    hls_path = str(lane_playlist_path(LANE_DIGITAL))
+    hls_path = str(lane_playlist_path(lane))
     segment_pattern = str(
         STREAMS_DIR
-        / f"{LANE_SEGMENT_PREFIX[LANE_DIGITAL]}_{stream_id}_%09d.ts"
+        / f"{LANE_SEGMENT_PREFIX[lane]}_{stream_id}_%09d.ts"
     )
     vb = preset["vb"]
 
@@ -1800,13 +1871,13 @@ def audio_capture_environment():
     return environment
 
 
-def build_tv_source_command(channel, udp_port=TV_UDP_PORT, tap_ports=()):
-    """Build the direct demux-to-UDP source command."""
+def build_tv_source_command(channel, udp_port=TV_UDP_PORT, tap_ports=(), adapter=None):
+    """Build the direct demux-to-UDP source command (tuner A's adapter unless told)."""
     taps = [arg for port in tap_ports for arg in ("--tap-port", str(port))]
     return [
         sys.executable,
         str(BASE_DIR / "dvb_source.py"),
-        "--adapter", str(DIGITAL_ADAPTER),
+        "--adapter", str(DIGITAL_ADAPTER if adapter is None else adapter),
         "--frequency", str(channel["frequency"]),
         "--service-id", str(channel.get("service_id", 1)),
         "--video-pid", str(channel["video_pid"]),
@@ -1817,10 +1888,11 @@ def build_tv_source_command(channel, udp_port=TV_UDP_PORT, tap_ports=()):
     ]
 
 
-def start_digital_packager(quality, stream_id, udp_port=TV_UDP_PORT):
-    """Start the digital lane's tune-scoped encoder with safety monitoring."""
+def start_digital_packager(quality, stream_id, udp_port=TV_UDP_PORT, lane=LANE_DIGITAL):
+    """Start a digital lane's tune-scoped encoder with safety monitoring."""
+    source_role, packager_role = digital_roles(lane)
     encoder = select_video_encoder()
-    cmd = build_tv_packager_command(quality, encoder, stream_id, udp_port)
+    cmd = build_tv_packager_command(quality, encoder, stream_id, udp_port, lane)
     health = new_stream_health(stream_id)
 
     try:
@@ -1833,8 +1905,8 @@ def start_digital_packager(quality, stream_id, udp_port=TV_UDP_PORT):
     except OSError as e:
         return False, f"Could not start TV encoder: {e}"
 
-    procs["digital_packager"] = packager
-    lanes[LANE_DIGITAL].update({
+    procs[packager_role] = packager
+    lanes[lane].update({
         "health": health,
         "stream_id": stream_id,
         "video_encoder": encoder["codec"],
@@ -1847,24 +1919,24 @@ def start_digital_packager(quality, stream_id, udp_port=TV_UDP_PORT):
             for line in packager.stderr:
                 line = line.rstrip()
                 recent.append(line)
-                print(f"digital ffmpeg: {line}", flush=True)
+                print(f"{lane} ffmpeg: {line}", flush=True)
                 reason = record_packager_warning(line, health)
                 if reason:
                     trip_packager(packager, health, reason)
         packager.wait()
-        print(f"Digital packager exited with code {packager.returncode}")
+        print(f"{lane} packager exited with code {packager.returncode}")
         if health["ok"] and packager.returncode not in (0, -9, 255):
             health["ok"] = False
             health["reason"] = f"ffmpeg exited with code {packager.returncode}"
 
         unexpected = False
         with lock:
-            if procs["digital_packager"] is packager:
-                procs["digital_packager"] = None
-                source = procs["digital_source"]
-                procs["digital_source"] = None
+            if procs[packager_role] is packager:
+                procs[packager_role] = None
+                source = procs[source_role]
+                procs[source_role] = None
                 kill_process(source, timeout=TV_SOURCE_STOP_TIMEOUT)
-                reset_lane(LANE_DIGITAL, "error")
+                reset_lane(lane, "error")
                 unexpected = True
         if unexpected and encoder["hardware"]:
             # A probe can pass even when a real broadcast exposes a driver or
@@ -1874,19 +1946,19 @@ def start_digital_packager(quality, stream_id, udp_port=TV_UDP_PORT):
             _disabled_video_encoders.add(encoder["codec"])
             _video_encoder_config = None
             print(f"Disabling failed GPU encoder {encoder['codec']}")
-        if unexpected and ALWAYS_ON:
+        if unexpected and ALWAYS_ON and lane == LANE_DIGITAL:
             always_on_wakeup.set()
 
     threading.Thread(target=monitor, daemon=True).start()
     threading.Thread(
         target=watch_tv_packager,
-        args=(packager, encoder, stream_id, health),
+        args=(packager, encoder, stream_id, health, lane),
         daemon=True,
     ).start()
     return True, None
 
 
-def start_digital(channel, quality="medium", taps=None):
+def start_digital(channel, quality="medium", taps=None, lane=LANE_DIGITAL):
     """Start a fresh DVB tuner and encoder generation for one channel.
 
     Returns ``(ok, error, False)``. Restarting ffmpeg is intentional: each
@@ -1896,37 +1968,42 @@ def start_digital(channel, quality="medium", taps=None):
     Only the digital front-end is touched, so an analog stream keeps
     running across a digital retune. ``taps`` are the recording tap ports
     the source feeds besides the encoder (by default, what this process's
-    recordings need).
+    recordings need). An extra tuner's ``lane`` (tuner B) is live only: no
+    recording taps, not the always-on channel, not the legacy playlist.
     """
     if shutting_down.is_set():
         return False, "The server is shutting down", False
     STREAMS_DIR.mkdir(exist_ok=True)
+    source_role, packager_role = digital_roles(lane)
+    primary = lane == LANE_DIGITAL
 
     # Stop both halves before opening the next timestamp domain. Marking the
     # process slots empty first makes their monitor threads treat this as an
     # intentional replacement rather than a crash.
-    stop_digital()
-    feed.transition(LANE_DIGITAL, "starting")
+    stop_digital() if primary else stop_digital(lane)
+    feed.transition(lane, "starting")
     stream_id = next_stream_id()
     # A fresh port per generation. Reusing one fixed port raced with the
     # previous encoder's socket on a fast retune, and ffmpeg lost the tune
     # to EADDRINUSE.
     udp_port = allocate_udp_port()
-    ok, error = start_digital_packager(quality, stream_id, udp_port)
+    ok, error = start_digital_packager(quality, stream_id, udp_port, lane)
     if not ok:
-        reset_lane(LANE_DIGITAL)
+        reset_lane(lane)
         return False, error, False
 
+    if not primary:
+        taps = []
     taps = recording_tap_ports(channel) if taps is None else list(taps)
-    source_cmd = build_tv_source_command(channel, udp_port, taps)
-    lanes[LANE_DIGITAL]["started_at"] = time.time()
+    source_cmd = build_tv_source_command(channel, udp_port, taps, DIGITAL_ADAPTERS[lane])
+    lanes[lane]["started_at"] = time.time()
 
     def abandon(message):
-        packager = procs["digital_packager"]
-        procs["digital_packager"] = None
+        packager = procs[packager_role]
+        procs[packager_role] = None
         kill_process(packager, timeout=TV_PACKAGER_STOP_TIMEOUT)
-        reset_lane(LANE_DIGITAL)
-        clear_streams(LANE_FILES[LANE_DIGITAL])
+        reset_lane(lane)
+        clear_streams(LANE_FILES[lane])
         return False, message, False
 
     try:
@@ -1949,18 +2026,21 @@ def start_digital(channel, quality="medium", taps=None):
             else f"exit code {source_proc.returncode}"
         return abandon(f"Tuner failed to start: {last}")
 
-    procs["digital_source"] = source_proc
-    lanes[LANE_DIGITAL].update({
+    procs[source_role] = source_proc
+    lanes[lane].update({
         "active": True,
         "selection": channel,
         "quality": quality,
-        "tuner": {"backend": TV_SOURCE_BACKEND, "adapter": DIGITAL_ADAPTER},
+        "tuner": {"backend": TV_SOURCE_BACKEND, "adapter": DIGITAL_ADAPTERS[lane]},
         "taps": taps,
     })
-    publish_legacy_playlist(LANE_DIGITAL)
-    feed.transition(LANE_DIGITAL, "running", generation=stream_id)
-    # Remember what the always-on keeper should resume after a restart.
-    save_playback_state(channel, quality)
+    # Its idle clock starts now: a tune nobody then watches is stopped like any other.
+    lane_fetched[lane] = time.time()
+    feed.transition(lane, "running", generation=stream_id)
+    if primary:
+        publish_legacy_playlist(lane)
+        # Remember what the always-on keeper should resume after a restart.
+        save_playback_state(channel, quality)
 
     def monitor():
         recent = deque(maxlen=20)
@@ -1970,19 +2050,19 @@ def start_digital(channel, quality="medium", taps=None):
                 recent.append(line)
                 print(f"dvb source: {line}", flush=True)
         source_proc.wait()
-        print(f"DVB source exited with code {source_proc.returncode}")
+        print(f"DVB source ({lane}) exited with code {source_proc.returncode}")
         with lock:
-            if procs["digital_source"] is source_proc:
-                procs["digital_source"] = None
-                packager = procs["digital_packager"]
-                procs["digital_packager"] = None
+            if procs[source_role] is source_proc:
+                procs[source_role] = None
+                packager = procs[packager_role]
+                procs[packager_role] = None
                 kill_process(packager, timeout=TV_PACKAGER_STOP_TIMEOUT)
-                reset_lane(LANE_DIGITAL, "error")
-                if ALWAYS_ON:
+                reset_lane(lane, "error")
+                if ALWAYS_ON and primary:
                     always_on_wakeup.set()
 
     threading.Thread(target=monitor, daemon=True).start()
-    print(f"Digital: {channel['name']} @ {channel['frequency']} Hz")
+    print(f"Digital ({lane}, adapter {DIGITAL_ADAPTERS[lane]}): {channel['name']} @ {channel['frequency']} Hz")
     return True, None, False
 
 
@@ -5444,17 +5524,19 @@ def lane_plays(lane, key, value):
 
 
 def perform_digital_tune(channel_id, quality="medium", token=None,
-                         override=False):
+                         override=False, lane=LANE_DIGITAL):
     request_started = time.monotonic()
     quality = normalize_quality(quality)
     # Checked before the refresh is preempted: a locked tuner should not have
     # its guide sweep cancelled for a tune that is about to be refused.
-    held = lock_holder(LANE_DIGITAL, token, override)
-    if held and not lane_plays(LANE_DIGITAL, "id", channel_id):
+    held = lock_holder(lane, token, override)
+    if held and not lane_plays(lane, "id", channel_id):
         return lock_refusal(held, "tune")
-    # A scheduled guide refresh holds the same front-end. Someone asking to
-    # watch something outranks it, so take it back rather than refusing.
-    preempt_guide_refresh()
+    # A scheduled guide refresh holds the same front-end (tuner A's). Someone
+    # asking to watch something outranks it, so take it back rather than refusing.
+    primary = lane == LANE_DIGITAL
+    if primary:
+        preempt_guide_refresh()
     channel = next(
         (item for item in load_channels() if item["id"] == channel_id), None
     )
@@ -5462,40 +5544,43 @@ def perform_digital_tune(channel_id, quality="medium", token=None,
         return {"error": "Channel not found"}, 404
 
     with lock:
-        held = lock_holder(LANE_DIGITAL, token, override)
-        watching = bool(held) and lane_plays(LANE_DIGITAL, "id", channel_id)
+        held = lock_holder(lane, token, override)
+        watching = bool(held) and lane_plays(lane, "id", channel_id)
         if held and not watching:
             return lock_refusal(held, "tune")
-        busy = busy_reason()
+        # A scan and a guide read use tuner A alone.
+        busy = busy_reason() if primary else None
         if busy:
             return {"error": busy}, 409
         if override:
-            override_tuner_lock(LANE_DIGITAL)
-        digital = feed_client.lane(LANE_DIGITAL)
+            override_tuner_lock(lane)
+        digital = feed_client.lane(lane)
         reused = watching or (
-            lane_plays(LANE_DIGITAL, "id", channel_id)
+            lane_plays(lane, "id", channel_id)
             and digital["quality"] == quality
             # A recording that starts on the channel already playing
             # needs a source generation that feeds its tap.
             and digital.get("taps", [])
-            == recording_tap_ports(channel))
+            == (recording_tap_ports(channel) if primary else []))
         if reused:
             ok, error, stream_reused = True, None, True
         else:
-            tuning_lanes.add(LANE_DIGITAL)
+            tuning_lanes.add(lane)
             try:
+                # An extra tuner feeds no recording: the VCR records on tuner A.
                 ok, error, stream_reused = feed_client.tune_digital(
-                    channel, quality, taps=recording_tap_ports(channel))
+                    channel, quality, taps=recording_tap_ports(channel)) if primary \
+                    else feed_client.tune_digital(channel, quality, taps=(), lane=lane)
             finally:
-                tuning_lanes.discard(LANE_DIGITAL)
-        state = feed_client.lane(LANE_DIGITAL)
-        snapshot = copy.deepcopy(lane_payload(LANE_DIGITAL))
+                tuning_lanes.discard(lane)
+        state = feed_client.lane(lane)
+        snapshot = copy.deepcopy(lane_payload(lane))
     if not ok:
         return {"error": error or "Failed to tune"}, 500
     return {
         "ok": True,
         "_lane": snapshot,
-        "lane": LANE_DIGITAL,
+        "lane": lane,
         "channel": channel,
         "stream_reused": stream_reused,
         "stream_id": state["stream_id"],
@@ -6246,6 +6331,7 @@ class TVHandler(SimpleHTTPRequestHandler):
                         lane,
                     )
                 filename = LANE_PLAYLIST[lane]
+            note_lane_fetch(filename)
             filepath = STREAMS_DIR / filename
             if filepath.exists() and filepath.is_relative_to(STREAMS_DIR):
                 content = filepath.read_bytes()
@@ -7322,6 +7408,9 @@ def main():
         if peer is not None:
             print(f"Tuner pool: with the peer at {PEER_URL}")
             peer.start()
+        if EXTRA_DIGITAL_LANES:
+            print(f"Extra tuners: {', '.join(f'{lane} on adapter {DIGITAL_ADAPTERS[lane]}' for lane in EXTRA_DIGITAL_LANES)}")
+            threading.Thread(target=extra_tuner_worker, daemon=True).start()
         threading.Thread(target=always_on_worker, daemon=True).start()
         threading.Thread(target=guide_worker, daemon=True).start()
         threading.Thread(target=yttv_guide_worker, daemon=True).start()

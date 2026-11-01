@@ -16,7 +16,9 @@ COMMON=(TV_THING_STREAMS_DIR="$STAGE/streams" TV_THING_STATE_DIR="$STAGE/state"
         TV_THING_RECORDINGS_DIR="$STAGE/recordings" TV_THING_ROKU_CONFIG="$STAGE/no-roku.json"
         TV_THING_EPG=0 TV_THING_YTTV_GUIDE=0 TV_THING_ALWAYS_ON=0 TV_THING_RECORD_MIN_FREE_GB=1
         TV_THING_TV_UDP_PORT=18620 TV_THING_RECORD_TAP_PORT=18684 TV_THING_ROKU_TAP_PORT=18670
-        PYTHONUNBUFFERED=1)
+        TV_THING_PEER_HOST=off TV_THING_TUNER_B=off PYTHONUNBUFFERED=1)
+# No tuner pool and no tuner B: host.json's peer_host would hand a staged tune to the real peer
+# (2026-10-31: the "feed stopped" tune retuned viviserv2), and tuner B would open a real adapter.
 fails=0
 pass() { echo "PASS  $*"; }
 fail() { echo "FAIL  $*"; fails=$((fails + 1)); }

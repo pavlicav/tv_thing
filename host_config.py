@@ -37,6 +37,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
+# The lane a second DVB adapter becomes (the tuner_b setting).
+TUNER_B = "digital-b"
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")    # feed_node's, for a node's name
 _HOST = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}|\[[0-9A-Fa-f:.]{2,45}\]")
 # viviserv's recordings disk. Where it is mounted, it is still the default.
@@ -91,6 +93,11 @@ SETTINGS = (
     Setting("digital_adapter", "Digital tuner", "TV_THING_DIGITAL_ADAPTER", (), ("feed", "control"),
             "The DVB adapter (/dev/dvb/adapterN) the digital lane, the scan, the DX meter and the "
             "guide read use. Auto: feed.json's, or else the first one this host has."),
+    Setting("tuner_b", "Second digital tuner", "TV_THING_TUNER_B", (), ("feed", "control"),
+            "A second DVB adapter as a live-only lane (digital-b) in the tuner pool: started by a "
+            "tune, stopped once nobody has watched it for five minutes; the scan, the guide and "
+            "the VCR stay on the first tuner. An adapter number, or off. Auto: the first DVB "
+            "adapter this host has besides the digital tuner's."),
     Setting("video_encoder", "Video encoder", "TV_THING_VIDEO_ENCODER",
             ("cpu", "auto", "nvenc", "vaapi", "qsv"), ("feed",),
             "The live packagers' H.264 encoder. cpu is libx264, and the default: the packager's "
@@ -138,6 +145,14 @@ def check(setting_id, value, saving=False):
             value = int(value)
         if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 31:
             raise ValueError("The digital tuner is an adapter number, 0 to 31")
+        return value
+    if setting_id == "tuner_b":
+        if value == "off":
+            return value
+        if isinstance(value, str) and value.isdigit():
+            value = int(value)
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 31:
+            raise ValueError("The second tuner is an adapter number, 0 to 31, or off")
         return value
     if setting_id == "recordings_dir":
         path = Path(str(value))
@@ -366,6 +381,23 @@ class Host:
                                                                  "; this host has no DVB adapter"))
         return Resolved(present[0], "auto", f"this host's first; feed.json's adapter{configured} is absent")
 
+    def _resolve_tuner_b(self):
+        value, source = self._given("tuner_b")
+        if value is not None and str(value).strip().lower() in ("off", "none", ""):
+            return Resolved("off", source, "set")
+        first = self.value("digital_adapter")
+        if value is not None:
+            try:
+                adapter = int(value)
+            except (TypeError, ValueError):
+                adapter = None
+            if adapter is not None and adapter != first:
+                return Resolved(adapter, source, "set")
+        others = [entry["adapter"] for entry in dvb_adapters(self.root) if entry["adapter"] != first]
+        if others:
+            return Resolved(others[0], "auto", f"this host's adapter{others[0]}, besides the digital tuner's")
+        return Resolved("off", "auto", "this host has one DVB adapter")
+
     def _resolve_video_encoder(self):
         value, source = self._given("video_encoder")
         if value is not None:
@@ -436,6 +468,18 @@ class Host:
         if not self.primary:
             lanes = tuple(replace(lane, description=self.describe_lane(lane, node, adapter))
                           for lane in base.lanes)
+        second = self.value("tuner_b")
+        template = next((lane for lane in base.lanes if lane.id == "digital"), None)
+        if second != "off" and template is not None and not any(lane.id == TUNER_B for lane in lanes):
+            # Its files share no prefix with tuner A's: clearing "digital*" must leave it alone.
+            device = next(d for d in devices if d.id == template.device)
+            devices.append(replace(device, id=TUNER_B, name="Digital front-end B", adapter=second,
+                                   detail=self.describe_device("dvb", second, node)))
+            lanes = (*lanes, replace(
+                template, id=TUNER_B, device=TUNER_B, name="Digital TV B",
+                description=self.describe_lane(template, node, second).replace("television", "television, tuner B"),
+                playlist="tunerb.m3u8", segment_prefix="tunerbseg", files=("tunerb", "tunerbseg"),
+                process="digital_b_packager"))
         if node == base.node and tuple(devices) == base.devices and lanes == base.lanes:
             return base
         return replace(base, node=node, devices=tuple(devices), lanes=lanes)

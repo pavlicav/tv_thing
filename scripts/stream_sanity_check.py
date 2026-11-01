@@ -348,6 +348,8 @@ def tune_and_observe(base_url, channel, args, seen_segments, samples,
         )
         if token:
             payload["token"] = token
+        if getattr(args, "tuner", None):
+            payload["tuner"] = args.tuner
         tune = http_json(
             base_url, "/api/v1/tune", method="POST",
             payload=payload,
@@ -384,7 +386,8 @@ def tune_and_observe(base_url, channel, args, seen_segments, samples,
     deadline = started + args.max_request_seconds
     next_sample = 0.0
     while time.monotonic() < deadline and first_segment is None:
-        found = collect_playlist(base_url, seen_segments, failures, args)
+        found = collect_playlist(base_url, seen_segments, failures, args,
+                                 playlist=getattr(args, "playlist", None) or "live.m3u8")
         if found:
             first_segment = found[0]
             break
@@ -406,7 +409,8 @@ def tune_and_observe(base_url, channel, args, seen_segments, samples,
     round_start_count = len(seen_segments)
     dwell_deadline = time.monotonic() + args.dwell_seconds
     while time.monotonic() < dwell_deadline:
-        collect_playlist(base_url, seen_segments, failures, args)
+        collect_playlist(base_url, seen_segments, failures, args,
+                         playlist=getattr(args, "playlist", None) or "live.m3u8")
         sample_host(
             base_url, args.server_pid, samples, failures,
             args.api_version,
@@ -658,6 +662,11 @@ def main(argv=None):
              "once nobody watches. Applies SLIDES_DEFAULTS to any limit not given.",
     )
     parser.add_argument("--lock-owner", default="stream gate")
+    parser.add_argument(
+        "--lane", default=None,
+        help="gate this digital lane (e.g. digital-b, a second tuner) instead of tuner A: "
+             "each tune names it, carries its lock, and its own playlist is watched.",
+    )
     explicit = {
         action.dest for action in parser._actions
         if any(option in (argv if argv is not None else sys.argv[1:])
@@ -785,7 +794,17 @@ def main(argv=None):
                 selected = [first, sibling]
         if len(selected) < 2:
             selected = selected * 2
-        tuned_lane = "analog" if args.cable_channel else "digital"
+        tuned_lane = "analog" if args.cable_channel else (args.lane or "digital")
+        if args.lane:
+            # A second digital lane: named on each tune, its own playlist and segments
+            # (tunerb.m3u8 writes tunerbseg_*).
+            status = http_json(args.url, "/api/v1/status")
+            info = (status.get("lanes") or {}).get(args.lane)
+            if not info:
+                raise RuntimeError(f"the server has no {args.lane} lane")
+            args.playlist = info["stream"]["playlist_path"].rsplit("/", 1)[-1]
+            args.tuner = f"{status['node']}:{args.lane}"
+            segment_prefix = args.playlist.removesuffix(".m3u8") + "seg"
         for index in range(args.retunes if not (args.roku_target or args.slides) else 0):
             channel = selected[index % len(selected)]
             print(

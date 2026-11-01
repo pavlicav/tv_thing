@@ -343,7 +343,11 @@ class LocalFeed:
             running = ops.lane_is_running(lane)
             alive = running and ops.lane_processes_alive(lane)
         ready = ops.lane_stream_ready(lane)
-        return {**state, "running": running, "alive": alive, "ready": ready, **self.node.view(lane)}
+        # When a player last fetched one of its segments (server.lane_fetched), for the
+        # extra tuner's idle stop.
+        fetched = getattr(ops, "lane_fetched", {}).get(lane)
+        return {**state, "running": running, "alive": alive, "ready": ready, "fetched_at": fetched,
+                **self.node.view(lane)}
 
     def running_lanes(self):
         return [lane.id for lane in self.node.config.lanes if self.ops.lane_is_running(lane.id)]
@@ -388,16 +392,21 @@ class LocalFeed:
                     if attempt == 2:
                         raise
 
-    def tune_digital(self, channel, quality, taps=(), op_id=None, expected=None):
+    def tune_digital(self, channel, quality, taps=(), op_id=None, expected=None, lane=None):
         """(ok, error, stream reused) for a fresh digital generation on this channel,
-        also feeding these recording tap ports."""
+        also feeding these recording tap ports. ``lane``: a digital lane other than tuner A."""
+        lane = lane or self.ops.LANE_DIGITAL
+
         def tune():
-            ok, error, reused = self.ops.start_digital(channel, quality, list(taps)) if taps \
-                else self.ops.start_digital(channel, quality)
+            if lane != self.ops.LANE_DIGITAL:
+                ok, error, reused = self.ops.start_digital(channel, quality, [], lane=lane)
+            else:
+                ok, error, reused = self.ops.start_digital(channel, quality, list(taps)) if taps \
+                    else self.ops.start_digital(channel, quality)
             if not ok:
-                self.ops.lanes[self.ops.LANE_DIGITAL]["error"] = error or "Failed to tune"
+                self.ops.lanes[lane]["error"] = error or "Failed to tune"
             return ok, error, reused
-        return self._command(self.ops.LANE_DIGITAL, tune, op_id, expected)
+        return self._command(lane, tune, op_id, expected)
 
     def tune_analog(self, channel, quality, op_id=None, expected=None):
         """(ok, error, tuner) for a fresh analog generation on this cable channel."""

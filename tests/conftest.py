@@ -14,6 +14,8 @@ collect_ignore = [] if os.environ.get("TV_THING_INTEGRATION") == "1" else ["test
 # never this host's settings file (host_config.py), nor a role read from its hostname.
 os.environ["TV_THING_HOST_CONFIG"] = str(Path(__file__).with_name("no-host-settings.json"))
 os.environ["TV_THING_NODE_ROLE"] = "primary"
+# viviserv has one DVB adapter; a host with two would otherwise grow tuner B in the suite.
+os.environ["TV_THING_TUNER_B"] = "off"
 
 
 @pytest.fixture(autouse=True)

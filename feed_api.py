@@ -95,9 +95,10 @@ class FeedAPI:
                 op = {"op_id": body.get("op_id"), "expected": body.get("expected")}
                 if not op["op_id"]:
                     raise ValueError("a tune needs an op_id")
-                if lane == local.ops.LANE_DIGITAL:
+                if lane in getattr(local.ops, "DIGITAL_LANES", (local.ops.LANE_DIGITAL,)):
+                    extra = {} if lane == local.ops.LANE_DIGITAL else {"lane": lane}
                     result = local.tune_digital(body["channel"], body.get("quality", "medium"),
-                                                taps=tuple(body.get("taps") or ()), **op)
+                                                taps=tuple(body.get("taps") or ()), **op, **extra)
                 elif lane == local.ops.LANE_ANALOG:
                     result = local.tune_analog(body["channel"], body.get("quality", "medium"), **op)
                 else:
@@ -371,8 +372,8 @@ class RemoteFeed:
                 return result
         raise AssertionError("unreachable")
 
-    def tune_digital(self, channel, quality, taps=()):
-        ok, error, reused = self._command("digital", "lanes/digital/tune",
+    def tune_digital(self, channel, quality, taps=(), lane="digital"):
+        ok, error, reused = self._command(lane, f"lanes/{lane}/tune",
                                           {"channel": channel, "quality": quality, "taps": list(taps)})["result"]
         return ok, error, reused
 
