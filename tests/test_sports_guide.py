@@ -99,6 +99,15 @@ def test_a_game_on_a_roku_source_is_on_its_live_sports_number():
     assert rows[2]["live"] is True and rows[3]["live"] is False
 
 
+def test_an_nwsl_game_on_espn_plus_is_on_its_live_sports_number():
+    espn = {"nwsl": [game(30, "2026-11-01T22:00Z", ("Boston Legacy FC", "Boston"), ("Angel City FC", "Angel City"), "ESPN+"),
+                     # NWSL+ is not in YouTube TV: nowhere here.
+                     game(31, "2026-11-01T22:00Z", ("Portland Thorns FC", "Portland"), ("Houston Dash", "Houston"), "NWSL+")]}
+    rows = sports_guide.day_games(espn, {"nwsl": {"items": [{"id": "30", "tv_number": 72}]}}, CHANNELS)
+    assert [(row["title"], row["network"], row["tv_number"], row["via"]) for row in rows] == [
+        ("Boston at Angel City", "ESPN+", 72, "nwsl")]
+
+
 def test_a_regional_nfl_game_is_on_its_own_markets_station():
     # October 25: YouTube TV's CBS (Lansing's) had Colts at Vikings, the antenna's (Washington's)
     # Bengals at Ravens; the others in the window were on Sunday Ticket.

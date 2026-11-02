@@ -2677,7 +2677,7 @@ def api_v1_roku_source(source_id, requested_date=None):
     def catalog():
         listing = roku.catalog(source_id, requested_date)
         listings = {source_id: listing}
-        # A day's games are numbered across the whole block, listed sources (NHL) too,
+        # A day's games are numbered across the whole block, listed sources too,
         # so a game has the same number here as in the guide.
         for partner in channel_lineup.game_partners(source_id):
             if partner != source_id and (partner in roku_lane.SOURCES
@@ -4580,6 +4580,7 @@ SPORTS_LABELS = {
     roku_lane.THURSDAY_NIGHT_FOOTBALL: "NFL Football · Prime Video",
     roku_lane.MLB: "MLB Baseball",
     roku_lane.NHL: "NHL Hockey · ESPN Unlimited",
+    roku_lane.NWSL: "NWSL Soccer · ESPN Unlimited",
 }
 
 
@@ -4623,11 +4624,12 @@ def sports_event(source_id, item, now):
     name = item.get("name") or "Game"
     nicknames = [(game.get(side) or {}).get("nickname") for side in ("away", "home")]
     extra = {}
-    if source_id == roku_lane.NHL:
+    if source_id in roku_lane.ESPN_UNLIMITED:
         stream = item.get("espn_unlimited")
         if stream is None:
             return None
-        text = _nhl_text(game, stream)
+        text = (_nhl_text(game, stream) if source_id == roku_lane.NHL
+                else "On ESPN+, on ESPN Unlimited in YouTube TV.")
         extra = {"exclusive": stream["exclusive"],
                  **({"blackout": sorted(set(stream["blackout"].values()))} if stream["blackout"] else {})}
     elif source_id == roku_lane.MLB:

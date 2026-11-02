@@ -10,9 +10,9 @@ Channel 6 plays it as slides (static/sports-guide.html, from
   station when its listings name it;
 * else on one of the Roku's game sources, on its Live Sports number: any
   other Sunday-afternoon game on Sunday Ticket, Thursday Night Football on
-  Prime Video, a baseball game on MLB.TV, an NHL game on ESPN Unlimited.
+  Prime Video, a baseball game on MLB.TV, an NHL or NWSL game on ESPN Unlimited.
 
-Streaming-only games (Peacock, Apple TV, ESPN+ outside hockey), regional
+Streaming-only games (Peacock, Apple TV, ESPN+ outside hockey and the NWSL), regional
 sports networks and games already over are left out. Sports go in a fixed
 order, each sport's games by start time, then by channel number.
 """
@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 from roku_control.config import normalize_channel_name
 from roku_control.networks import NETWORKS
-from roku_control.sports import NETWORK_ALIASES, nhl_on_espn_unlimited
+from roku_control.sports import NETWORK_ALIASES, nhl_on_espn_unlimited, nwsl_on_espn_unlimited
 
 # Each sport and its leagues, as (league, tag), in the order the guide shows them.
 # The pros and the colleges each get their own pages, as the papers listed them.
@@ -49,7 +49,9 @@ SHORT_NAMES = {"Big Ten Network": "BTN", "NBC Sports Network": "NBCSN",
                "CBS Sports Network": "CBSSN", "The CW": "CW"}
 # The game sources' Live Sports numbers, named for the service that streams the game.
 SERVICES = {"sunday-ticket": "Sunday Ticket", "thursday-night-football": "Prime Video",
-            "mlb": "MLB.TV", "nhl": "ESPN+"}
+            "mlb": "MLB.TV", "nhl": "ESPN+", "nwsl": "ESPN+"}
+# The leagues whose games ESPN Unlimited streams, each its own game source.
+ESPN_UNLIMITED = {"nhl": nhl_on_espn_unlimited, "nwsl": nwsl_on_espn_unlimited}
 
 
 class Channels:
@@ -153,8 +155,8 @@ def _where(league, game, numbered, channels):
         if source in ("sunday-ticket", "thursday-night-football"):
             return _service(source, numbered.get((source, game_id)))
     found = _national(game, channels)
-    if found is None and league == "nhl" and nhl_on_espn_unlimited(game):
-        found = _service("nhl", numbered.get(("nhl", game_id)))
+    if found is None and league in ESPN_UNLIMITED and ESPN_UNLIMITED[league](game):
+        found = _service(league, numbered.get((league, game_id)))
     return found
 
 

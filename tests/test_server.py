@@ -1293,7 +1293,7 @@ def test_the_guide_lists_every_sport_together_on_the_live_sports_numbers(monkeyp
 
     assert {day for _, day in asked} == {"2027-01-15", "2027-01-16", "2027-01-17"}
     assert {source for source, _ in asked} == {
-        "mlb", "sunday-ticket", "thursday-night-football", "nhl"}
+        "mlb", "sunday-ticket", "thursday-night-football", "nhl", "nwsl"}
     rows = {key: channel for key, channel in payload["channels"].items() if key.startswith("games/")}
     # The day's games share the block from 71 (VizelVision is on 70) by start
     # time, whatever the sport; the game already over keeps its number and leaves the guide.

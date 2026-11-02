@@ -171,7 +171,7 @@ def test_roku_lane_lock_tune_and_reuse_over_http(roku_api):
     request, lane = roku_api
     code, sources = request("/api/v1/sources")
     roku_ids = [s["id"] for s in sources["sources"] if s.get("lane") == "roku"]
-    assert roku_ids == ["youtube-tv", "mlb", "thursday-night-football", "sunday-ticket", "nhl", "roku-manual"]
+    assert roku_ids == ["youtube-tv", "mlb", "thursday-night-football", "sunday-ticket", "nhl", "nwsl", "roku-manual"]
     code, channels = request("/api/v1/sources/youtube-tv")
     assert code == 200 and [i["id"] for i in channels["items"]] == ["NBC", "ESPN"]
     code, games = request("/api/v1/sources/mlb?date=2026-10-01")

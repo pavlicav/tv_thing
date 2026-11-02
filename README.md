@@ -629,8 +629,16 @@ are numbered together by start time, so 61 can be a hockey game tonight and a
 football game on Sunday. An airing runs from its start to the projected final
 and goes once the game is over. **Watch** puts one of today's games on the
 Roku through the Watch page, as its own source would (Sunday Ticket, Thursday
-Night Football, MLB, NHL). Record is not offered on these rows yet; the VCR
-page tapes a game.
+Night Football, MLB, NHL, NWSL). Record is not offered on these rows yet; the
+VCR page tapes a game.
+
+**So is some of the NWSL.** A game ESPN's scoreboard lists nationally on "ESPN+"
+or "ESPN Unlmtd" is the `nwsl` source, found on the same ESPN page. That is few
+games: 9 of 2026's 240 listed ESPN+ (7 on the season's last day), most of the
+rest ION, NWSL+, Victory+, Prime Video or CBSSN. The ones on a YouTube TV channel
+are on that channel's row, and ION is on the antenna's 66.1. NWSL+ and Victory+
+are in neither the YouTube TV catalog nor the lineup. On the page its row is
+"National Women's Soccer League", one card a game (seen 2026-11-01).
 
 **Hockey is ESPN Unlimited's.** YouTube TV's main plan has carried ESPN
 Unlimited since 2026-09-01, and with it the NHL's out-of-market games (NHL
@@ -1016,7 +1024,7 @@ Every channel has a TV Thing number, laid out like an old cable lineup card in
 | 40–59 | Sports cable from YouTube TV: TBS, TNT, the ESPNs and the rest in their old order, then USA and truTV |
 | 60–69 | News and more: CNN, MS NOW, FOX News, CNBC, the Weather Channel, Discovery, HGTV, Smithsonian, FX, Comedy Central |
 | 70 | VizelVision again |
-| 71–99 | Live Sports: the day's games, football, baseball and hockey together by start time (NFL Sunday Ticket, Thursday Night Football, MLB, and the NHL on ESPN Unlimited) |
+| 71–99 | Live Sports: the day's games, football, baseball, hockey and soccer together by start time (NFL Sunday Ticket, Thursday Night Football, MLB, and the NHL and NWSL on ESPN Unlimited) |
 | 100–109 | Roku (Manual Roku on 109) |
 | 110–289 | The digital tier, by genre, YouTube TV's other channels and the antenna's subchannels together: news and business, learning and lifestyle, kids, entertainment, music (Cairo Radio on 197), classic TV, movies and westerns, crime and reality, game shows, Spanish, shopping, faith |
 | 290–299 | Repeaters and other markets; 292–297 held for YouTube TV's Lansing locals once a Michigan antenna takes their numbers |
@@ -1100,7 +1108,7 @@ A game is listed only when it can be watched here, and shows where:
   there.
 * **On a Roku game source**, by its Live Sports number and the service:
   Sunday Ticket for any other Sunday-afternoon CBS or FOX game, Prime Video
-  for Thursday Night Football, MLB.TV, and ESPN+ for the NHL on ESPN
+  for Thursday Night Football, MLB.TV, and ESPN+ for the NHL and NWSL on ESPN
   Unlimited.
 
 Streaming-only games (Peacock, Apple TV's MLS, Prime Video's NBA, ESPN+ outside

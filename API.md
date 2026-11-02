@@ -355,7 +355,8 @@ refreshed in the background), `generation` and `reuse_max_age_seconds`.
   or MLB.TV), `thursday-night-football` (Prime Video), `sunday-ticket`
   (Sunday-afternoon CBS/FOX games), `nhl` (NHL games on ESPN Unlimited,
   found on YouTube TV's ESPN page; each item's `espn_unlimited` says whether
-  it is an exclusive and which markets may black it out), and `roku-manual`.
+  it is an exclusive and which markets may black it out), `nwsl` (the same,
+  for NWSL games ESPN lists on ESPN+), and `roku-manual`.
   Every item has an
   `id` (the `channel_id` to tune) and a `name`; games carry `game`,
   `state`, `start_time` and `playable`.
