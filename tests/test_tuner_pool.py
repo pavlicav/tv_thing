@@ -199,6 +199,17 @@ def test_a_second_nodes_rescan_keeps_the_shared_plan(monkeypatch):
     assert saved == [] and received == [([7, 8], {8: None})]
 
 
+def test_a_box_in_another_market_owns_its_plan(monkeypatch, tmp_path):
+    saved = []
+    monkeypatch.setattr(server.HOST, "_cache", {**server.HOST._cache,
+                                                "role": server.host_config.Resolved("second", "auto", "")})
+    monkeypatch.setattr(server, "MARKET", "lansing")
+    monkeypatch.setattr(server, "save_channels", saved.append)
+    monkeypatch.setattr(server, "save_reception", lambda scanned, got: None)
+    _run_rescan(monkeypatch)
+    assert saved == [[{"id": "w8", "rf_channel": 8}]]
+
+
 def _run_rescan(monkeypatch):
     from io import BytesIO
     import feed_node
@@ -234,6 +245,9 @@ class FakePeer:
 
     def location(self):
         return None
+
+    def plan(self):
+        return None             # a peer from before plans
 
     def tuners(self):
         return self._tuners

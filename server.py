@@ -216,6 +216,8 @@ ALWAYS_ON = os.environ.get("TV_THING_ALWAYS_ON", "1") != "0"
 PLAYBACK_STATE_FILE = STREAMS_DIR / "playback_state.json"
 HLS_SEGMENT_TIME = float(os.environ.get("TV_THING_HLS_SEGMENT_TIME", "0.6"))
 VIDEO_ENCODER = HOST.value("video_encoder")    # TV_THING_VIDEO_ENCODER, the Config page, else cpu
+# The city whose stations this box's antenna gets (Config's market): see home_market.
+MARKET = HOST.value("market")
 VAAPI_DEVICE = os.environ.get("TV_THING_VAAPI_DEVICE", "/dev/dri/renderD128")
 VAAPI_DECODE = os.environ.get("TV_THING_VAAPI_DECODE", "1") != "0"
 NVENC_PROBE_ATTEMPTS = int(
@@ -892,7 +894,8 @@ def local_tuners():
             stream = payload["stream"]
             rf = (payload["selection"] or {}).get("rf_channel")
             result.append({
-                "id": tuner_id(lane), "node": FEED_CONFIG.node, "location": location, "lane": lane, "kind": "digital",
+                "id": tuner_id(lane), "node": FEED_CONFIG.node, "location": location, "market": MARKET,
+                "lane": lane, "kind": "digital",
                 "name": payload["name"], "local": True, "reachable": not unknown,
                 "state": "unknown" if unknown else stream["state"],
                 "selection": payload["selection"], "quality": payload["quality"],
@@ -955,6 +958,7 @@ def api_v1_tuners_payload(local=False):
     peer reads."""
     tuners = local_tuners() if local else pool_tuners()
     return {"api_version": API_VERSION, "node": FEED_CONFIG.node, "location": node_location(),
+            "market": MARKET, "plan_revision": plan_revision(),
             "peer": peer_payload(), "tuners": tuners, "summary": tuner_pool.summary(tuners)}
 
 
@@ -1001,7 +1005,7 @@ def api_v1_digital_tune(body, quality):
     local_only = bool(body.get("local_only")) or peer is None
     if local_only and len(DIGITAL_TUNER_LANES) == 1:
         return here()
-    channel = next((item for item in load_channels() if item["id"] == channel_id), None)
+    channel = dial_channel(channel_id) or own_channel(channel_id)
     if channel is None:
         return here()               # 404, in the usual words
     tuners = local_tuners() if local_only else pool_tuners()
@@ -1131,11 +1135,134 @@ def api_v1_peer_inputs():
             "relay_prefix": peers.RELAY_PREFIX, **read}, 200
 
 
-def load_channels():
-    if CHANNELS_FILE.exists():
-        with open(CHANNELS_FILE) as f:
+# ---------------------------------------------------------------------------
+# Markets: one dial across cities (Phase B)
+#
+# A station is its TSID and service ID wherever it is received (tuner_pool.receives). Each box
+# owns the plan of its own antenna's market: the home market's (the primary's) is the tracked
+# channels.json; a box in another market keeps its own, state/channels.json, from its own
+# scans. Each serves it (GET /api/v1/plan) and reads its peer's (peers.PeerClient.plan). The
+# dial (antenna_dial) is the home market's channels, keyed digital/<number> as always, then
+# each other market's that the home market does not carry, keyed digital@<market>/<number>,
+# their ids <market>/<id>, numbered by the box that owns them. Only that market's tuners play
+# them (tuner_pool.candidates), so elsewhere they play over the relay.
+# ---------------------------------------------------------------------------
+def home_market():
+    """The home city's market: the primary's own. A second node learns it from the
+    primary's plan, and until then takes the default."""
+    if HOST.primary:
+        return MARKET
+    plan = peer.plan() if peer is not None else None
+    if plan and plan.get("primary") and plan.get("market"):
+        return plan["market"]
+    return host_config.DEFAULT_MARKET
+
+
+def away():
+    """Whether this box is outside the home market: it then owns its own plan."""
+    return MARKET != home_market()
+
+
+def own_plan_file():
+    return AWAY_CHANNELS_FILE if away() else CHANNELS_FILE
+
+
+def market_source(market):
+    """The lineup source of a market's antenna channels: digital for the home market's,
+    digital@<market> for another's (lineup.json keys digital@lansing/6.1)."""
+    return lineup.ANTENNA if market == home_market() else f"{lineup.ANTENNA}@{market}"
+
+
+def read_plan(path):
+    try:
+        with open(path) as f:
             return json.load(f)
-    return []
+    except FileNotFoundError:
+        return []
+
+
+def load_channels():
+    """This box's antenna's plan: what its own tuners tune, its guide reads and its VCR
+    records. The tracked channels.json in the home market; this box's own in another
+    (nothing until it is scanned there). The dial adds the other market's (antenna_dial)."""
+    return read_plan(own_plan_file())
+
+
+def plan_revision():
+    """Changes whenever this box's plan does: the peer then reads it again."""
+    try:
+        stat = own_plan_file().stat()
+        return f"{MARKET}:{stat.st_mtime_ns}:{stat.st_size}"
+    except OSError:
+        return f"{MARKET}:none"
+
+
+def api_v1_plan():
+    """``GET /api/v1/plan``: this box's own antenna's channels as its dial numbers them, with
+    their lineup keys, its market and whether it is the primary (whose market is home)."""
+    return {"api_version": API_VERSION, "node": FEED_CONFIG.node, "market": MARKET,
+            "primary": HOST.primary, "revision": plan_revision(),
+            "rows": [dict(row, key=key) for key, row in numbered_on_dial(load_channels())]}
+
+
+def antenna_dial():
+    """``[(source, key, row)]``: every antenna channel on the dial, the home market's first,
+    then each other market's that the home market does not carry (by TSID and service ID).
+    A row outside the home market has its absolute id, ``<market>/<id>``, and its ``market``
+    and ``node`` (the owner, who numbered it); every row has its ``market``."""
+    home = home_market()
+    plan = peer.plan() if peer is not None else None
+    theirs = None
+    if plan and plan.get("market") and plan.get("node") != FEED_CONFIG.node:
+        theirs = (plan["market"], plan.get("node"), [(row.get("key"), row) for row in plan["rows"]
+                                                     if isinstance(row, dict) and row.get("id")])
+    own = (MARKET, FEED_CONFIG.node, numbered_on_dial(load_channels()))
+    if MARKET == home:
+        parts = [own]
+    elif theirs and theirs[0] == home:
+        parts = [theirs]
+    else:
+        # No box in the home market answers: the tracked plan, numbered here.
+        parts = [(home, None, numbered_on_dial(read_plan(CHANNELS_FILE), lineup.ANTENNA))]
+    if MARKET != home:
+        parts.append(own)
+    if theirs and theirs[0] not in (home, MARKET):
+        parts.append(theirs)
+    dial, stations = [], set()
+    for market, node, rows in parts:
+        source = market_source(market)
+        for key, row in rows:
+            station = (row.get("tsid"), row.get("service_id"))
+            if market != home and row.get("tsid") is not None and station in stations:
+                continue            # the home market's channel already: one station, one channel
+            if row.get("tsid") is not None:
+                stations.add(station)
+            row = dict(row, market=market)
+            if market != home:
+                row["id"] = f"{market}/{row['id']}"
+            if node and node != FEED_CONFIG.node:
+                row["node"] = node
+            dial.append((source, key, row))
+    return dial
+
+
+def dial_channel(channel_id):
+    """The dial's row for ``channel_id``, any market's, or None."""
+    return next((row for _, _, row in antenna_dial() if row["id"] == channel_id), None)
+
+
+def own_channel(channel_id):
+    """This box's own plan row for ``channel_id``, which its own tuners can play, or None.
+    Outside the home market its channels' ids on the dial are ``<market>/<id>``: the row
+    comes back with that id, which its lane then plays."""
+    channels = load_channels()
+    found = next((item for item in channels if item["id"] == channel_id), None)
+    prefix = f"{MARKET}/"
+    if found is None and away() and isinstance(channel_id, str) and channel_id.startswith(prefix):
+        found = next((item for item in channels if item["id"] == channel_id[len(prefix):]), None)
+        if found is not None:
+            found = dict(found, id=channel_id)
+    return found
 
 
 channel_lineup = lineup.Lineup(LINEUP_FILE, LINEUP_STATE_FILE)
@@ -1178,20 +1305,28 @@ web_streams = internet_streams.InternetStreams(
     INTERNET_STREAMS_FILE, resolver=lambda stream: resolve_internet_stream(stream))
 
 
-def antenna_on_dial(channels):
-    """``[(lineup key, channel)]`` for the antenna's channels lineup.json does not hide."""
+def antenna_on_dial(channels, source=None):
+    """``[(lineup key, channel)]`` for the antenna's channels lineup.json does not hide.
+    ``source``: their lineup source, this box's market's by default (market_source)."""
+    source = source or market_source(MARKET)
     return [(key, channel) for key, channel in zip(lineup.antenna_keys(channels), channels)
-            if not channel_lineup.hides(lineup.ANTENNA, key)]
+            if not channel_lineup.hides(source, key)]
 
 
-def numbered_channels(channels):
+def numbered_on_dial(channels, source=None):
+    """``[(lineup key, channel)]`` of numbered_channels."""
+    source = source or market_source(MARKET)
+    shown = antenna_on_dial(channels, source)
+    views = channel_lineup.number(source, [(key, channel.get("name")) for key, channel in shown])
+    return [(key, dict(channel, **(view or {}))) for (key, channel), view in zip(shown, views)]
+
+
+def numbered_channels(channels, source=None):
     """Antenna channels with their TV Thing numbers (tv_number, tv_name,
     tv_section). A channel lineup.json does not list -- one a rescan has
     just found -- is given the next number in its section here. One it hides
-    is left out."""
-    shown = antenna_on_dial(channels)
-    views = channel_lineup.number(lineup.ANTENNA, [(key, channel.get("name")) for key, channel in shown])
-    return [dict(channel, **(view or {})) for (_, channel), view in zip(shown, views)]
+    is left out. ``source``: their lineup source, this box's market's by default."""
+    return [channel for _, channel in numbered_on_dial(channels, source)]
 
 
 def internet_views():
@@ -1298,11 +1433,13 @@ def channels_from_scan(results):
 
 
 def save_channels(channels):
-    """Atomically replace the channel list."""
-    temp = CHANNELS_FILE.with_suffix(".tmp")
+    """Atomically replace this box's plan (own_plan_file)."""
+    path = own_plan_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(".tmp")
     with open(temp, "w") as f:
         json.dump(channels, f, indent=2)
-    os.replace(temp, CHANNELS_FILE)
+    os.replace(temp, path)
 
 
 def load_playback_state():
@@ -2857,6 +2994,13 @@ RECEPTION_FILE = STATE_DIR / "reception.json"
 # How well this node's antenna plays each RF channel, from its tuners' frontends while they
 # play (signal_health.py; signal_health_worker writes it).
 SIGNAL_HEALTH_FILE = STATE_DIR / "signal_health.json"
+# A box outside the home market keeps its own antenna's plan here, written by its rescans; in
+# the home market its plan is the tracked channels.json (own_plan_file).
+AWAY_CHANNELS_FILE = STATE_DIR / "channels.json"
+# The peer's plan as last read (GET /api/v1/plan): its channels stay on the dial while it is down.
+PEER_PLAN_FILE = STATE_DIR / "peer_plan.json"
+if peer is not None:
+    peer.keep_plan_in(PEER_PLAN_FILE)
 signal_grades = signal_health.SignalHealth(SIGNAL_HEALTH_FILE)
 # The feed's recorder processes (feed_node.Recorders); the timers, pieces and
 # finalizing below are control's.
@@ -5655,9 +5799,8 @@ def perform_digital_tune(channel_id, quality="medium", token=None,
     primary = lane == LANE_DIGITAL
     if primary:
         preempt_guide_refresh()
-    channel = next(
-        (item for item in load_channels() if item["id"] == channel_id), None
-    )
+    # Only this box's own antenna's channels: another market's is its owner's to play.
+    channel = own_channel(channel_id)
     if not channel:
         return {"error": "Channel not found"}, 404
 
@@ -6490,6 +6633,10 @@ class TVHandler(SimpleHTTPRequestHandler):
             self.send_json(payload, status=status)
             return
 
+        if path == "/api/v1/plan":
+            self.send_json(api_v1_plan())
+            return
+
         if path == "/api/v1/tuners":
             local = parse_qs(parsed.query).get("local", ["0"])[0] not in ("", "0", "false")
             self.send_json(api_v1_tuners_payload(local=local))
@@ -6899,9 +7046,10 @@ class TVHandler(SimpleHTTPRequestHandler):
             channels = channels_from_scan(found)
             if channels:
                 save_reception(channels_to_scan, {result["rf_channel"]: result.get("tsid") for result in found})
-                # The plan is the primary's: a second node's scan says what its antenna
-                # gets (its reception), and leaves the dial both nodes share as it is.
-                if HOST.primary:
+                # The home market's plan is the primary's: a second node there says what
+                # its antenna gets (its reception) and leaves the plan as it is. A box in
+                # another market owns its market's plan (own_plan_file).
+                if HOST.primary or away():
                     save_channels(channels)
                 send_sse("done", {
                     "ok": True,

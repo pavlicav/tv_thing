@@ -252,6 +252,23 @@ each tuner's lock by tuner id.
 A second node's rescan writes only its reception: the plan (`channels.json`, tracked) is
 the primary's, and its rescan writes both.
 
+**Markets** (one dial across cities). Each box has a `market` (Config; a short name, auto
+`dc`); the home market is the primary's, which a second node learns from the primary's plan.
+A box in the home market tunes from the tracked `channels.json`; a box in another market owns
+its market's plan, `state/channels.json`, which its rescans write. `GET /api/v1/plan` is this
+box's own antenna's channels as its dial numbers them: `{node, market, primary, revision,
+rows}`, each row a plan row with its lineup `key` and `tv_number`/`tv_name`/`tv_section`.
+`/api/v1/tuners` carries `market` and `plan_revision` at the top level and `market` on each
+tuner; a peer reads the plan again when `plan_revision` changes, and at least every minute,
+and keeps the last one in `state/peer_plan.json`. The dial's antenna channels are the home
+market's, keyed `digital/<number>` with their ids as always, then each other market's that the
+home market does not carry (one station, by TSID and service ID, is one channel), keyed
+`digital@<market>/<number>`, with `channel_id` `<market>/<id>`, `market` and `node` (its
+owner), numbered by the owner (lineup.json's `digital@*` section, 400-449, unless one names the
+market), and no `stream` or `listings` here yet. Only a tuner in a channel's market plays it:
+another market's channel is relayed from its owner's tuners. A box's own tuners tune only its
+own plan's channels; anything else is 404 there.
+
 A box with a second DVB adapter has **tuner B**, lane `digital-b` (Config's `tuner_b`; auto:
 the first adapter besides the digital tuner's), playlist `tunerb.m3u8`. It is in `lanes`,
 `frontends` and `tuners` like any lane, and is tuned with `tuner: "<node>:digital-b"` or by the

@@ -23,6 +23,7 @@ Until Phase 2 lands, TV Thing is one process, and a restart breaks invariants 1 
 | 7 | Client URLs and API shapes on `:8080` and `/tv/` do not change. `/internal/` and `/feed/v1/` are never reachable through Apache. | VizelVision, the Watch page and the sideloaded Roku app take no part in the migration. Resolved upstream URLs carry tokens. | `test_api_contract.py` unchanged; drill rows D2–D4. |
 | 8 | A relay that is playing keeps playing while control is down. | Web streams are on air too. | Drill row A1 (with an internet stream playing). |
 | 9 | A node never treats its peer's tuners as free unless the peer answered within 6 s, and never writes the peer's state: a peer's tuner is changed, locked and released only by the peer's own API, and a node's request to its peer (`local_only`) is never forwarded again. | Two writers of one tuner's lock or lane would break invariants 3 and 6 across machines; a tune that bounced between nodes would retune both. | `tests/test_tuner_pool.py`, `tests/test_peers.py`; the staged two-node check (a node's control stopped: its tuners read unknown within 8 s). |
+| 10 | Each market's plan has one writer, the box in that market that owns it (the primary for the home market), and each antenna source on the dial one numberer, its owner: another box shows those channels with the owner's numbers and never numbers them itself. Only a tuner in a station's market plays it. | Two writers of one plan, or two numberers of one source, would give the two dials different channels or numbers; a tuner in another city would play another station on the same RF. | `tests/test_markets.py`. |
 
 ## The state model
 
@@ -65,6 +66,8 @@ Exactly one writer process per file.
 |---|---|
 | `recordings.json`, `tuner_locks.json`, `playback_state.json` (always-on intent), `channels.json` (scan results), `epg.json`, `yttv_epg.json`, `lineup_state.json`, `roku_state/` | control |
 | `state/reception.json` (this node's antenna: RF channels and the TSID heard on each) | control |
+| `state/signal_health.json` (this node's antenna: the signal grade of each RF channel it has played) | control |
+| `state/channels.json` (a box outside the home market: its own market's plan, from its scans), `state/peer_plan.json` (the peer's plan as last read) | control |
 | `state/feed/recordings-journal.jsonl` (git-ignored; one place for both builds, so a rollback reads it), lane playlists and segments in `streams/` | feed |
 
 ## The failure matrix

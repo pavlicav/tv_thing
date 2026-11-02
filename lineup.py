@@ -12,7 +12,8 @@ are placed by rule:
   channel: sections listing the same game sources fill one after another.
 * **Anything new** -- a channel a rescan turns up, a YouTube TV row added to
   roku.json -- takes the first free number in the section whose ``new``
-  names its source (``*`` takes any source no section names). The number is
+  names its source (``digital@*`` takes another market's antenna channels,
+  ``*`` any source no section names). The number is
   kept in ``lineup_state.json`` so it never moves; a fixed number in
   lineup.json takes precedence.
 * Whatever does not fit goes to the ``overflow`` section.
@@ -39,6 +40,9 @@ from dataclasses import dataclass
 HOUSE = "vizelvision"
 ANTENNA = "digital"
 ANY_SOURCE = "*"
+# Another market's antenna channels are source ``digital@<market>`` (``digital@lansing/6.1``);
+# a section whose ``new`` lists this takes those of any market no section names.
+OTHER_ANTENNAS = "digital@*"
 # The station's slide channels: channel id -> name. server.py knows the pages that play them.
 SLIDES = {"sports-guide": "VizelVision Sports Guide", "cairo-radio": "Cairo Radio"}
 
@@ -80,6 +84,8 @@ class Plan:
 
     def new_section(self, source_id):
         named = next((s for s in self.sections if source_id in s.new), None)
+        if named is None and source_id.startswith(f"{ANTENNA}@"):
+            named = next((s for s in self.sections if OTHER_ANTENNAS in s.new), None)
         return named or next((s for s in self.sections if ANY_SOURCE in s.new), None)
 
     def overflow_section(self):

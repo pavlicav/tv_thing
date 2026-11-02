@@ -9,6 +9,10 @@ door (``:8080``), the way any client does:
   slow reads ``unknown``, and an unknown tuner is never available (INVARIANTS.md 9).
 * **Changes** (a tune, a lock, a release) are the peer's own public API calls, sent with
   ``local_only`` so the peer answers from its own tuners and never asks back.
+* **Its plan** (``GET /api/v1/plan``: its antenna's channels, its market and their numbers)
+  is read by the same poller whenever its ``plan_revision`` changes, and at least every
+  ``plan_interval``. The last one read is kept in ``plan_store``, so the peer's channels
+  stay on the dial while it is down (their tuners then read unknown).
 
 Streams are not relayed here: the front door proxies ``/stream/peer/`` to the peer's
 ``/stream/`` (deploy/apache/tv-thing-routes.conf), so a viewer only ever talks to its own
@@ -48,12 +52,15 @@ class PeerClient:
     """
 
     def __init__(self, base_url, *, timeout=1.5, command_timeout=25.0, interval=2.0,
-                 max_age=6.0, clock=time.monotonic, opener=urlopen):
+                 max_age=6.0, plan_interval=60.0, plan_store=None, clock=time.monotonic,
+                 opener=urlopen):
         self.base_url = base_url.rstrip("/")
         self.timeout, self.command_timeout = timeout, command_timeout
         self.interval, self.max_age, self.clock, self.opener = interval, max_age, clock, opener
+        self.plan_interval, self.plan_store = plan_interval, plan_store
         self._lock = threading.Lock()
         self._read, self._at, self.last_error = None, None, None
+        self._plan, self._plan_at = self._load_plan(), None
         self._wakeup = threading.Event()
         self._stopping = threading.Event()
 
@@ -91,7 +98,51 @@ class PeerClient:
             return False
         with self._lock:
             self._read, self._at, self.last_error = payload, self.clock(), None
+            plan, plan_at = self._plan, self._plan_at
+        if (plan_at is None or self.clock() - plan_at >= self.plan_interval
+                or payload.get("plan_revision") != (plan or {}).get("revision")):
+            self.refresh_plan()
         return True
+
+    def _load_plan(self):
+        try:
+            plan = json.loads(self.plan_store.read_text()) if self.plan_store else None
+        except (OSError, ValueError):
+            return None
+        return plan if isinstance(plan, dict) and isinstance(plan.get("rows"), list) else None
+
+    def refresh_plan(self):
+        """Read the peer's plan once, and keep it. Returns whether it answered."""
+        try:
+            status, plan = self._request("GET", "/api/v1/plan")
+        except PeerUnavailable:
+            return False
+        if status != 200 or not isinstance(plan.get("rows"), list) or not plan.get("market"):
+            return False        # a peer from before plans: nothing to merge
+        with self._lock:
+            changed = plan != self._plan
+            self._plan, self._plan_at = plan, self.clock()
+        if changed and self.plan_store:
+            try:
+                self.plan_store.parent.mkdir(parents=True, exist_ok=True)
+                temp = self.plan_store.with_suffix(".tmp")
+                temp.write_text(json.dumps(plan, indent=2) + "\n")
+                temp.replace(self.plan_store)
+            except OSError:
+                pass            # kept in memory; the next change tries the file again
+        return True
+
+    def keep_plan_in(self, path):
+        """Keep the peer's plan in ``path``, and start from what it holds."""
+        self.plan_store = path
+        loaded = self._load_plan()
+        with self._lock:
+            self._plan = self._plan or loaded
+
+    def plan(self):
+        """The peer's plan as last read (kept across restarts), or None."""
+        with self._lock:
+            return copy.deepcopy(self._plan)
 
     def run(self):
         """The poller: read the peer every ``interval`` seconds until ``stop()``."""

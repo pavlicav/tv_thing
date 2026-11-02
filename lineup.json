@@ -47,7 +47,8 @@
     {"first": 350, "last": 369, "name": "New on YouTube TV", "new": ["youtube-tv"]},
     {"first": 370, "last": 379, "name": "New internet streams", "new": ["internet"]},
     {"first": 380, "last": 399, "name": "Michigan extras"},
-    {"first": 400, "last": 999, "name": "More channels", "overflow": true}
+    {"first": 400, "last": 449, "name": "Other cities' antennas", "new": ["digital@*"]},
+    {"first": 450, "last": 999, "name": "More channels", "overflow": true}
   ],
   "channels": [
     {"number": 0, "source": "vizelvision"},

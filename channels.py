@@ -160,21 +160,26 @@ class AntennaChannels(Adapter):
 
     def channels(self, day, found):
         host = self.host
-        listed = host.load_channels()
         lane = host.LANE_DIGITAL
         found_channels = []
-        # numbered_channels leaves out what antenna_on_dial does: the two stay in step.
-        keys = [key for key, _ in host.antenna_on_dial(listed)]
-        for key, channel in zip(keys, host.numbered_channels(listed)):
-            network, market = NETWORKS.antenna_channel(channel.get("number")) or (None, None)
+        # Every market's: the home one's as digital/<number>, another's as
+        # digital@<market>/<number>, played by its own market's tuners (server.antenna_dial).
+        for source, key, channel in host.antenna_dial():
+            home = source == lineup.ANTENNA
+            network, market = (NETWORKS.antenna_channel(channel.get("number")) or (None, None)) \
+                if home else (None, channel.get("market"))
             found_channels.append(Channel(
-                id=f"{lineup.ANTENNA}/{key}", source_id="digital", channel_id=channel["id"],
+                id=f"{source}/{key}", source_id="digital", channel_id=channel["id"],
                 number=channel.get("tv_number"), name=channel.get("tv_name") or channel.get("name"),
-                section=channel.get("tv_section"), kind=self.kind, lane=lane, node=host.FEED_CONFIG.node,
+                section=channel.get("tv_section"), kind=self.kind, lane=lane,
+                node=channel.get("node") or host.FEED_CONFIG.node,
                 network=network, market=market, tune={"source": "digital", "channel_id": channel["id"]},
-                stream=f"/stream/{host.LANE_PLAYLIST[lane]}", listings=channel.get("number"),
+                # Another market's plays through the relay, and has no guide here yet.
+                stream=f"/stream/{host.LANE_PLAYLIST[lane]}" if home else None,
+                listings=channel.get("number") if home else None,
                 detail={"source_name": channel.get("name"), "antenna_number": channel.get("number"),
-                        "rf_channel": channel.get("rf_channel")},
+                        "rf_channel": channel.get("rf_channel"),
+                        **({} if home else {"antenna_market": channel.get("market")})},
                 row={key: channel.get(key) for key in ("tv_number", "tv_name", "tv_section")}
                 | {"kind": "digital", "source_id": "digital", "channel_id": channel["id"],
                    "name": channel.get("name"), "antenna_number": channel.get("number"),

@@ -71,10 +71,18 @@ def plays(tuner, channel_id):
             and stream.get("active") and stream.get("ready") and not stream.get("error"))
 
 
+def in_market(tuner, channel):
+    """Whether ``tuner``'s box is in ``channel``'s market (server.antenna_dial): only a box in
+    the city a station broadcasts from plays it. A side that names no market (a box from
+    before markets) is taken to be in it."""
+    market, there = channel.get("market"), tuner.get("market")
+    return market is None or there is None or market == there
+
+
 def candidates(tuners, channel):
     """The tuners that could play ``channel`` (a channels.json row) at all."""
     return [tuner for tuner in tuners if tuner.get("kind", "digital") == "digital"
-            and receives(tuner, channel)]
+            and in_market(tuner, channel) and receives(tuner, channel)]
 
 
 def choose(tuners, channel):

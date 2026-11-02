@@ -41,6 +41,9 @@ BASE_DIR = Path(__file__).parent
 TUNER_B = "digital-b"
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")    # feed_node's, for a node's name
 _HOST = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}|\[[0-9A-Fa-f:.]{2,45}\]")
+_MARKET = re.compile(r"[a-z][a-z0-9-]{0,23}")
+# The home city: every box's market until it is set (the market setting).
+DEFAULT_MARKET = "dc"
 # viviserv's recordings disk. Where it is mounted, it is still the default.
 VIVISERV_RECORDINGS = Path("/mnt/sda1/media/TV Recordings")
 
@@ -119,6 +122,11 @@ SETTINGS = (
             "Where this box is (\"Apartment\", \"Mom's house\"): shown beside its tuners and inputs "
             "on both nodes' pages, and settable from the Inputs page. Takes effect at once.",
             default="", live=True),
+    Setting("market", "Market", "TV_THING_MARKET", (), ("control",),
+            "The city whose stations this box's antenna gets, as a short name (dc, lansing). The "
+            "dial's antenna channels are the home market's (the primary's market) plus each "
+            "other market's own: a box in another market keeps its own plan, from its own "
+            "scans, and its channels are numbered and played by it. Auto: dc."),
 )
 BY_ID = {setting.id: setting for setting in SETTINGS}
 
@@ -169,6 +177,10 @@ def check(setting_id, value, saving=False):
         if not isinstance(value, str) or len(value.strip()) > 60 or any(ord(c) < 32 for c in value):
             raise ValueError("A location is a short name, at most 60 characters, on one line")
         return value.strip() or None
+    if setting_id == "market":
+        if not isinstance(value, str) or not _MARKET.fullmatch(value):
+            raise ValueError("A market is a short name: lowercase letters, digits and '-', at most 24")
+        return value
     if setting_id == "peer_host":
         host, port = split_port(value) if isinstance(value, str) else (None, None)
         if host is None or not _HOST.fullmatch(host) or not 0 < port < 65536:
@@ -429,6 +441,12 @@ class Host:
         if not self.primary and self.value("primary_host"):
             return Resolved(self.value("primary_host"), "auto", "a second node pools with the primary")
         return Resolved("", source or "auto", "no peer: this node's own tuners only")
+
+    def _resolve_market(self):
+        value, source = self._given("market")
+        if value:
+            return Resolved(str(value), source, "set")
+        return Resolved(DEFAULT_MARKET, source or "auto", "the home city")
 
     def _resolve_location(self):
         value, source = self._given("location")

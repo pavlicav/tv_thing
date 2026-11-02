@@ -19,7 +19,7 @@ class FakePeer:
             # The peer's view of the asking node's own tuner, which it must not take as the peer's.
             {"id": "viviserv:digital", "node": "viviserv", "lane": "digital", "local": False},
         ]
-        self.posted, self.status = [], 200
+        self.posted, self.status, self.plan, self.plans_read = [], 200, None, 0
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -37,8 +37,12 @@ class FakePeer:
             def do_GET(self):
                 if fake.status != 200:
                     return self.answer(fake.status, {})
+                if self.path == "/api/v1/plan":
+                    fake.plans_read += 1
+                    return self.answer(200, fake.plan) if fake.plan else self.answer(404, {})
                 assert self.path == "/api/v1/tuners?local=1"
-                self.answer(200, {"node": "viviserv2", "tuners": fake.tuners})
+                self.answer(200, {"node": "viviserv2", "tuners": fake.tuners,
+                                  "plan_revision": (fake.plan or {}).get("revision")})
 
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -124,3 +128,30 @@ def test_the_relay_path():
     assert peers.stream_path("/stream/digital.m3u8") == "/stream/peer/digital.m3u8"
     assert peers.stream_path("/stream/digital-b.m3u8") == "/stream/peer/digital-b.m3u8"
     assert peers.stream_path(None) is None
+
+
+PLAN = {"node": "viviserv2", "market": "lansing", "primary": False, "revision": "lansing:1",
+        "rows": [{"id": "wlns_6_1", "number": "6.1", "key": "6.1", "tsid": 1234, "service_id": 1}]}
+
+
+def test_the_peers_plan_is_read_kept_and_read_again_when_it_changes(fake, tmp_path):
+    clock, store = Clock(), tmp_path / "peer_plan.json"
+    fake.plan = PLAN
+    client = peers.PeerClient(fake.url, clock=clock)
+    client.keep_plan_in(store)
+    assert client.refresh() and client.plan() == PLAN and fake.plans_read == 1
+    assert json.loads(store.read_text()) == PLAN
+    clock.now += 2
+    client.refresh()
+    assert fake.plans_read == 1             # unchanged and recent: not read again
+    fake.plan = {**PLAN, "revision": "lansing:2", "rows": []}
+    client.refresh()
+    assert fake.plans_read == 2 and client.plan()["rows"] == []
+    restarted = peers.PeerClient(fake.url)
+    restarted.keep_plan_in(store)
+    assert restarted.plan()["revision"] == "lansing:2"     # before the peer has answered
+
+
+def test_a_peer_from_before_plans_has_none(fake):
+    client = peers.PeerClient(fake.url)
+    assert client.refresh() and client.plan() is None
