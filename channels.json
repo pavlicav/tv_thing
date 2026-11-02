@@ -56,7 +56,8 @@
     "modulation": "VSB_8",
     "id": "wdco_10_1",
     "number": "10.1",
-    "rf_channel": 24
+    "rf_channel": 24,
+    "tsid": 8755
   },
   {
     "name": "WFDC-DT",
