@@ -462,6 +462,7 @@
     .tuner-chip.locked { border-color: rgba(251, 191, 36, .45); color: var(--warn); }
     .tuner-chip.unknown { opacity: .5; text-decoration: line-through; }
     .tuner-chip.watching { font-weight: 700; }
+    .tuner-chip.poor { border-style: dashed; }
 
     .modal-backdrop {
       position: fixed; inset: 0; z-index: 50;
@@ -1789,14 +1790,17 @@
       for (const tuner of tuners) {
         const chip = document.createElement("span");
         const unknown = tuner.reachable === false;
-        chip.className = "tuner-chip " + (unknown ? "unknown" : tuner.lock ? "locked" : "available")
-          + (tuner.id === state.tvTuner && state.playing === "tv" ? " watching" : "");
         const selection = tuner.selection || {};
+        const signal = tuner.signal && tuner.signal.verdict;
+        chip.className = "tuner-chip " + (unknown ? "unknown" : tuner.lock ? "locked" : "available")
+          + (tuner.id === state.tvTuner && state.playing === "tv" ? " watching" : "")
+          + (signal === "poor" ? " poor" : "");
         const label = tuner.lock ? `🔒 ${tuner.lock.owner}` : (selection.number || "free");
-        chip.textContent = `${tuner.node} · ${label}`;
+        chip.textContent = `${tuner.node} · ${label}${signal === "poor" ? " ⚠" : ""}`;
         chip.title = `${tuner.id}${tuner.local ? "" : " (relayed)"}: `
           + (unknown ? (tuner.error || "not answering")
             : `${selection.name ? `${selection.name} ${selection.number}` : "idle"}`
+              + (signal ? ` · signal ${signal}` : "")
               + (tuner.lock ? ` · ${lockSummary(tuner.lock)}` : " · available"));
         els.tunerPool.append(chip);
       }
@@ -1810,9 +1814,36 @@
         state.tuners = data.tuners || [];
         for (const tuner of state.tuners) state.pool[tuner.id] = tuner.lock || null;
         renderTuners();
+        switchOffPoorSignal();
       } catch (_) {
         // The strip is a summary; a missed poll leaves the last one up.
       }
+    }
+
+    // A tuner's grade for an RF channel, as the pool ranks it (tuner_pool.grade): what it
+    // plays now, measured, else its antenna's last word; not yet measured counts as good.
+    const SIGNAL_RANK = { good: 0, fair: 1, poor: 2 };
+    function signalRank(tuner, rf) {
+      const live = tuner.signal || {};
+      const verdict = live.verdict && live.rf === rf ? live.verdict : (tuner.health || {})[String(rf)];
+      return SIGNAL_RANK[verdict] || 0;
+    }
+
+    // The tuner being watched plays its station poorly and another would play it better:
+    // tune the same channel again, and the pool moves it (at most every two minutes).
+    const SIGNAL_SWITCH_MS = 120000;
+    function switchOffPoorSignal() {
+      if (state.playing !== "tv" || state.tuning || !state.tvTuner || !state.currentChannelId) return;
+      const watching = state.tuners.find(t => t.id === state.tvTuner);
+      const signal = watching && watching.signal;
+      if (!signal || signal.verdict !== "poor"
+          || (watching.selection || {}).id !== state.currentChannelId) return;
+      if (Date.now() - (state.signalSwitchAt || 0) < SIGNAL_SWITCH_MS) return;
+      const better = state.tuners.some(t => t.id !== watching.id && t.available && t.reachable !== false
+        && signalRank(t, signal.rf) < SIGNAL_RANK.poor);
+      if (!better) return;
+      state.signalSwitchAt = Date.now();
+      tuneTv(state.currentChannelId);
     }
 
     pollTuners();

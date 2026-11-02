@@ -43,6 +43,7 @@ import host_config
 import internet_streams
 import lineup
 import peers
+import signal_health
 import recorder
 import roku_lane
 import web_basic
@@ -797,6 +798,29 @@ def tuner_lock_payload():
 DIGITAL_TUNER_LANES = DIGITAL_LANES
 
 
+def sample_signals():
+    """One sample of each playing tuner's frontend (read-only), for its signal grade: a tune
+    prefers a tuner that plays the station well (tuner_pool.grade). A tuner stopped, tuning
+    or sweeping the band starts its window over."""
+    for lane in DIGITAL_TUNER_LANES:
+        try:
+            state = feed_client.lane(lane)
+            rf = (state.get("selection") or {}).get("rf_channel")
+            if (not state.get("running") or state.get("unknown") or rf is None
+                    or lane in tuning_lanes or (scanning and lane == LANE_DIGITAL)):
+                signal_grades.forget(lane)
+                continue
+            signal_grades.record(lane, rf, feed_client.measure(FEED_CONFIG.lane(lane).device))
+        except Exception as error:   # noqa: BLE001 - the next pass tries again
+            signal_grades.forget(lane)
+            print(f"Signal health: could not sample {lane}: {error}")
+
+
+def signal_health_worker():
+    while not shutting_down.wait(signal_health.SAMPLE_SECONDS):
+        sample_signals()
+
+
 def tuner_id(lane, node=None):
     """A tuner's name across both nodes: ``viviserv:digital``."""
     return f"{node or FEED_CONFIG.node}:{lane}"
@@ -858,6 +882,7 @@ def local_tuners():
     if unscanned:
         reception = []
     location = node_location()
+    health = signal_grades.stored()
     result = []
     with lock:
         for lane in DIGITAL_TUNER_LANES:
@@ -865,6 +890,7 @@ def local_tuners():
             held = active_lock(lane)
             unknown = bool(feed_client.lane(lane).get("unknown"))
             stream = payload["stream"]
+            rf = (payload["selection"] or {}).get("rf_channel")
             result.append({
                 "id": tuner_id(lane), "node": FEED_CONFIG.node, "location": location, "lane": lane, "kind": "digital",
                 "name": payload["name"], "local": True, "reachable": not unknown,
@@ -876,6 +902,10 @@ def local_tuners():
                 "available": not unknown and held is None and not (scanning and lane == LANE_DIGITAL),
                 "rf_channels": reception, "tsids": {str(rf): tsid for rf, tsid in tsids.items()},
                 "unscanned": unscanned,
+                # How well it plays what it is on, and this antenna's last word on each RF
+                # channel (signal_health.py, tuner_pool.grade).
+                "signal": signal_grades.live(lane, rf) if stream["active"] else None,
+                "health": health,
                 "stream": {key: stream[key] for key in (
                     "id", "state", "active", "ready", "error", "playlist_path", "playback", "revision")},
             })
@@ -2824,6 +2854,10 @@ RECORDINGS_JOURNAL = STATE_DIR / "feed" / "recordings-journal.jsonl"
 # What this node's antenna gets, by RF channel and the TSID heard there: its scans write it
 # (save_reception).
 RECEPTION_FILE = STATE_DIR / "reception.json"
+# How well this node's antenna plays each RF channel, from its tuners' frontends while they
+# play (signal_health.py; signal_health_worker writes it).
+SIGNAL_HEALTH_FILE = STATE_DIR / "signal_health.json"
+signal_grades = signal_health.SignalHealth(SIGNAL_HEALTH_FILE)
 # The feed's recorder processes (feed_node.Recorders); the timers, pieces and
 # finalizing below are control's.
 recorders = feed_node.Recorders(RECORDINGS_JOURNAL, spawn=lambda command: _spawn_recorder(command),
@@ -7496,6 +7530,7 @@ def main():
             print(f"Extra tuners: {', '.join(f'{lane} on adapter {DIGITAL_ADAPTERS[lane]}' for lane in EXTRA_DIGITAL_LANES)}")
             threading.Thread(target=extra_tuner_worker, daemon=True).start()
         threading.Thread(target=always_on_worker, daemon=True).start()
+        threading.Thread(target=signal_health_worker, daemon=True).start()
         threading.Thread(target=guide_worker, daemon=True).start()
         threading.Thread(target=yttv_guide_worker, daemon=True).start()
         threading.Thread(target=recording_worker, daemon=True).start()

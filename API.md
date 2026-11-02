@@ -266,6 +266,21 @@ One channel occupies one tuner: a tune for a channel any pool tuner already play
 joins that stream (the response's `stream_reused`), whichever box asked. Two tuners carry the
 same channel only when asked for: a `tuner` named, an `override`, a lock holder's own tune.
 
+Each tuner has a signal grade (`signal_health.py`). Every 5 s control samples each of its
+box's playing tuners' frontends, read-only; a sample is errored when it is not locked or
+reports uncorrected blocks. The errored share of the last 24 samples, with at least 6, is
+`good` (10% or less), `fair` or `poor` (30% or more). A tuner carries `signal`, `{rf, verdict,
+errored, samples}` for what it plays (`verdict` null until 6 samples), or null when idle; and
+`health`, `{"<rf>": verdict}`, its box's last verdict on each RF channel (in
+`state/signal_health.json`, forgotten after 14 days). SNR is not used: the two boxes' drivers
+scale it differently. The pool ranks good and unmeasured alike, before fair, before poor, and
+only then this box's before the peer's: with both healthy a tune stays here, and a station
+this antenna plays poorly goes to a tuner that plays it well. A channel playing on a fair or
+poor tuner moves to a better available one (that tune's tuner is new, `stream_reused` false):
+"healthily" above means this. The Watch page, when the tuner it plays reads `poor` and another
+available tuner grades better, tunes the same channel again (at most every two minutes), and
+the pool moves it. A locked tuner is never moved, so VizelVision's tune stays where it is.
+
 Each box has a `location` (Config, or the Inputs page's Set location): a short name for where
 it is, read on every use, so it waits for no restart. It is in `/api/v1/inputs`, in
 `/api/v1/tuners` (top level and on each tuner) and in `peer.location`. `POST

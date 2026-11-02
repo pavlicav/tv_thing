@@ -98,6 +98,62 @@ def test_a_second_node_never_scanned_gets_nothing_and_the_primary_its_plan(monke
     assert tuner_pool.choose(second, WUSA) == (None, "none")
 
 
+# -- signal grades (signal_health.py) ---------------------------------------------------------
+WTTG = {"id": "wttg_5_1", "number": "5.1", "rf_channel": 36}
+
+
+def graded(tuner_, *, live=None, health=None, rf=36):
+    tuner_["signal"] = {"rf": rf, "verdict": live, "errored": None, "samples": 24} if live else None
+    tuner_["health"] = health or {}
+    return tuner_
+
+
+def test_both_healthy_a_tune_stays_on_this_node():
+    here = graded(tuner("viviserv", True), health={"36": "good"})
+    there = graded(tuner("viviserv2", False, active=False), health={"36": "good"})
+    assert tuner_pool.choose([here, there], WTTG) == (here, "retune")
+
+
+def test_a_station_this_antenna_plays_poorly_goes_to_the_peer_that_plays_it_well():
+    """5.1 was choppy on viviserv and clean on viviserv2 (2026-11-01)."""
+    here = graded(tuner("viviserv", True), health={"36": "poor"})
+    there = graded(tuner("viviserv2", False, active=False), health={"36": "good"})
+    assert tuner_pool.choose([here, there], WTTG) == (there, "idle")
+
+
+def test_not_yet_measured_counts_as_good_so_this_node_keeps_it():
+    here = graded(tuner("viviserv", True))
+    there = graded(tuner("viviserv2", False), health={"36": "good"})
+    assert tuner_pool.choose([here, there], WTTG) == (here, "retune")
+
+
+def test_a_fair_tuner_gives_way_to_a_good_one_but_beats_a_poor_one():
+    fair = graded(tuner("viviserv", True), health={"36": "fair"})
+    good = graded(tuner("viviserv2", False), health={"36": "good"})
+    poor = graded(tuner("viviserv2", False, lane="digital-b"), health={"36": "poor"})
+    assert tuner_pool.choose([fair, good], WTTG)[0] is good
+    assert tuner_pool.choose([fair, poor], WTTG)[0] is fair
+
+
+def test_a_channel_playing_poorly_moves_to_a_tuner_that_plays_it_well():
+    here = graded(tuner("viviserv", True, playing="wttg_5_1"), live="poor")
+    there = graded(tuner("viviserv2", False, active=False), health={"36": "good"})
+    assert tuner_pool.choose([here, there], WTTG) == (there, "better")
+
+
+def test_a_channel_playing_poorly_stays_when_nothing_plays_it_better():
+    here = graded(tuner("viviserv", True, playing="wttg_5_1"), live="poor")
+    there = graded(tuner("viviserv2", False, active=False), health={"36": "poor"})
+    locked = graded(tuner("viviserv2", False, lane="digital-b", lock=LOCK), health={"36": "good"})
+    assert tuner_pool.choose([here, there, locked], WTTG) == (here, "playing")
+
+
+def test_the_live_verdict_counts_only_for_the_rf_it_was_measured_on():
+    here = graded(tuner("viviserv", True), live="poor", rf=9, health={"36": "good"})
+    assert tuner_pool.grade(here, WTTG) == "good"
+    assert tuner_pool.grade(here, WUSA) == "poor"
+
+
 def test_the_summary_counts_the_free_tuners():
     tuners = [tuner("viviserv", True, lock=LOCK), tuner("viviserv2", False),
               tuner("viviserv2", False, lane="digital-b", reachable=False)]
