@@ -90,6 +90,28 @@ def test_vaapi_command_uploads_software_filtered_frames(monkeypatch):
     assert filters[-2:] == ["format=nv12", "hwupload"]
 
 
+def test_vaapi_decodes_deinterlaces_and_scales_an_antenna_stream_on_the_gpu(monkeypatch):
+    monkeypatch.setattr(server, "_video_encoder_config", None)
+    monkeypatch.setattr(server, "VIDEO_ENCODER", "vaapi")
+    monkeypatch.setattr(server, "_probe_video_encoder", lambda config: True)
+    encoder = server.select_video_encoder()
+    monkeypatch.setattr(server, "_video_encoder_config", None)
+
+    command = server.build_tv_packager_command("medium", encoder)
+
+    assert option_value(command, "-hwaccel") == "vaapi"
+    assert option_value(command, "-hwaccel_output_format") == "vaapi"
+    assert "-vaapi_device" not in command
+    assert option_value(command, "-vf") == (
+        "deinterlace_vaapi=mode=motion_adaptive:auto=1,"
+        f"scale_vaapi=w=-2:h={server.QUALITY_PRESETS['medium']['scale']}"
+    )
+    assert option_value(command, "-c:v") == "h264_vaapi"
+    # The probe and the analog lane still upload software frames.
+    assert encoder["input_args"] == ["-vaapi_device", server.VAAPI_DEVICE]
+    assert encoder["filter_suffix"] == ["format=nv12", "hwupload"]
+
+
 def test_the_antenna_encoder_survives_a_5_1_to_stereo_switch():
     """first_pts=0 made a rebuilt audio filter (ffmpeg rebuilds it when a station switches
     AC-3 between 5.1 and stereo) start at zero and fill the encoder's whole run with silence

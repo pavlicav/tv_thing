@@ -216,6 +216,7 @@ PLAYBACK_STATE_FILE = STREAMS_DIR / "playback_state.json"
 HLS_SEGMENT_TIME = float(os.environ.get("TV_THING_HLS_SEGMENT_TIME", "0.6"))
 VIDEO_ENCODER = HOST.value("video_encoder")    # TV_THING_VIDEO_ENCODER, the Config page, else cpu
 VAAPI_DEVICE = os.environ.get("TV_THING_VAAPI_DEVICE", "/dev/dri/renderD128")
+VAAPI_DECODE = os.environ.get("TV_THING_VAAPI_DECODE", "1") != "0"
 NVENC_PROBE_ATTEMPTS = int(
     os.environ.get("TV_THING_NVENC_PROBE_ATTEMPTS", "3")
 )
@@ -1719,6 +1720,16 @@ def select_video_encoder():
             "input_args": ["-vaapi_device", VAAPI_DEVICE],
             "filter_suffix": ["format=nv12", "hwupload"],
             "encoder_args": ["-bf", "0"],
+            # An antenna stream decodes, deinterlaces and scales on the GPU too. On the
+            # UHD 630, bwdif and scale in software cost ~113% CPU a 1080i stream in real
+            # time, the GPU path ~20% (viviserv2, 2026-11-01). Off: TV_THING_VAAPI_DECODE=0.
+            **({"gpu_decode_args": [
+                "-hwaccel", "vaapi", "-hwaccel_device", VAAPI_DEVICE,
+                "-hwaccel_output_format", "vaapi",
+            ],
+                "gpu_deinterlace": "deinterlace_vaapi=mode=motion_adaptive:auto=1",
+                "gpu_scale": "scale_vaapi=w=-2:h={height}",
+            } if VAAPI_DECODE else {}),
         },
         {
             "codec": "h264_videotoolbox", "label": "VideoToolbox",
@@ -1773,10 +1784,11 @@ def build_tv_packager_command(quality, encoder=None, stream_id="test",
         / f"{LANE_SEGMENT_PREFIX[lane]}_{stream_id}_%09d.ts"
     )
     vb = preset["vb"]
+    gpu_decode = encoder.get("gpu_decode_args")
 
     cmd = [
         "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "warning",
-        *encoder.get("input_args", []),
+        *(gpu_decode or encoder.get("input_args", [])),
         "-fflags", "+discardcorrupt",
         # See recorder.BROADCAST_MAX_PIXELS: a corrupt header must not
         # allocate a gigabyte frame.
@@ -1790,12 +1802,19 @@ def build_tv_packager_command(quality, encoder=None, stream_id="test",
         "-map", "0:v:0", "-map", "0:a:0?",
     ]
 
-    # Deinterlace before an optional GPU upload. This supports interlaced ATSC
-    # on every encoder while still moving the expensive H.264 encode to GPU.
-    filters = ["bwdif=mode=send_frame:parity=auto:deint=interlaced"]
-    if preset["scale"]:
-        filters.append(f"scale=-2:{preset['scale']}")
-    filters += encoder.get("filter_suffix", [])
+    if gpu_decode:
+        # Frames stay on the GPU from the decoder to the encoder. auto=1 deinterlaces
+        # interlaced frames only, and one frame out per frame in, as bwdif's below.
+        filters = [encoder["gpu_deinterlace"]]
+        if preset["scale"]:
+            filters.append(encoder["gpu_scale"].format(height=preset["scale"]))
+    else:
+        # Deinterlace before an optional GPU upload. This supports interlaced ATSC
+        # on every encoder while still moving the expensive H.264 encode to GPU.
+        filters = ["bwdif=mode=send_frame:parity=auto:deint=interlaced"]
+        if preset["scale"]:
+            filters.append(f"scale=-2:{preset['scale']}")
+        filters += encoder.get("filter_suffix", [])
     cmd += ["-vf", ",".join(filters)]
     cmd += [
         "-c:v", encoder["codec"], *encoder.get("encoder_args", []),

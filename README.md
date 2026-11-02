@@ -229,6 +229,11 @@ TV_THING_VIDEO_ENCODER=vaapi TV_THING_VAAPI_DEVICE=/dev/dri/renderD128 python3 s
 TV_THING_VIDEO_ENCODER=cpu python3 server.py
 ```
 
+With VA-API, an antenna stream is decoded, deinterlaced and scaled on the GPU as
+well, so its frames never come back to the CPU (about a fifth of the CPU on
+viviserv2's UHD 630). `TV_THING_VAAPI_DECODE=0` goes back to decoding,
+deinterlacing and scaling in software, with only the encode on the GPU.
+
 ### Versioned local API
 
 See [the API contract and locking flow](API.md) for generation-aware playback,
