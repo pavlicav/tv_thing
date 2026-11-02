@@ -205,11 +205,66 @@ BOSTON_ANGEL_CITY = {'league': 'nwsl', 'game_id': 401854095, 'title': 'Boston Le
                      'home': team('Angel City FC', 'Angel City FC', 'LA')}
 
 
-class NwslTests(unittest.TestCase):
-    """No NWSL card has been seen on the page yet; these are the other sports' forms."""
+CHICAGO_WASHINGTON = {'league': 'nwsl', 'game_id': 401854035, 'title': 'Chicago Stars FC at Washington Spirit',
+                      'away': team('Chicago Stars FC', 'Chicago Stars FC', 'CHI'),
+                      'home': team('Washington Spirit', 'Washington Spirit', 'WAS')}
+KANSAS_CITY_LOUISVILLE = {'league': 'nwsl', 'game_id': 401854036, 'title': 'Kansas City Current at Racing Louisville FC',
+                          'away': team('Kansas City Current', 'Kansas City Current', 'KC'),
+                          'home': team('Racing Louisville FC', 'Racing Louisville FC', 'LOU')}
 
+
+class NwslPageTests(unittest.TestCase):
+    """The NWSL on the ESPN page as the Roku showed it on 2026-11-01, the season's last day."""
+
+    def test_its_row_and_cards_are_read(self):
+        ocr = SimpleNamespace(ocr=LocalOcr())
+        shown = frame('row-nwsl-spirit-stars')
+        self.assertIn("National Women's Soccer League", espn_unlimited.read_row_label(ocr, shown))
+        self.assertTrue(espn_unlimited.league_row('nwsl', espn_unlimited.read_row_label(ocr, shown)))
+        self.assertFalse(espn_unlimited.league_row('nhl', espn_unlimited.read_row_label(ocr, shown)))
+        card = espn_unlimited.read_card(ocr, shown, CHICAGO_WASHINGTON)
+        # Home team first, and no "FC" on Chicago Stars.
+        self.assertEqual(card['caption'], 'ESPN+ Washington Spirit vs. Chicago Stars')
+        self.assertEqual((card['place'], card['matched'], card['blocked']), (0, True, False))
+
+    def test_a_game_has_one_card_and_its_row_is_found(self):
+        result, keys, events = open_game(['menu-live', 'row-ncaaw-soccer', 'row-nwsl-spirit-stars',
+                                          'row-nwsl-last-card', 'row-nwsl-spirit-stars'], game=CHICAGO_WASHINGTON)
+        self.assertEqual(keys, ['Select', 'Down', 'Right', 'Down', 'Right', 'Left'])
+        self.assertEqual((result['stream'], result['streams'], result['position']), (None, 1, 0))
+
+    def test_the_rows_last_game_plays_from_the_second_place(self):
+        result, keys, _ = open_game(['menu-live', 'row-nwsl-spirit-stars', 'row-nwsl-last-card'],
+                                    game=KANSAS_CITY_LOUISVILLE)
+        self.assertEqual(keys, ['Select', 'Down', 'Right', 'Right'])
+        self.assertEqual(result['caption'], 'ESPN+ Racing Louisville FC vs. Kansas City Current')
+
+    def test_a_score_bug_behind_the_logo_does_not_stop_the_page(self):
+        page = Page(['menu-live', 'row-nwsl-spirit-stars', 'row-nwsl-last-card', 'row-nwsl-spirit-stars'])
+        page.shown = frame('page-score-bug')
+
+        def refuse(channel, aliases):
+            raise NavigationError("Visible network page detail logo does not match 'ESPN'; refusing to play it")
+        page.verify_network_page, events = refuse, []
+        result = espn_unlimited.open_game(controller(page), CHICAGO_WASHINGTON, events)
+        self.assertEqual(result['network_page']['by'], 'section_menu')
+        self.assertEqual(result['caption'], 'ESPN+ Washington Spirit vs. Chicago Stars')
+
+    def test_without_the_menu_a_refused_logo_still_stops_it(self):
+        page = Page([])
+        page.shown = frame('playing-away-stream')
+
+        def refuse(channel, aliases):
+            raise NavigationError('logo does not match')
+        page.verify_network_page = refuse
+        with self.assertRaisesRegex(NavigationError, 'did not open'):
+            espn_unlimited.open_game(controller(page), CHICAGO_WASHINGTON, [])
+
+
+class NwslTests(unittest.TestCase):
     def test_the_rows_that_can_list_its_games(self):
-        for label, row in (('NWSL', True), ('NWSL 7LIVE', True), ('Soccer', True), ('Also Live', True),
+        for label, row in (('NWSL', True), ('NWSL 7LIVE', True), ("National Women's Soccer League 7LIVE", True),
+                           ("National Women's Soccer League 7UVE", True), ('Soccer', True), ('Also Live', True),
                            ('On Now', True), ('NCAAW Soccer', False), ('NCAAM Soccer 3LIVE', False),
                            ('NHL', False), ('NCAA Football', False)):
             with self.subTest(label=label):

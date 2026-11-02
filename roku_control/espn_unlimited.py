@@ -23,9 +23,9 @@ YouTube TV blacks out where the Roku is carries a crossed-out eye at its centre
 A row stops scrolling at its last card, which stays in the second place with
 its focus ring and caption there (Maple Leafs at Oilers, 2026-10-24).
 
-The NWSL has not been seen on the page yet. Its rows and captions are assumed
-to follow the others': a row "NWSL", cards "ESPN+ Boston Legacy FC vs. Angel
-City FC", one stream each.
+The NWSL's row is "National Women's Soccer League" (2026-11-01, 7 live), one
+card a game, home team first, and some clubs without their "FC": "ESPN+ Washington
+Spirit vs. Chicago Stars", "ESPN+ Seattle Reign FC vs. Orlando Pride".
 """
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ FEEDS = ("home", "away")
 # The rows that can list a league's games, as OCR reads their names. "NCAA Field Hockey" is
 # not the NHL's: on 2026-10-31 it stopped the walk one row above the NHL's, six times over.
 LEAGUE_ROWS = {"nhl": r"\bnhl\b|(?<!field )\bhockey\b",
-               "nwsl": r"\bnwsl\b|(?<!ncaaw )(?<!ncaam )\bsoccer\b"}
+               "nwsl": r"\bnwsl\b|\bnational women.?s soccer\b|(?<!ncaaw )(?<!ncaam )\bsoccer\b"}
 MIXED_ROWS = r"\bon now\b|\balso live\b"
 # The blacked-out card's crossed-out eye, white, centred on the focused card:
 # 1280x720 pixels 318-372 by 340-394 in steps of 2 (from 2026-10-22).
@@ -135,11 +135,16 @@ def league_row(league, label):
 MENU_WORDS = ("coming", "network", "studio", "films", "documentar", "original", "movies", "series")
 
 
+def page_menu_visible(feedback, frame):
+    """Whether a network page's section menu is on screen, focused or not."""
+    text = feedback.ocr.read(frame, crop=_crop(frame, MENU), psm=6).text.lower()
+    return sum(word in text for word in MENU_WORDS) >= 2
+
+
 def menu_live_focused(feedback, frame):
     """Whether the page's section menu is open with Live, its first section, focused."""
-    text = feedback.ocr.read(frame, crop=_crop(frame, MENU), psm=6).text.lower()
     pill = frame.luma(round(frame.width * LIVE_PILL[0]), round(frame.height * LIVE_PILL[1]))
-    return sum(word in text for word in MENU_WORDS) >= 2 and pill >= 200
+    return page_menu_visible(feedback, frame) and pill >= 200
 
 
 def _step(controller, key, events, action):
@@ -174,6 +179,12 @@ def open_game(controller, game, events, *, feed="home"):
             break
         except NavigationError as exc:
             events.append({"event": "espn_page_retry", "attempt": attempt, "error": str(exc)})
+            # The page's video plays behind its logo, and a score bug there fails the match (LAR 24
+            # FINAL, 2026-11-01; it cost the NHL tries too). Its row was verified as ESPN's, its menu
+            # says this is a network page, and only a card naming both teams is ever selected.
+            if page_menu_visible(feedback, feedback.capture()):
+                page = {"matched": False, "by": "section_menu", "logo_error": str(exc)}
+                break
             if attempt == controller.config.feedback.verify_attempts:
                 raise NavigationError("The ESPN page did not open from its guide row") from exc
             controller._sleep(controller.config.feedback.verify_retry_seconds)

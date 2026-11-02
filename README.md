@@ -637,8 +637,8 @@ or "ESPN Unlmtd" is the `nwsl` source, found on the same ESPN page. That is few
 games: 9 of 2026's 240 listed ESPN+ (7 on the season's last day), most of the
 rest ION, NWSL+, Victory+, Prime Video or CBSSN. The ones on a YouTube TV channel
 are on that channel's row, and ION is on the antenna's 66.1. NWSL+ and Victory+
-are in neither the YouTube TV catalog nor the lineup. No NWSL game has been tuned
-on the page yet, so its row name and captions are assumed.
+are in neither the YouTube TV catalog nor the lineup. On the page its row is
+"National Women's Soccer League", one card a game (seen 2026-11-01).
 
 **Hockey is ESPN Unlimited's.** YouTube TV's main plan has carried ESPN
 Unlimited since 2026-09-01, and with it the NHL's out-of-market games (NHL
