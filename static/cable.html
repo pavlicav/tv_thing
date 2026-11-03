@@ -15,6 +15,24 @@
       height: 100vh;
     }
     .topbar { grid-area: top; }
+
+    /* The Watch page's lowkey set-top box: the stage and channel list in the guide's navy
+       glass and gold highlight, in the set-top's own type. Scoped here, not :root, so the
+       shared top bar looks the same on every page. */
+    .stage, .channel-panel {
+      --stb-font: Tiresias, "Tiresias Screenfont", Verdana, Tahoma, "DejaVu Sans", sans-serif;
+      --bg: #040a1c;
+      --surface: #081231;
+      --surface-2: #0d1a42;
+      --surface-3: #142656;
+      --border: #16244d;
+      --border-strong: #22386e;
+      --text-dim: #b3c2e8;
+      --text-mute: #7185b8;
+      --accent: #ffd23f;
+      --accent-soft: rgba(255, 210, 63, 0.11);
+      --accent-line: rgba(255, 210, 63, 0.42);
+    }
     .stage {
       grid-area: stage;
       min-width: 0;
@@ -41,7 +59,7 @@
       justify-content: center;
       gap: 10px;
       color: var(--text-mute);
-      background: radial-gradient(ellipse at center, #131519 0%, #000 75%);
+      background: radial-gradient(ellipse at center, #0b1638 0%, #000 75%);
     }
     .placeholder.hidden { display: none; }
     .placeholder strong {
@@ -60,8 +78,8 @@
       border-top: 1px solid var(--border);
     }
     .now-playing { min-width: 0; }
-    .np-title { font-size: 13px; font-weight: 600; }
-    .np-sub { font-size: 11px; color: var(--text-mute); }
+    .np-title { font-family: var(--stb-font); font-size: 13px; font-weight: 700; }
+    .np-sub { font-family: var(--stb-font); font-size: 11px; color: var(--text-mute); }
     .channel-panel {
       grid-area: channels;
       min-height: 0;
@@ -87,15 +105,23 @@
     }
     .channel-list .item-key {
       min-width: 5.2em;
-      font-family: var(--mono);
+      font-family: var(--stb-font);
+      font-weight: 700;
       font-size: 15px;
       color: var(--text-dim);
     }
+    .channel-list .item-name { font-family: var(--stb-font); font-weight: 700; }
+    .channel-list .list-item { min-height: 46px; align-items: center; }
     .channel-list .item-tag {
       min-width: 5.6em;
       text-align: right;
+      font-family: var(--stb-font);
+      font-size: 10px;
+      opacity: .8;
     }
+    .panel-head .section-label, .plan-note, .placeholder { font-family: var(--stb-font); }
     .panel-foot {
+      font-family: var(--stb-font);
       padding: 9px 14px;
       color: var(--text-mute);
       border-top: 1px solid var(--border);
