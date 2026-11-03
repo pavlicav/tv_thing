@@ -306,7 +306,18 @@ def test_the_watch_page_follows_the_tuner_the_pool_chose():
     assert "...(data.tuner ? { tuner: data.tuner } : {})" in tune
     wait = section(INDEX, "async function waitForTvStream", "function setMeter")
     assert "(raw.tuners || []).find(t => t.id === state.tvTuner)" in wait
-    assert 'fetch("api/v1/tuners"' in INDEX and 'id="tuner-pool"' in INDEX
+    # The strip reads the status, which carries the pool's tuners and the Roku lane both.
+    poll = section(INDEX, "async function pollTuners", "pollTuners();")
+    assert 'fetch("api/v1/status"' in poll and 'id="tuner-pool"' in INDEX
+    assert "state.tuners = data.tuners || [];" in poll
+    assert "state.rokuLane = (data.lanes || {}).roku || null;" in poll
+
+
+def test_the_tuner_strip_shows_what_the_roku_is_on():
+    chip = section(INDEX, "function rokuChip()", "function renderTuners()")
+    assert 'chip.href = "roku.html"' in chip
+    assert "selection?.name || selection?.channel_id" in chip
+    assert "state.rokuLock" in chip and "navigating" in chip
 
 
 def test_roku_tab_lists_feeds_and_drives_the_remote_under_its_lock():
