@@ -6,8 +6,10 @@
   <title>Config · TV Thing</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="settop.css">
   <style>
-    body { min-height: 100vh; background: var(--bg); }
+    /* The box's SETTINGS screen (settop.css): the Explorer on top, this page on its TV. */
+    body { min-height: 100vh; background: #0b0c0e; }
     .page { max-width: 1120px; }
     .ok { color: var(--ok); }
     .warn { color: var(--warn); }
@@ -84,7 +86,13 @@
     </nav>
   </header>
 
-  <main class="page">
+  <main class="setup-room">
+  <section class="settop" id="box" aria-label="Cable box"></section>
+  <section class="tv" aria-label="Settings">
+  <div class="crt">
+  <div class="osd osd-page">
+  <nav class="osd-menu" id="setup-menu" aria-label="Setup"></nav>
+  <div class="page">
     <h1>This server</h1>
     <p class="lede">What makes this TV Thing server differ from another: its role, its Roku
       lane, its tuner and encoder, where it files recordings. The settings live in this host's
@@ -116,12 +124,22 @@
     <p class="foot">Read from <code>/sys</code> and <code>/dev</code>; no device is opened, so
       looking never disturbs a stream. Whether an encoder ffmpeg was built with really works is
       found out by the feed, at its first tune.</p>
+  </div>
+  </div>
+  </div>
+  <div class="tv-chin" aria-hidden="true"><span class="chin-brand">COLOR TV</span><span class="grille"></span><span>CH 3</span><span>● POWER</span></div>
+  </section>
   </main>
 
+  <script src="settop.js"></script>
   <script>
   (() => {
     "use strict";
     const $ = id => document.getElementById(id);
+    setupMenu($("setup-menu"));
+    // The box's panel: this server's role and Roku lane, and unsaved changes, on its lamps;
+    // what it is on its line.
+    const box = setupBox($("box"), { model: "SETTINGS", lamps: [["primary", "PRIMARY"], ["roku", "ROKU"], ["edit", "EDIT", true]] });
     let config = null, errors = {}, saved = null;
 
     const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
@@ -181,6 +199,10 @@
         : setting("roku").effective === "off" ? "off" : "not running";
       const encoder = setting("video_encoder").effective;
       const adapter = setting("digital_adapter").effective;
+      const market = config.settings.some(item => item.id === "market") ? setting("market").effective : null;
+      box.lamp("primary", config.node_role === "primary");
+      box.lamp("roku", roku.running);
+      box.say(`${config.node} · ${role}${market ? ` · market ${market}` : ""} · encoder ${encoder}`);
       $("summary").innerHTML = [
         `<span class="chip">${dot("live")}<strong>${esc(config.node)}</strong> ${esc(role)}</span>`,
         `<span class="chip">${dot(roku.running ? "live" : "idle")}Roku lane <strong>${esc(rokuText)}</strong></span>`,
@@ -294,6 +316,7 @@
       $("save").disabled = !count;
       $("revert").disabled = !count;
       $("save").textContent = count ? `Save ${count} change${count === 1 ? "" : "s"}` : "Save";
+      box.lamp("edit", count);
     }
 
     // ---- Hardware ---------------------------------------------------------------
@@ -351,6 +374,7 @@
         $("notice").hidden = false;
         $("notice").className = "notice bad";
         $("notice").textContent = `Could not read this server's settings (${res.status || res.error || "no answer"}).`;
+        box.say("Could not read the settings");
         return;
       }
       config = res.body;
