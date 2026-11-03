@@ -99,10 +99,7 @@
     <section class="tv" aria-label="Signal meter">
       <div class="crt">
         <div class="osd">
-          <nav class="osd-menu" aria-label="Setup">
-            <a href="rescan.html">1 AUTO PROGRAM</a>
-            <a href="dx.html" aria-current="page">2 SIGNAL METER</a>
-          </nav>
+          <nav class="osd-menu" id="setup-menu" aria-label="Setup"></nav>
           <div class="osd-head">
             <span>SIGNAL METER · ANTENNA</span>
             <span class="hint">ONE RF CHANNEL AT A TIME</span>
@@ -154,6 +151,7 @@
     "use strict";
     const $ = (id) => document.getElementById(id);
     const box = explorerPanel($("panel"));
+    setupMenu($("setup-menu"));
     const BANDS = [
       ["VHF-Lo", "VHF LOW", "54–88 MHZ"],
       ["VHF-Hi", "VHF HIGH", "174–216 MHZ"],

@@ -87,3 +87,79 @@ function explorerPanel(root) {
     lamp(name, lit) { root.querySelector(`[data-lamp="${name}"]`)?.classList.toggle("lit", Boolean(lit)); },
   };
 }
+
+// ---------- the box's setup screens ----------
+// Scan, DX, Roku, Inputs and Config are screens of one menu on the box (settop.css's
+// .setup-room): the TV shows the menu's tabs, the Explorer above it its front panel.
+
+const SETUP_SCREENS = [
+  ["rescan.html", "AUTO PROGRAM"], ["dx.html", "SIGNAL METER"], ["roku.html", "ROKU"],
+  ["inputs.html", "INPUTS"], ["config.html", "SETTINGS"],
+];
+
+function setupScreen() {
+  const here = location.pathname.split("/").pop() || "index.html";
+  return SETUP_SCREENS.findIndex(([href]) => href === here);
+}
+
+// The menu's tabs in ``nav``, this page's selected.
+function setupMenu(nav) {
+  const here = setupScreen();
+  nav.replaceChildren(...SETUP_SCREENS.map(([href, label], index) => {
+    const tab = document.createElement("a");
+    tab.href = href;
+    tab.textContent = `${index + 1} ${label}`;
+    if (index === here) tab.setAttribute("aria-current", "page");
+    return tab;
+  }));
+}
+
+// The Explorer in ``section`` for a screen with no keys of its own: ``model`` under the
+// badge, ``lamps`` ([key, label, amber?]) in its window. Its pad moves between the menu's
+// screens (◀ ▶), scrolls this one (▲ ▼) and reads it again (SELECT). Returns its panel
+// (explorerPanel): the page lights the lamps and writes the line.
+function setupBox(section, { model, lamps = [] }) {
+  const lamp = ([key, label, amber]) =>
+    `<span class="lamp${amber ? " amber" : ""}" data-lamp="${key}">${label}</span>`;
+  section.innerHTML = `
+    <div class="sa-badge">
+      <span class="sa-maker">SCIENTIFIC ATLANTA</span>
+      <span class="sa-explorer">Explorer</span>
+      <span class="sa-model">${model}</span>
+    </div>
+    <div class="settop-window" role="status" aria-live="polite" aria-label="Box display">
+      <div class="lamps" aria-hidden="true">${lamps.map(lamp).join("")}</div>
+      <svg class="seg settop-clock" aria-hidden="true"></svg>
+      <div class="settop-text"><span>${model}</span></div>
+    </div>
+    <div class="sa-controls">
+      <div class="sa-pad" role="group" aria-label="Menu">
+        <button class="sa-arrow up" data-pad="up" title="Scroll up" aria-label="Scroll up">▲</button>
+        <button class="sa-arrow left" data-pad="left" title="Previous screen" aria-label="Previous screen">◀</button>
+        <button class="sa-select" data-pad="select" title="Read this screen again">SELECT</button>
+        <button class="sa-arrow right" data-pad="right" title="Next screen" aria-label="Next screen">▶</button>
+        <button class="sa-arrow down" data-pad="down" title="Scroll down" aria-label="Scroll down">▼</button>
+      </div>
+      <div class="sa-keys">
+        <a class="nub" href="guide.html" title="The program guide">GUIDE</a>
+        <a class="nub" href="vcr.html" title="Recordings and timers">VCR</a>
+        <a class="nub" href="about.html" title="About TV Thing">INFO</a>
+        <a class="nub" href="./" title="Back to watching">EXIT</a>
+      </div>
+    </div>
+    <span class="settop-power" aria-hidden="true"><span class="led on green"></span></span>`;
+  const here = setupScreen();
+  const go = (by) => {
+    const next = SETUP_SCREENS[(here + by + SETUP_SCREENS.length) % SETUP_SCREENS.length];
+    location.href = next[0];
+  };
+  const scroll = (by) => {
+    const step = by * Math.round(window.innerHeight * 0.6);
+    (document.scrollingElement || document.documentElement).scrollBy({ top: step, behavior: "smooth" });
+  };
+  const actions = { left: () => go(-1), right: () => go(1), up: () => scroll(-1), down: () => scroll(1),
+                    select: () => location.reload() };
+  section.querySelectorAll("[data-pad]").forEach(button =>
+    button.addEventListener("click", () => actions[button.dataset.pad]()));
+  return explorerPanel(section.querySelector(".settop-window"));
+}

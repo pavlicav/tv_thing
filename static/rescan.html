@@ -81,10 +81,7 @@
     <section class="tv" aria-label="Channel setup">
       <div class="crt">
         <div class="osd">
-          <nav class="osd-menu" aria-label="Setup">
-            <a href="rescan.html" aria-current="page">1 AUTO PROGRAM</a>
-            <a href="dx.html">2 SIGNAL METER</a>
-          </nav>
+          <nav class="osd-menu" id="setup-menu" aria-label="Setup"></nav>
 
           <div class="osd-menu" id="scan-tabs" role="tablist" hidden>
             <button role="tab" id="tab-tv" aria-selected="true">ANTENNA</button>
@@ -158,6 +155,7 @@
     const $ = (id) => document.getElementById(id);
     const result = $("result");
     const box = explorerPanel($("panel"));
+    setupMenu($("setup-menu"));
     const FM_UI_ENABLED = false; // backend is retained for compatible hardware
 
     // ---------- tabs ----------

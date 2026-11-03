@@ -403,6 +403,68 @@ a.nub { text-decoration: none; }
 .rf-cell.scanning .rf-names span, .rf-cell.busy .rf-sub { color: var(--osd-blue); }
 .rf-cell[aria-current="true"] { outline: 2px solid var(--osd-hi); outline-offset: 3px; }
 
+/* ---------- A page on the box's screen (Roku, Inputs, Config) ---------- */
+/* .osd.osd-page holds a page built from app.css's parts (.page, .card, .kv, .btn, .field,
+   .notice): its colours, corners and type become the on-screen menu's, so the page's own
+   styles follow without being written twice. Headings and labels are in capitals, as on the
+   menu; prose and data (paths, addresses, names) keep their case. */
+.osd.osd-page {
+  --bg: transparent;
+  --surface: rgba(0, 0, 0, .14);
+  --surface-2: rgba(0, 0, 0, .24);
+  --surface-3: rgba(255, 255, 255, .14);
+  --border: rgba(255, 255, 255, .38);
+  --border-strong: rgba(255, 255, 255, .75);
+  --text: #ffffff;
+  --text-dim: #e4e8ff;
+  --text-mute: #c9d1ff;
+  --accent: var(--osd-hi);
+  --accent-soft: rgba(255, 233, 90, .16);
+  --accent-line: rgba(255, 233, 90, .65);
+  --ok: #9dffb8;
+  --warn: var(--osd-hi);
+  --err: #ffb3ba;
+  --r-sm: 0; --r-md: 0; --r-lg: 0; --r-full: 0;
+  --font: var(--osd-font);
+  --mono: var(--osd-font);
+  font-size: clamp(12px, 1.5vw, 14px);
+  text-transform: none;
+  letter-spacing: .02em;
+  text-shadow: 1px 1px 0 #000;
+}
+.osd-page .page { max-width: none; margin: 0; padding: 0; }
+.osd-page .page h1 {
+  font-size: 1.3em; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--osd-hi); margin-bottom: 8px;
+}
+.osd-page .page h2 {
+  font-size: 1em; letter-spacing: .08em; color: var(--osd-hi);
+  border-bottom: 2px solid rgba(255, 255, 255, .5); margin: 26px 0 12px;
+}
+.osd-page .page .lede { font-size: 1em; margin-bottom: 18px; }
+.osd-page .card { border-width: 2px; box-shadow: 3px 3px 0 #000; }
+.osd-page .kv-row { border-bottom-style: dotted; }
+.osd-page .kv-row dt, .osd-page th, .osd-page .section-label { text-transform: uppercase; letter-spacing: .06em; }
+.osd-page .btn {
+  border-width: 2px; background: none; color: var(--text); box-shadow: 2px 2px 0 #000;
+  font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+}
+.osd-page .btn:hover:not(:disabled) {
+  background: var(--osd-text); color: var(--osd-blue); border-color: var(--osd-text); text-shadow: none;
+}
+.osd-page .btn-accent { border-color: var(--osd-hi); color: var(--osd-hi); }
+.osd-page .btn-accent:hover:not(:disabled) { background: var(--osd-hi); color: var(--osd-blue); border-color: var(--osd-hi); }
+.osd-page .field {
+  background: rgba(0, 0, 0, .22); border: 0; border-bottom: 2px solid rgba(255, 255, 255, .8); color: #fff;
+}
+.osd-page .field:focus { background: rgba(255, 255, 255, .14); }
+.osd-page select option { background: var(--osd-blue-lo); color: #fff; }
+.osd-page input, .osd-page select { color-scheme: dark; }
+.osd-page .notice { border-width: 2px; border-color: var(--osd-hi); }
+.osd-page .notice.error { border-color: #ffb3ba; }
+.osd-page a { color: var(--osd-hi); }
+.osd-page pre, .osd-page code { text-shadow: none; }
+
 /* ---------- Narrow screens ---------- */
 
 @media (max-width: 560px) {

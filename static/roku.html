@@ -6,8 +6,10 @@
   <title>Roku · TV Thing</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="settop.css">
   <style>
-    body { min-height: 100vh; background: var(--bg); }
+    /* The box's ROKU screen (settop.css): the Explorer on top, this page on its TV. */
+    body { min-height: 100vh; background: #0b0c0e; }
     .kv-row dd { overflow-wrap: anywhere; }
     .ok { color: var(--ok); }
     .bad { color: var(--err); }
@@ -17,7 +19,7 @@
     .form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
     .form label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-mute); }
     .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-    pre { margin: 12px 0 0; padding: 12px; max-height: 320px; overflow: auto; font: 12px/1.5 var(--mono);
+    pre { margin: 12px 0 0; padding: 12px; max-height: 320px; overflow: auto; font: 400 12px/1.5 var(--mono);
           background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md);
           color: var(--text-dim); white-space: pre-wrap; }
     .card + .card { margin-top: 14px; }
@@ -40,7 +42,13 @@
     </nav>
   </header>
 
-  <main class="page">
+  <main class="setup-room">
+  <section class="settop" id="box" aria-label="Cable box"></section>
+  <section class="tv" aria-label="Roku">
+  <div class="crt">
+  <div class="osd osd-page">
+  <nav class="osd-menu" id="setup-menu" aria-label="Setup"></nav>
+  <div class="page">
     <h1>Roku</h1>
     <p class="lede">The source Roku, seen through the Hauppauge HD PVR: what it is showing,
       how it is captured, and the screen calibration its navigation relies on.
@@ -89,12 +97,21 @@
       </div>
       <pre id="result" hidden></pre>
     </div>
+  </div>
+  </div>
+  </div>
+  <div class="tv-chin" aria-hidden="true"><span class="chin-brand">COLOR TV</span><span class="grille"></span><span>CH 3</span><span>● POWER</span></div>
+  </section>
   </main>
 
+  <script src="settop.js"></script>
   <script>
   (() => {
     "use strict";
     const $ = id => document.getElementById(id);
+    setupMenu($("setup-menu"));
+    // The box's panel: what the Roku shows on the line; capture, navigation, a failure lit.
+    const box = setupBox($("box"), { model: "ROKU", lamps: [["cap", "CAPTURE"], ["nav", "NAV", true], ["fail", "FAIL"]] });
     const LOCK_KEY = "tvthing.rokuLock";
     let channelsLoaded = false;
 
@@ -122,6 +139,7 @@
         data = await res.json();
       } catch (_) {
         rows($("now"), [["Server", "unreachable", "bad"]]);
+        box.say("Server unreachable");
         return;
       }
       if (!data.configured) {
@@ -133,6 +151,13 @@
       const selection = roku.selection;
       const operation = roku.operation;
       const stream = lane.stream || {};
+      box.lamp("cap", stream.active);
+      box.lamp("nav", operation && operation.active);
+      box.lamp("fail", operation && operation.state === "failed");
+      box.say(operation && operation.active ? `Navigating · ${operation.message || operation.phase || ""}`
+        : selection ? `On ${selection.manual ? "Manual Roku" : selection.name}`
+          + (selection.resolved_source && selection.resolved_source.label ? ` · ${selection.resolved_source.label}` : "")
+          : "Unverified");
       rows($("now"), [
         ["Showing", selection ? (selection.manual ? "Manual Roku" : selection.name) : "unverified"],
         ["Verified", selection && !selection.manual ? `${Math.round(selection.age_seconds)} s ago` +
