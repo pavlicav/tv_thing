@@ -63,6 +63,7 @@ class FakeController:
         self._lock = threading.Lock()
         self.navigation_guard = nullcontext
         self.plays = []
+        self.feeds = []
         self.cancelled = threading.Event()
         self.release = threading.Event()
         self.release.set()
@@ -90,7 +91,8 @@ class FakeController:
     def play_sunday_ticket(self, game):
         return self._play(game["title"], "sunday_ticket")
 
-    def play_espn_game(self, game):
+    def play_espn_game(self, game, feed="home"):
+        self.feeds.append(feed)
         return self._play(game["title"], "espn_unlimited")
 
     def cancel_operation(self):
@@ -495,6 +497,24 @@ def test_the_nhl_catalog_lists_espn_unlimited_games_and_the_roku_finds_them(lane
     selection = lane.selection_view()
     assert (selection["source_id"], selection["channel_id"]) == ("nhl", "1")
     assert selection["resolved_source"]["provider"] == "espn_unlimited"
+
+
+def test_a_tune_asks_for_a_stream_of_an_espn_unlimited_game(lane):
+    by_id = {game["game_id"]: game for game in NHL_SLATE}
+    lane.sports = SimpleNamespace(game=lambda league, game_id, day: dict(by_id[game_id]))
+    target = {"source_id": roku_lane.NHL, "channel_id": "1", "date": "2026-10-20"}
+    assert lane.tune({**target, "feed": "away"})[0] == 202
+    settle(lane)
+    assert lane.controller.feeds == ["away"]
+    # What already plays is not moved for it: the favorite's may be blacked out, the other playing.
+    assert lane.tune({**target, "feed": "home"})[0] == 200
+    assert lane.controller.feeds == ["away"]
+    assert lane.tune({**target, "force": True})[0] == 202
+    settle(lane)
+    assert lane.controller.feeds == ["away", "home"]
+    with pytest.raises(ConfigError):
+        lane.tune({**target, "feed": "Detroit", "force": True})
+    assert lane.controller.feeds == ["away", "home"]
 
 
 def _nwsl(game_id, away, home, *names):

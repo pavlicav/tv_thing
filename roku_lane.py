@@ -34,6 +34,7 @@ import feed_node
 from roku_control import days
 from roku_control.errors import (ConfigError, ControlBusyError, CueCancelledError, EcpError,
                                  NavigationError, RokuStreamError, SundayTicketBlackoutError)
+from roku_control.espn_unlimited import FEEDS
 from roku_control.sports import LEAGUES, TYPICAL, nhl_on_espn_unlimited, nwsl_on_espn_unlimited
 
 LANE = "roku"
@@ -299,9 +300,14 @@ class RokuLane:
 
         200 when nothing had to move (``reused``), 202 with an operation when
         the Roku navigates, 409 when ``navigate`` is false and the Roku does not
-        already show target.
+        already show target. ``feed`` (home or away) is which of an ESPN Unlimited
+        game's two streams to look for, if a navigation happens: it does not make
+        a stream already playing move, nor one blacked out play.
         """
         target, game = self.normalize(body)
+        feed = body.get("feed", FEEDS[0])
+        if feed not in FEEDS:
+            raise ConfigError(f"feed must be one of {', '.join(FEEDS)}")
         force = body.get("force") is True
         navigate = body.get("navigate", True) is not False
         resume = body.get("resume", True) is not False
@@ -320,7 +326,7 @@ class RokuLane:
                 return 409, {"error": "The Roku is not showing that verified selection",
                              "code": "not_prepared"}
             self._stop_operation()
-            return 202, {"reused": False, "operation": self._start(target, game)}
+            return 202, {"reused": False, "operation": self._start(target, game, feed)}
 
     def watch(self, body):
         """Serve target only if nothing has to move. Returns (status, payload), or None.
@@ -360,19 +366,19 @@ class RokuLane:
             return bool(selection and not selection.get("manual") and same_target(selection, target)
                         and not self._running())
 
-    def _start(self, target, game):
+    def _start(self, target, game, feed=FEEDS[0]):
         operation = {"id": uuid.uuid4().hex, "target": copy.deepcopy(target), "state": "running",
                      "phase": "accepted", "message": "Accepted", "error": None,
                      "started_at": self._wall(), "finished_at": None, "controller_id": None}
         with self._lock:
             self.operation = operation
-        thread = threading.Thread(target=self._navigate, args=(operation, target, game),
+        thread = threading.Thread(target=self._navigate, args=(operation, target, game, feed),
                                   name=f"roku-{operation['id'][:8]}", daemon=True)
         self._thread = thread
         thread.start()
         return self.operation_view()
 
-    def _navigate(self, operation, target, game):
+    def _navigate(self, operation, target, game, feed=FEEDS[0]):
         source = target["source_id"]
         self._local.navigations = navigations = []
         try:
@@ -383,7 +389,7 @@ class RokuLane:
             elif source == MLB:
                 result = self.controller.play_baseball_game(game)
             elif source in ESPN_UNLIMITED:
-                result = self.controller.play_espn_game(game)
+                result = self.controller.play_espn_game(game, feed=feed)
             else:
                 result = self.controller.play(target["channel_id"])
             selection = self._verified(target, result)

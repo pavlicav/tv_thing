@@ -404,7 +404,10 @@ refreshed in the background), `generation` and `reuse_max_age_seconds`.
   or after the still-playing check below passes (`resumed: true`). Otherwise
   **202** and an `operation`: the Roku navigates (YouTube TV takes 40–125 s,
   Sunday Ticket up to about 4 min). Poll `lanes.roku.roku.operation` until its
-  `state` is `succeeded`, `failed` or `cancelled`. Options: `force: true`
+  `state` is `succeeded`, `failed` or `cancelled`. Options: `feed: "home"`
+  or `"away"` is which of an ESPN Unlimited game's two streams to look for
+  (home by default; the other if that one is blacked out; what already plays
+  is not moved for it); `force: true`
   always navigates; `navigate: false` never does, answering **409**
   `not_prepared` instead; `resume: false` skips the still-playing check.
   A Sunday Ticket game plays from wherever it is watchable: when a local
