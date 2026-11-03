@@ -6,8 +6,10 @@
   <title>Inputs · TV Thing</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="settop.css">
   <style>
-    body { min-height: 100vh; background: var(--bg); }
+    /* The box's INPUTS screen (settop.css): the Explorer on top, this page on its TV. */
+    body { min-height: 100vh; background: #0b0c0e; }
     .page { max-width: 1120px; }
     .ok { color: var(--ok); }
     .warn { color: var(--warn); }
@@ -104,7 +106,13 @@
     </nav>
   </header>
 
-  <main class="page">
+  <main class="setup-room">
+  <section class="settop" id="box" aria-label="Cable box"></section>
+  <section class="tv" aria-label="Inputs">
+  <div class="crt">
+  <div class="osd osd-page">
+  <nav class="osd-menu" id="setup-menu" aria-label="Setup"></nav>
+  <div class="page">
     <h1>Input streams</h1>
     <p class="lede">Everything that feeds the dial, on this box and on the other one it pools
       its tuners with: each box's tuner stack, Roku input and web streams, with the services that
@@ -128,7 +136,13 @@
       </div>
     </div>
     <p class="foot" id="updated"></p>
+  </div>
+  </div>
+  </div>
+  <div class="tv-chin" aria-hidden="true"><span class="chin-brand">COLOR TV</span><span class="grille"></span><span>CH 3</span><span>● POWER</span></div>
+  </section>
   </main>
+  <script src="settop.js"></script>
 
   <!-- One box's inputs. This node's section, then the peer's (/api/v1/peer/inputs). -->
   <template id="node-template">
@@ -175,6 +189,9 @@
   (() => {
     "use strict";
     const $ = id => document.getElementById(id);
+    setupMenu($("setup-menu"));
+    // The box's panel: this box's services and the peer, on the lamps and the line.
+    const box = setupBox($("box"), { model: "INPUTS", lamps: [["feed", "FEED"], ["control", "CONTROL"], ["peer", "PEER", true]] });
     const POLL_MS = 5000;
     const cpuSeen = {};          // "node unit" -> {cpu, at, rate}: CPU time between two systemd reads
     let cycle = 0, timer = null;
@@ -610,6 +627,8 @@
       if (!status.ok || !status.body) {
         local.part("notice").hidden = false;
         local.part("notice").textContent = "Control is not answering, so nothing here is current. It retries every five seconds.";
+        box.lamp("control", false);
+        box.say("Control is not answering");
         $("updated").textContent = `Last tried ${new Date().toLocaleTimeString()}`;
         return;
       }
@@ -635,6 +654,16 @@
           "are not shown; its tuners are never counted free meanwhile. It retries every five seconds.";
       }
       $("updated").textContent = `Updated ${new Date().toLocaleTimeString()}`;
+      const services = (inputs.ok && inputs.body && inputs.body.services) || [];
+      const running = (id) => services.some(service => service.id === id && service.systemd
+        && service.systemd.state === "active" && service.answering !== false);
+      const up = services.filter(service => service.systemd && service.systemd.state === "active").length;
+      const peerUp = Boolean(peer.ok && peer.body && peer.body.status);
+      box.lamp("feed", running("feed"));
+      box.lamp("control", running("control"));
+      box.lamp("peer", peerUp);
+      box.say(`${status.body.node || "This box"} · ${up} of ${services.length} services up`
+        + (other.section.hidden ? "" : peerUp ? ` · ${peer.body.status.node || "peer"} answering` : " · peer not answering"));
     }
 
     function schedule() {
