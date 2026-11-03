@@ -9,8 +9,9 @@ lanes are absent. Its tuners and viviserv's are **one pool on one dial** (sectio
 tune on either box takes whichever tuner is free, and a stream from the other box is relayed
 through this one's front door.
 
-It has been running since 2026-10-31, from the `host-config` branch (`e3b8379`). This file says
-how it was set up, how it is run, and what does not work here.
+It has been running since 2026-10-31. Since 2026-11-03 its checkout is `master`, pulled from
+GitHub and never committed to here (section 5). This file says how it was set up, how it is
+run, and what does not work here.
 
 - The Watch page: <http://10.0.0.99:8080/> or <http://viviserv2.local:8080/>.
 - The Config page (this host's settings and hardware): `/config.html`.
@@ -97,166 +98,18 @@ and its bare `python3` was removed from `environment.systemPackages`: `tv-thing.
 now this Python, a superset of the bare one.
 
 The originals are kept beside it: `configuration.nix.before-tv-thing`, and
-`tv-thing.nix.stage1` (groups and Python only, before the services). A working copy of the
-module is in `~/tv_thing-host/tv-thing.nix`.
+`tv-thing.nix.stage1` (groups and Python only, before the services). The module itself is in
+the repo, [`deploy/nixos/tv-thing.nix`](deploy/nixos/tv-thing.nix), and
+`deploy/nixos/deploy-nixos.sh` installs it: it shows the change and asks, evaluates the whole
+system with it before touching `/etc/nixos`, keeps a dated copy of the module it replaces,
+rebuilds, and checks the iHD driver and the services afterwards. Run it as yourself; sudo asks
+for the copy and the rebuild.
 
-`/etc/nixos/tv-thing.nix`:
+What it declares, in order: the video group; the iHD VA-API driver; the services' Python (and
+the fast suite's); the three services, translated from `deploy/systemd/`; the front door on
+`:8080` joining the dashboard's Apache, with TV Thing at `/tv/` on the dashboard's site too; and
+Apache reloading, not restarting, when its config changes.
 
-```nix
-# /etc/nixos/tv-thing.nix: TV Thing on viviserv2, a second node (~/tv_thing/VIVISERV2_SETUP.md).
-# The video group, the services' Python, the three services (translations of
-# deploy/systemd/*.service) and the front door on :8080 (deploy/apache/). This host's own settings
-# are host_config.py's: auto from the hostname and hardware, plus ~/.config/tv-thing/host.json.
-{ config, lib, pkgs, ... }:
-
-let
-  tv = "/home/vivian/tv_thing";
-
-  # The services' and the fast suite's Python 3.13. It stands in for viviserv's miniconda.
-  python = pkgs.python3.withPackages (ps: with ps; [
-    numpy pillow scipy requests   # the services (scipy: sports_guide_music.py; requests: test_integration.py)
-    pytest jsonschema             # the fast suite
-  ]);
-
-  # Pinned here, over the Config page and auto: nothing on this box may press a key on the house
-  # Roku, which answers from anywhere on the LAN and belongs to viviserv and VizelVision.
-  hostEnvironment = {
-    TV_THING_ROKU = "off";
-    # Each line reaches the journal when printed, not when an 8 KiB buffer fills.
-    PYTHONUNBUFFERED = "1";
-  };
-  unit = {
-    wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.ffmpeg pkgs.procps ];   # NixOS units get a minimal PATH; the code runs `ffmpeg`/`ffprobe`
-  };
-  service = {
-    Type = "simple";
-    User = "vivian";
-    WorkingDirectory = tv;
-    Restart = "always";
-    TimeoutStopSec = 5;
-  };
-in
-{
-  # /dev/dvb/adapter*/* are root:video 0660.
-  users.users.vivian.extraGroups = [ "video" ];
-
-  # The UHD 630's VA-API driver (iHD), for the feed's h264_vaapi encoder: libva finds it under
-  # /run/opengl-driver. The gate passed on it, both tuners at once (VIVISERV2_SETUP.md, section 3).
-  # Its packagers trip at 90 C on the CPU package's sensor, the iGPU being on the CPU's die.
-  hardware.graphics = {
-    enable = true;
-    extraPackages = [ pkgs.intel-media-driver ];
-  };
-
-  environment.systemPackages = [
-    python
-    pkgs.tesseract   # only the fast suite's Roku OCR tests use it on this host
-    pkgs.libva-utils # vainfo: whether the iGPU encoder is there
-  ];
-
-  systemd.services.tv-thing-feed = unit // {
-    description = "TV Thing feed (tuners, recorders, streams)";
-    wants = [ "network-online.target" ];
-    after = [ "network-online.target" ];
-    # A rebuild must never restart the feed behind your back: that drops every stream and ends
-    # every recording. Restart it yourself, deliberately.
-    restartIfChanged = false;
-    environment = hostEnvironment // {
-      TV_THING_VIDEO_ENCODER = "vaapi";   # h264_vaapi on the iGPU; "cpu" for libx264
-      LIBVA_DRIVER_NAME = "iHD";   # the UHD 630's driver, not the older i965
-      TV_THING_CONTROL_URL = "http://127.0.0.1:8087";
-    };
-    serviceConfig = service // {
-      ExecStart = "${python}/bin/python3 ${tv}/feed_server.py";
-      RestartSec = 5;
-      CPUQuota = "400%";      # viviserv: 800% of 28 threads. Here: 4 of 6 faster cores
-      MemoryMax = "1800M";
-      TasksMax = 192;
-      OOMPolicy = "continue";
-      LimitFSIZE = "16M:16G";
-    };
-  };
-
-  systemd.services.tv-thing = unit // {
-    description = "TV Thing control (API, UI, channels, guides, VCR)";
-    wants = [ "network-online.target" "tv-thing-feed.service" ];
-    after = [ "network-online.target" "tv-thing-feed.service" ];
-    environment = hostEnvironment // {
-      TV_THING_ROLE = "control";
-      PORT = "8087";
-      TV_THING_FEED_URL = "http://127.0.0.1:8086/";
-    };
-    serviceConfig = service // {
-      ExecStart = "${python}/bin/python3 ${tv}/server.py";
-      RestartSec = 2;
-      CPUQuota = "200%";      # viviserv: 400%
-      MemoryMax = "1200M";
-      TasksMax = 160;
-      OOMPolicy = "stop";
-      LimitFSIZE = "16M:16G";
-    };
-  };
-
-  systemd.services.tv-thing-web-basic = unit // {
-    description = "TV Thing web-basic (slide channels' video, simple web relays)";
-    wants = [ "network-online.target" ];
-    after = [ "network-online.target" ];
-    environment = hostEnvironment // {
-      TV_THING_CONTROL_URL = "http://127.0.0.1:8087";
-    };
-    serviceConfig = service // {
-      ExecStart = "${python}/bin/python3 ${tv}/web_basic.py";
-      RestartSec = 5;
-      CPUQuota = "200%";      # as viviserv: web_stream_check.py's own peak limit
-      MemoryMax = "768M";
-      TasksMax = 96;
-      LimitFSIZE = "16M:2G";
-    };
-  };
-
-  # The front door: Apache on :8080. /stream/ goes to the feed (and web-basic's paths to
-  # web-basic), everything else to control, and /internal/ and /feed/v1/ are never routed.
-  # It joins the dashboard's Apache (viviserv2-dashboard.nix), which already sets adminAddr and
-  # loads proxy, proxy_http, headers and alias. *:8080, not explicit addresses: viviserv binds
-  # its own only because another service holds tailscale0's :8080 there.
-  # The routes are the repo's, read at rebuild time, so a change to them takes effect at the
-  # next `nixos-rebuild`, not on a pull.
-  services.httpd.virtualHosts.tv-thing-front-door = {
-    listen = [ { port = 8080; } ];
-    extraConfig = ''
-      Define TV_THING_FEED_PORT 8086
-      Define TV_THING_CONTROL_PORT 8087
-      Define TV_THING_PEER_URL http://10.0.0.98:8080
-    '' + builtins.readFile "${tv}/deploy/apache/tv-thing-routes.conf";
-  };
-  # TV Thing at http://viviserv2/tv/ too, on the dashboard's site, as viviserv's main site has it:
-  # the dashboard's TV Thing card links there. A <Location>, not viviserv's vhost-level ProxyPass:
-  # the dashboard proxies <Location />, and mod_proxy tries a Location's ProxyPass before the
-  # vhost's, so a vhost-level /tv/ would never match. Locations are written in name order, so
-  # /tv/ follows / and wins for its paths. flushpackets for the rescan's events and HLS; the
-  # timeout so a scan is not cut off. The bare /tv redirects by mod_rewrite, which translates
-  # before mod_proxy (a RedirectMatch would lose /tv to the dashboard's proxy).
-  services.httpd.virtualHosts.viviserv2 = {
-    extraConfig = ''
-      RewriteEngine On
-      RewriteRule ^/tv$ /tv/ [R=301,L]
-    '';
-    locations."/tv/".extraConfig = ''
-      ProxyPass http://127.0.0.1:8080/ flushpackets=on timeout=3600
-      ProxyPassReverse http://127.0.0.1:8080/
-    '';
-  };
-  systemd.services.httpd = {
-    # NixOS restarts Apache whenever its config changes, which drops every viewer. Reload it
-    # instead: its ExecReload is `httpd -k graceful`.
-    restartTriggers = lib.mkForce [ ];
-    reloadTriggers = [ config.services.httpd.configFile ];
-  };
-
-  networking.firewall.allowedTCPPorts = [ 8080 ];
-}
-```
 
 Two things the dashboard's module already provides, and this one must not repeat:
 `services.httpd.adminAddr` (two different values are an evaluation error) and the proxy,
@@ -269,7 +122,7 @@ To check a change to the module before applying it, without root, evaluate a cop
 `/etc/nixos/` and syntax-check the Apache config it generates:
 
 ```bash
-S=$(mktemp -d); cp /etc/nixos/*.nix "$S"/ && cp ~/tv_thing-host/tv-thing.nix "$S"/
+S=$(mktemp -d); cp /etc/nixos/*.nix "$S"/ && cp ~/tv_thing/deploy/nixos/tv-thing.nix "$S"/
 C=$(nix-build '<nixpkgs/nixos>' -I nixos-config="$S"/configuration.nix -A config.services.httpd.configFile --no-out-link)
 mkdir -p "$S"/run "$S"/log
 sed -e "s#/run/httpd#$S/run#g" -e "s#/var/log/httpd#$S/log#g" "$C" > "$S"/httpd.conf && httpd -f "$S"/httpd.conf -t
@@ -365,7 +218,7 @@ Results, 2026-10-31, with the default limits:
 
 The GPU checks read `nvidia-smi` only, so they read 0 here, which is right for libx264.
 
-**Tuner B and VA-API, 2026-11-01.** `~/tv_thing-host/gate-igpu.sh` gates a staged candidate
+**Tuner B and VA-API, 2026-11-01.** `deploy/nixos/gate-staged.sh` gates a staged candidate
 (branch `station-ids`) with both tuners on the UHD 630 (`TV_THING_VIDEO_ENCODER=vaapi`, the
 system iHD driver): each tuner alone, then tuner B retuned while tuner A holds WETA, with
 `--max-dvb-sources 2` (two streams on purpose). With no NVIDIA card the gate reads the CPU
@@ -443,8 +296,8 @@ curl -s http://127.0.0.1:8080/api/v1/status | python3 -m json.tool | less
 - **Restarting:** `sudo systemctl restart tv-thing` drops nothing (use the restart drill).
   `tv-thing-web-basic` drops only its own web streams. `tv-thing-feed` drops every stream and
   ends every recording: do it deliberately.
-- **Code** (a pull): reaches each service at its next restart, crash restarts included, as on
-  viviserv. The checkout is on `host-config`; once that is merged, switch it to `master`.
+- **Code** (a pull, section 5): reaches each service at its next restart, crash restarts
+  included, as on viviserv.
 - **Unit settings** (`/etc/nixos/tv-thing.nix`): `sudo nixos-rebuild switch` restarts control
   and web-basic when their units change, and never the feed (`restartIfChanged = false`: it
   says "NOT restarting the following changed units"). Restart the feed yourself afterwards
@@ -461,6 +314,33 @@ curl -s http://127.0.0.1:8080/api/v1/status | python3 -m json.tool | less
   health is in `/api/v1/status`.
 - **The guide** reads the tuner at control's start when it has less than a day, and at 03:00
   and 15:00, interrupting live TV for about 80 seconds, as on viviserv.
+
+## 5. Version control: one master, pulled here
+
+Both boxes run commits of one branch, `master` on GitHub (`pavlicav/tv_thing`). Every change is
+made, gated and committed on viviserv, merged to its `master` and pushed from there (viviserv
+has the GitHub key). This box only pulls: it reads GitHub anonymously over HTTPS, has no key,
+and nothing is ever committed here. What differs between the boxes is never in git: each
+box's settings are `~/.config/tv-thing/host.json`, and its state (`state/`: reception, signal
+grades, the peer's plan, a non-home market's own plan) is git-ignored.
+
+To deploy here what viviserv runs:
+
+```bash
+cd ~/tv_thing
+git fetch && git log --oneline HEAD..origin/master    # what is coming
+git pull --ff-only
+```
+
+Then restart what the change needs, under its gate (AGENTS.md; section 3 for the paths here):
+control under the restart drill; web-basic after `scripts/web_stream_check.py`; the feed only
+after `deploy/nixos/gate-staged.sh` (a staged candidate in `~/tv_thing-gate-b`, production
+stopped) and then `deploy/nixos/gate-production.sh`; a change to `deploy/nixos/tv-thing.nix` by
+`deploy/nixos/deploy-nixos.sh`. A pull alone restarts nothing, but every service takes the new
+code at its next restart, a crash's included: pull only what is meant to run here.
+
+Until 2026-11-03 this box ran the `host-config` branch, fed by bundles copied over from
+viviserv; that branch is kept locally (`git branch -v`) and no longer used.
 
 ## What does not work here
 
