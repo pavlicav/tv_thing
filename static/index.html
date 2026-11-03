@@ -451,7 +451,8 @@
     .lock-pill[hidden] { display: none; }
     .lock-pill:hover { background: rgba(251, 191, 36, .2); }
 
-    /* The digital tuners of both nodes (api/v1/tuners): free, in use, locked or unknown. */
+    /* The digital tuners of both nodes (api/v1/status's tuners): free, in use, locked or
+       unknown; and this node's Roku, with what it is on. */
     .tuner-pool { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-mute); white-space: nowrap; }
     .tuner-pool[hidden] { display: none; }
     .tuner-chip {
@@ -463,6 +464,11 @@
     .tuner-chip.unknown { opacity: .5; text-decoration: line-through; }
     .tuner-chip.watching { font-weight: 700; }
     .tuner-chip.poor { border-style: dashed; }
+    a.tuner-chip { text-decoration: none; }
+    .tuner-chip.roku { border-color: rgba(167, 139, 250, .5); color: #c4b5fd; max-width: 210px; }
+    .tuner-chip.roku.locked { border-color: rgba(251, 191, 36, .45); color: var(--warn); }
+    .tuner-chip.roku.navigating { border-style: dashed; }
+    .tuner-pool .sep { width: 1px; height: 14px; background: var(--border); margin: 0 3px; }
 
     .modal-backdrop {
       position: fixed; inset: 0; z-index: 50;
@@ -742,7 +748,9 @@
       filter: "",
       locks: {},
       pool: {},          // api/v1/tuner/lock's pool: each tuner's lock, by tuner id
-      tuners: [],        // api/v1/tuners: both nodes' digital tuners
+      tuners: [],        // api/v1/status's tuners: both nodes' digital tuners
+      rokuLane: null,    // api/v1/status's lanes.roku, and its lock
+      rokuLock: null,
       tvTuner: null,     // the tuner the last tune landed on ("viviserv2:digital"), or null
       tvPlaylist: null,  // its stream's playlist path (/stream/peer/... when relayed)
       roku: {
@@ -1780,10 +1788,33 @@
     pollLock();
     setInterval(pollLock, 15000);
 
+    // This node's Roku, when it has one in use: what it is on, or where it is navigating to.
+    function rokuChip() {
+      const lane = state.rokuLane;
+      const roku = (lane && lane.roku) || {};
+      const selection = roku.selection || lane?.selection;
+      const navigating = Boolean(lane?.navigating || roku.operation?.active);
+      if (!lane || (!selection && !navigating) || lane.available === false && !selection) return null;
+      const chip = document.createElement("a");
+      chip.href = "roku.html";
+      const lock = state.rokuLock;
+      chip.className = "tuner-chip roku" + (lock ? " locked" : "") + (navigating ? " navigating" : "")
+        + (state.playing === "roku" ? " watching" : "");
+      const title = navigating && roku.operation?.target ? rokuTargetName(roku.operation.target)
+        : selection?.manual ? "Manual" : (selection?.name || selection?.channel_id || "Roku");
+      chip.textContent = `Roku · ${navigating ? "→ " : ""}${lock ? "🔒 " : ""}${title}`;
+      const via = [selection?.app?.name, selection?.resolved_source?.label].filter(Boolean).join(" · ");
+      chip.title = `${lane.node || "this node"}:roku: ${navigating ? "navigating to " : ""}${title}`
+        + (via ? ` (${via})` : "")
+        + (lock ? ` · ${lockSummary(lock)}` : " · available");
+      return chip;
+    }
+
     function renderTuners() {
       const tuners = state.tuners || [];
-      // One tuner and no peer: nothing to choose between, as before the pool.
-      els.tunerPool.hidden = tuners.length < 2;
+      const roku = rokuChip();
+      // One tuner, no peer and no Roku in use: nothing to show, as before the pool.
+      els.tunerPool.hidden = tuners.length < 2 && !roku;
       if (els.tunerPool.hidden) return;
       const available = tuners.filter(t => t.available).length;
       els.tunerPool.replaceChildren(document.createTextNode(`Tuners ${available}/${tuners.length}`));
@@ -1804,14 +1835,22 @@
               + (tuner.lock ? ` · ${lockSummary(tuner.lock)}` : " · available"));
         els.tunerPool.append(chip);
       }
+      if (roku) {
+        const sep = document.createElement("span");
+        sep.className = "sep";
+        els.tunerPool.append(sep, roku);
+      }
     }
 
     async function pollTuners() {
       try {
-        const res = await fetch("api/v1/tuners", { cache: "no-store" });
+        // The status carries the pool's tuners and the Roku lane both.
+        const res = await fetch("api/v1/status", { cache: "no-store" });
         if (!res.ok) return;
         const data = await res.json();
         state.tuners = data.tuners || [];
+        state.rokuLane = (data.lanes || {}).roku || null;
+        state.rokuLock = (data.locks || {}).roku || null;
         for (const tuner of state.tuners) state.pool[tuner.id] = tuner.lock || null;
         renderTuners();
         switchOffPoorSignal();
