@@ -331,6 +331,78 @@ a.osd-btn { text-decoration: none; display: inline-block; color: var(--osd-text)
 .tv-chin span { white-space: nowrap; }
 .tv-chin .grille { flex: 1; height: 10px; background: repeating-linear-gradient(90deg, #0d0e10 0 3px, transparent 3px 6px); border-radius: 2px; }
 
+/* ---------- The box's setup screens (Scan, DX) ---------- */
+/* The Explorer on top, the TV below showing its setup menu: tabs that are pages, a line of
+   help, block bars, and the band as a grid of RF channel cells. */
+
+.setup-room {
+  max-width: 1120px; margin: 0 auto; padding: 28px 16px 64px;
+  display: flex; flex-direction: column; gap: 26px;
+}
+.setup-room > .settop { align-self: center; width: min(100%, 660px); }
+.setup-room > .tv { max-width: none; }
+a.nub { text-decoration: none; }
+.osd-menu a { color: inherit; text-decoration: none; padding: 2px 6px; }
+.osd-menu a[aria-current="page"] { background: var(--osd-text); color: var(--osd-blue); text-shadow: none; }
+.osd-menu a:hover:not([aria-current]) { background: rgba(255,255,255,.16); }
+.osd-menu a:focus-visible { outline: 2px dashed var(--osd-hi); outline-offset: 2px; }
+.osd-lede {
+  max-width: 72ch; margin: 0 0 16px;
+  color: #c9d1ff; font-size: .85em; text-transform: none; letter-spacing: .02em;
+}
+.osd-lede a { color: var(--osd-hi); }
+
+/* A bar of blocks, as a set-top's meter draws one */
+.osd-bar {
+  position: relative; height: 14px; overflow: hidden;
+  border: 2px solid var(--osd-text); box-shadow: 2px 2px 0 #000;
+}
+.osd-bar > .fill {
+  display: block; height: 100%; width: 0;
+  background: repeating-linear-gradient(90deg, currentColor 0 9px, transparent 9px 12px);
+  color: var(--osd-hi); transition: width .35s;
+}
+.osd-bar > .fill.ok { color: #9dffb8; }
+.osd-bar > .fill.err { color: #ffb3ba; }
+.osd-bar > .mark { position: absolute; top: 0; bottom: 0; width: 2px; background: #ff9aa4; }
+
+.osd-legend { display: flex; gap: 6px 18px; flex-wrap: wrap; margin: 12px 0 2px; font-size: .78em; color: #c9d1ff; }
+.osd-legend .sw {
+  display: inline-block; width: .95em; height: .95em; margin-right: 7px; vertical-align: -.12em;
+  border: 2px solid rgba(255,255,255,.45);
+}
+.osd-legend .sw.scanning { background: var(--osd-text); border-color: var(--osd-text); }
+.osd-legend .sw.found { border-color: var(--osd-hi); }
+.osd-legend .sw.none { border-style: dotted; opacity: .5; }
+
+.osd-band { margin-top: 18px; }
+.osd-band .osd-sub { margin: 0 0 8px; display: flex; gap: 14px; flex-wrap: wrap; align-items: baseline; }
+.osd-band .osd-sub .hint { color: #c9d1ff; font-size: .8em; }
+.rf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(7.4em, 1fr)); gap: 8px; }
+.rf-cell {
+  position: relative; min-width: 0; min-height: 4.4em; padding: 4px 7px 5px;
+  border: 2px solid rgba(255,255,255,.4); box-shadow: 2px 2px 0 rgba(0,0,0,.55);
+}
+.rf-cell[role="button"] { cursor: pointer; }
+.rf-cell[role="button"]:hover { background: rgba(255,255,255,.1); }
+.rf-cell:focus-visible { outline: 2px dashed var(--osd-hi); outline-offset: 2px; }
+.rf-n { font-size: 1.2em; line-height: 1.2; }
+.rf-mhz { font-size: .7em; color: #c9d1ff; }
+.rf-names span, .rf-sub {
+  display: block; font-size: .72em; color: var(--osd-hi);
+  text-transform: none; letter-spacing: .02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rf-sub.dim { color: #c9d1ff; }
+.rf-ic { position: absolute; top: 4px; right: 7px; font-size: .8em; }
+.rf-cell.found { border-color: var(--osd-hi); }
+.rf-cell.none { border-style: dotted; opacity: .42; }
+.rf-cell.repacked .rf-n { color: #c9d1ff; }
+.rf-cell.scanning, .rf-cell.busy { background: var(--osd-text); color: var(--osd-blue); text-shadow: none; }
+.rf-cell.scanning .rf-mhz, .rf-cell.busy .rf-mhz,
+.rf-cell.scanning .rf-names span, .rf-cell.busy .rf-sub { color: var(--osd-blue); }
+.rf-cell[aria-current="true"] { outline: 2px solid var(--osd-hi); outline-offset: 3px; }
+
 /* ---------- Narrow screens ---------- */
 
 @media (max-width: 560px) {
@@ -343,4 +415,6 @@ a.osd-btn { text-decoration: none; display: inline-block; color: var(--osd-text)
   .crt { border-radius: 16px / 12px; min-height: 360px; }
   .osd-grid { grid-template-columns: 1fr; gap: 4px; }
   .osd-grid .k { margin-top: 8px; }
+  .setup-room { padding: 16px 12px 48px; gap: 20px; }
+  .rf-grid { grid-template-columns: repeat(auto-fill, minmax(6.2em, 1fr)); }
 }

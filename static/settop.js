@@ -70,3 +70,20 @@ function clockText(now = new Date()) {
   const hours = now.getHours() % 12 || 12;
   return `${String(hours).padStart(2, " ")}:${String(now.getMinutes()).padStart(2, "0")}`;
 }
+
+// One Explorer's front panel (its .settop-window): the clock, which keeps the time until a
+// page holds it to show something else; the lamps (data-lamp); and the scrolling line.
+function explorerPanel(root) {
+  const clock = root.querySelector("svg.settop-clock");
+  const line = root.querySelector(".settop-text");
+  const inner = line.querySelector("span");
+  let held = null;
+  const tick = () => { if (held === null) drawSegments(clock, clockText()); };
+  tick();
+  setInterval(tick, 10000);
+  return {
+    clock(text) { held = text; if (text === null) tick(); else drawSegments(clock, text); },
+    say(text) { setMarqueeText(line, inner, String(text).toUpperCase()); },
+    lamp(name, lit) { root.querySelector(`[data-lamp="${name}"]`)?.classList.toggle("lit", Boolean(lit)); },
+  };
+}
