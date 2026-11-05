@@ -31,7 +31,7 @@ run, and what does not work here.
 | CPU / RAM | 14 cores / 28 threads at 2.6 GHz | i5-9500: 6 cores / 6 threads, 3.0–4.4 GHz; 15 GiB |
 | Disk | Nearly full boot SSD + 4 TB `/mnt/sda1` for recordings | One 225 GB NVMe. Recordings in `~/tv-recordings` |
 | Address | `10.0.0.98` (static) | `10.0.0.99` on `eno1`, DHCP; also `viviserv2.local` (avahi) |
-| Front door | Apache, explicit addresses on `:8080`; the main site's `/tv/` proxies to it | Apache, `*:8080`, sharing the dashboard's Apache on `:80`, whose `/tv/` proxies to it (the dashboard's TV Thing card links there) |
+| Front door | Apache, explicit addresses on `:8080`; the main site's `/tv/` proxies to it; Tailscale Serve forwards the tailnet's `:8080` to it | Apache, `*:8080`, sharing the dashboard's Apache on `:80`, whose `/tv/` proxies to it (the dashboard's TV Thing card links there) |
 | Neighbours | VizelVision, Trains, Cairo Radio's audio | None. Cairo Radio and VizelVision media come from viviserv |
 
 ## How this host knows it is viviserv2
@@ -347,14 +347,20 @@ viviserv; that branch is kept locally (`git branch -v`) and no longer used.
 - **Analog lane.** No analog hardware. The lane stays in `feed.json` (`server.py` refuses to
   start without it) and says "not fitted". Cable channels do not tune.
 - **Roku lane.** Off by design (hazard 1). YouTube TV, Sunday Ticket, MLB and Prime Video
-  channels do not tune. Turning it on here would also need roku.json's `ffmpeg_path`
-  (`/usr/bin/ffmpeg`, absent on NixOS) fixed.
+  channels do not tune, and the Watch page's Roku tab is empty: the pool shares digital tuners
+  only. Turning it on here would also need roku.json's `ffmpeg_path` (`/usr/bin/ffmpeg`, absent
+  on NixOS) fixed.
 - **Sports Guide listings.** The channel renders, but its games come from the Roku lane's
   schedules, so it lists none here.
 - **Trains (`cabride`).** It relays `127.0.0.1:8791`, a service on viviserv that does not
-  answer on the LAN.
+  answer off that box, so it plays from viviserv's relay through `/stream/peer/`
+  (`server.played_from_primary`). It works only while viviserv is up, and has no listings here.
 - **Cairo Radio and VizelVision media** come from viviserv (`primary_host`), so they work only
-  while viviserv is up.
+  while viviserv is up. The feed relays VizelVision, so a new `primary_host` reaches it at the
+  feed's next restart.
+- **Leaving this LAN.** `peer_host` and `primary_host` can be Tailscale addresses, but
+  `/stream/peer/` is Apache's: `TV_THING_PEER_URL` is a LAN address here and in viviserv's
+  `deploy/apache/tv-thing-front-door.conf`. Both must change before this box moves.
 - **The lineup card PDF.** It needs `tectonic` (`pkgs.tectonic`).
 - **Tuner B as the guide and scan tuner**, so the 03:00 and 15:00 guide reads stop interrupting
   live TV on tuner A: not done. Tuner B is a live lane (section 4).

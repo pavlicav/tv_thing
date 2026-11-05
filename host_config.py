@@ -109,7 +109,7 @@ SETTINGS = (
     Setting("recordings_dir", "Recordings folder", "TV_THING_RECORDINGS_DIR", (), ("feed", "control"),
             f"Where the VCR files its recordings. Auto: {VIVISERV_RECORDINGS} where that disk is "
             "mounted, else ~/tv-recordings."),
-    Setting("primary_host", "Primary's address", "TV_THING_PRIMARY_HOST", (), ("control", "web-basic"),
+    Setting("primary_host", "Primary's address", "TV_THING_PRIMARY_HOST", (), ("feed", "control", "web-basic"),
             "A second node's way to the primary's own services: Cairo Radio's audio and song "
             "information, and VizelVision's media. Empty: this host's own, which a second node "
             "does not have."),

@@ -3,7 +3,10 @@
 import json
 import time
 from io import BytesIO
+from types import SimpleNamespace
 
+import internet_streams
+import pytest
 import server
 
 
@@ -1101,6 +1104,51 @@ def test_guide_now_names_what_an_internet_stream_plays(monkeypatch):
     entry = server.guide_now_payload(now=now)["channels"]["internet/cabride"]
     assert entry["now"]["title"] == "Aizu Railway"
     assert entry["next"]["title"] == "Train in the Snow"
+
+
+def _second_node(monkeypatch, peer="http://100.68.34.34:8080"):
+    monkeypatch.setattr(server, "HOST", SimpleNamespace(primary=False))
+    monkeypatch.setattr(server, "PEER_URL", peer)
+
+
+def _played(key="cabride"):
+    return next(view for view in server.internet_views() if view["channel_id"] == key)["stream_path"]
+
+
+def test_a_second_node_plays_a_stream_on_the_primarys_loopback_from_the_primary(monkeypatch):
+    """Trains' cabride.service answers only on viviserv itself, so viviserv2's own relay of it
+    gave 502; the primary's relay reaches viewers through this front door's /stream/peer/."""
+    _second_node(monkeypatch)
+    assert _played("cabride") == "/stream/peer/internet/cabride/index.m3u8"
+    # One from the web is relayed here as ever.
+    assert _played("pentulive") == "/stream/internet/pentulive/index.m3u8"
+
+
+def test_the_primary_and_a_node_without_a_peer_play_every_stream_from_their_own_relay(monkeypatch):
+    assert _played("cabride") == "/stream/internet/cabride/index.m3u8"
+    monkeypatch.setattr(server, "HOST", SimpleNamespace(primary=False))
+    monkeypatch.setattr(server, "PEER_URL", None)
+    assert _played("cabride") == "/stream/internet/cabride/index.m3u8"
+
+
+@pytest.mark.parametrize("url,from_primary", [
+    ("http://127.0.0.1:8791/cab/index.m3u8", True), ("http://localhost:8791/cab/index.m3u8", True),
+    ("http://[::1]:8791/cab/index.m3u8", True), ("http://10.0.0.50:8791/cab/index.m3u8", False),
+    ("http://streams.example/cab/index.m3u8", False)])
+def test_only_a_stream_on_loopback_is_the_primarys_alone(monkeypatch, url, from_primary):
+    _second_node(monkeypatch)
+    stream = internet_streams.Stream(id="cab", name="Cab", resolver="url", params={"url": url})
+    assert server.played_from_primary(stream) is from_primary
+
+
+def test_a_second_node_lists_no_row_it_cannot_read_and_the_inputs_page_says_who_makes_it(monkeypatch):
+    _second_node(monkeypatch)
+    asked = []
+    monkeypatch.setattr(server.web_streams, "listings", lambda stream_id: asked.append(stream_id) or [])
+    assert "internet/cabride" not in server.internet_guide_channels() and asked == []
+    trains = next(entry for entry in server.web_inputs() if entry["id"] == "internet/cabride")
+    assert (trains["service"], trains["upstream"], trains["listings"]) == ("peer", "100.68.34.34:8080", False)
+    assert trains["stream"] == "/stream/peer/internet/cabride/index.m3u8"
 
 
 def _station_schedule(monkeypatch, now, **fields):

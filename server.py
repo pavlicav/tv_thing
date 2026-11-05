@@ -1342,13 +1342,34 @@ def internet_views():
     views = channel_lineup.number(internet_streams.SOURCE,
                                   [(stream.id, stream.name) for stream in streams])
     return [dict(view or {}, channel_id=stream.id, name=stream.name, note=stream.note,
-                 stream_path=f"/stream/internet/{stream.id}/index.m3u8")
+                 stream_path=internet_stream_path(stream))
             for stream, view in zip(streams, views)]
+
+
+def played_from_primary(stream):
+    """Whether this node plays an internet stream from the primary's relay: a second node
+    cannot reach a service on the primary's own loopback (Trains' cabride.service)."""
+    if HOST.primary or not PEER_URL:
+        return False
+    url = stream.params.get("url") if internet_streams.RESOLVERS[stream.resolver].fixed else None
+    host = urlparse(url).hostname if url else None
+    try:
+        return host == "localhost" or (host is not None and ipaddress.ip_address(host).is_loopback)
+    except ValueError:
+        return False
+
+
+def internet_stream_path(stream):
+    """The playlist a viewer plays an internet stream from: this node's relay, or the primary's
+    through this front door's /stream/peer/ (played_from_primary)."""
+    path = f"/stream/internet/{stream.id}/index.m3u8"
+    return peers.stream_path(path) if played_from_primary(stream) else path
 
 
 def internet_guide_channels():
     """The internet streams that publish listings (``guide`` in internet_streams.json) as
-    guide rows keyed ``internet/<id>``. A listing that does not answer leaves its row empty."""
+    guide rows keyed ``internet/<id>``. A listing that does not answer leaves its row empty,
+    and one on the primary's loopback (played_from_primary) has no row on a second node."""
     try:
         streams = web_streams.streams()
     except internet_streams.StreamConfigError:
@@ -1356,7 +1377,7 @@ def internet_guide_channels():
     channels = {}
     for view in internet_views():
         stream = streams.get(view["channel_id"])
-        if stream is None or not stream.guide:
+        if stream is None or not stream.guide or played_from_primary(stream):
             continue
         key = f"internet/{stream.id}"
         channels[key] = {"key": key, "kind": "internet", "source_id": internet_streams.SOURCE,
@@ -5588,6 +5609,9 @@ def web_inputs():
                          resolver=stream.resolver if stream else None,
                          listings=bool(stream and stream.guide),
                          made_by=f"a relay in {stream.service}" if stream else None, status=None)
+            if stream and played_from_primary(stream):
+                entry.update(service="peer", upstream=urlparse(PEER_URL).netloc, listings=False,
+                             made_by="the primary's relay, through /stream/peer/")
         out.append(entry)
     return out
 

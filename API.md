@@ -510,7 +510,9 @@ starting in the next N hours). Three kinds of row share it:
   `source_id` `internet`, `channel_id`, `name`, `note` and `stream_path`).
   Events have `start`, `duration`, `title` and sometimes `description`. The
   guide's Watch plays the relay (`#watch=internet%2FID` on the Watch page);
-  there is nothing to record.
+  there is nothing to record. On a second node, a stream on the primary's own
+  loopback (Trains) has no row, and its `stream_path` is the primary's relay,
+  `/stream/peer/internet/ID/index.m3u8`.
 * **VizelVision**, keyed `vizelvision/NUMBER` (`kind: "vizelvision"`, with
   `source_id` `vizelvision`, `name` and `stream_path`), a row at each number
   it holds. They list what the station's own `GET /v1/playback` says will air:
