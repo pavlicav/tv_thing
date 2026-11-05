@@ -28,7 +28,7 @@ from datetime import date, datetime, timedelta, timezone
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from zoneinfo import ZoneInfo
@@ -46,6 +46,7 @@ import peers
 import signal_health
 import recorder
 import roku_lane
+import station_listings
 import web_basic
 import sports_guide
 import tuner_pool
@@ -1363,6 +1364,32 @@ def internet_guide_channels():
                          **{field: view.get(field) for field in ("tv_number", "tv_name", "tv_section")},
                          "stream_path": view["stream_path"], "events": web_streams.listings(stream.id)}
     return channels
+
+
+def station_channel_name(source_id, channel_id):
+    """What the lineup calls a channel the station takes from this box's antenna."""
+    if source_id != station_listings.ANTENNA:
+        return None
+    channel = next((channel for channel in load_channels() if channel.get("id") == channel_id), None)
+    return channel and (channel.get("tv_name") or channel.get("name"))
+
+
+station_schedule = station_listings.StationListings(
+    urljoin(VIZELVISION_MEDIA_URL, "/"), channel_name=station_channel_name)
+
+
+def station_guide_channels():
+    """VizelVision's numbers as guide rows keyed ``vizelvision/<number>``, each listing what
+    the station's schedule says will air (station_listings), and how that read went:
+    ``(rows, summary)``."""
+    listing = station_schedule.read()
+    rows = {}
+    for view in channel_lineup.house():
+        key = f"{lineup.HOUSE}/{view['tv_number']}"
+        rows[key] = {"key": key, "kind": "vizelvision", "source_id": lineup.HOUSE, "channel_id": None,
+                     "name": "VizelVision", **{field: view.get(field) for field in ("tv_number", "tv_name", "tv_section")},
+                     "stream_path": channels.StationChannels.STREAM, "events": listing["events"]}
+    return rows, {field: listing[field] for field in ("available", "paused", "pause_reason", "generated_at", "last_error")}
 
 
 def numbered_roku_listings(listings):

@@ -983,6 +983,17 @@ It does not tune the Roku or ATSC receiver, take a source lock, change master
 control, or launch an encoder. The quality selector is hidden for both Roku and
 VizelVision. If the station is unavailable, select its channel again to retry.
 
+The Guide lists what VizelVision will air, on a row at each of its numbers, and
+the Watch page says what is on it now. Both come from the station's own
+projection (`GET /v1/playback` on its web service): Up next and its schedule
+played forward, so a game holds the row until about its final. A second node
+reads the primary's.
+
+The Guide has a row for every channel of the lineup (`/api/v1/channels`), listed
+or not. A channel with nothing listed has one cell you can land on and tune from:
+named for what it plays (pen2live, the Sports Guide), or "No information" where
+listings would normally be.
+
 TV Thing relays station HLS through `stream/vizelvision/index.m3u8` so playback
 works on the direct TV Thing port and under `/tv/`. The upstream defaults to
 `http://127.0.0.1:6970/v1/master/media/`; override
@@ -1194,7 +1205,8 @@ Ticket rows lie in between), so a channel that has moved up the guide is still
 walked onto. `navigation.fast_seek_*` in `roku.json` tunes it; `fast_seek_rows: 0`
 turns it off.
 
-Additional fast checks: `node --test tests/test_tunable_channels.cjs tests/test_live_player.cjs`
+Additional fast checks: `node --test tests/test_tunable_channels.cjs tests/test_live_player.cjs`,
+`node tests/test_guide_browser.cjs /path/to/playwright` (the station's guide row and Watch from it)
 and `node tests/test_tunable_browser.cjs /path/to/playwright`. The browser check mocks
 source APIs and covers both URL layouts, combined search, source routing,
 station playback, declined locks, delayed retunes, keyboard focus and mobile

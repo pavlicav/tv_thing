@@ -262,6 +262,11 @@
     }
     .prog:hover { filter: brightness(1.18); }
     .prog:focus-visible { outline: none; }
+    .prog.no-info {
+      font: italic 700 12px/1 var(--stb-font); color: var(--stb-mute); text-shadow: none;
+      background: linear-gradient(180deg, #16295a, #102149);
+      box-shadow: none;
+    }
     .prog[aria-current="true"] {
       color: var(--stb-ink); text-shadow: none;
       background: linear-gradient(180deg, var(--stb-gold-hi) 0%, var(--stb-gold) 45%, var(--stb-gold-lo) 100%);
@@ -467,6 +472,7 @@ const STEP = 1800;          // paging step, seconds
 
 const $ = (id) => document.getElementById(id);
 let guide = null;
+let lineup = [];            // api/v1/channels: every channel on the dial
 let channels = [];
 let windowStart = 0;
 let selected = null;        // { channel, event }
@@ -485,6 +491,8 @@ const fmtDay = (unix) => new Date(unix * 1000)
 const fmtDate = (unix) => new Date(unix * 1000)
   .toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 const nowUnix = () => Math.floor(Date.now() / 1000);
+// A game the station holds to its final ends about then: "~9:40 PM".
+const fmtEnd = (event) => (event.estimated ? '~' : '') + fmtTime(event.start + event.duration);
 
 function fmtAge(seconds) {
   if (seconds < 90) return 'just now';
@@ -505,6 +513,12 @@ const isGames = (channel) => channel.kind === 'games';
 // An internet stream that publishes listings (internet/cabride): it plays the
 // server's relay of it, so Watch puts it on with no tuner and nothing to record.
 const isInternet = (channel) => channel.kind === 'internet';
+// The station itself (vizelvision/0): its schedule, as it will air. Watch plays
+// its relay, and nothing here can record it.
+const isStation = (channel) => channel.kind === 'vizelvision';
+// The station's slide channels (vizelvision/sports-guide): no listings, nothing
+// to record, and Watch plays their page.
+const isSlides = (channel) => channel.kind === 'slides';
 // The games' day, which turns at 3 AM (roku_control/days.py): last night's
 // games still on at 1 AM are today's, and Watch puts them on.
 function gameDay() {
@@ -516,6 +530,7 @@ function gameDay() {
 // Why a game cannot be put on the Roku from here, or '' when it can.
 function gameRefusal(event) {
   if (!event) return 'Choose a game first.';
+  if (event.unlisted) return 'No game is listed on this number here.';
   if (!event.playable) return 'The Roku cannot reach this game.';
   if (event.date !== gameDay()) return `${event.title} is not on today; Watch is for today's games.`;
   return '';
@@ -527,8 +542,13 @@ async function load() {
   try {
     // A day and a bit: YouTube TV's listings run two days ahead, and the
     // grid is for tonight and tomorrow, not for downloading all of it.
+    // Every channel of the lineup gets a row, listed or not. Without the lineup
+    // the grid still shows what has listings.
+    const lineupRead = fetch('api/v1/channels')
+      .then((response) => response.json()).catch(() => ({}));
     const response = await fetch('api/guide?hours=30');
     guide = await response.json();
+    lineup = (await lineupRead).channels || [];
   } catch (error) {
     $('state').hidden = false;
     $('state').innerHTML =
@@ -544,20 +564,48 @@ function minStart() {
   return Math.floor(nowUnix() / STEP) * STEP;
 }
 
+// A channel of the lineup that has no row in the guide, as a row with no listings.
+function lineupRow(entry) {
+  const detail = entry.detail || {};
+  const key = entry.kind === 'vizelvision' ? `vizelvision/${entry.number}` : entry.listings || entry.id;
+  return {
+    key,
+    kind: key.startsWith('games/') ? 'games' : entry.kind,
+    id: entry.kind === 'digital' ? entry.channel_id : undefined,
+    number: detail.antenna_number,
+    name: detail.source_name || entry.name,
+    note: detail.note,
+    source_id: entry.source_id,
+    channel_id: entry.channel_id,
+    tv_number: entry.number,
+    tv_name: isGames({ kind: key.startsWith('games/') ? 'games' : entry.kind }) ? entry.section : entry.name,
+    tv_section: entry.section,
+    events: [],
+  };
+}
+
+// Every channel on the dial, with or without listings: the guide is where to
+// find and tune them. Beyond the lineup, a row needs something to list (the
+// numbers another day's games take). Antenna numbers is the antenna's own view.
+function allRows() {
+  const onDial = new Map(lineup.map((entry) => {
+    const row = lineupRow(entry);
+    return [row.key, row];
+  }));
+  const rows = Object.entries(guide.channels || {})
+    .map(([key, channel]) => ({ ...channel, key: channel.key || key }))
+    .filter((channel) => channel.events.length || isRoku(channel) || onDial.has(channel.key));
+  const listed = new Set(rows.map(keyOf));
+  return rows.concat([...onDial.values()].filter((row) => !listed.has(row.key)));
+}
+
 function render() {
   renderMeta();
-  // An antenna channel with no listing is left out, as ever. A YouTube TV
-  // row stays: some have no listing anywhere (Local Now), and the guide is
-  // still where to tune them. Antenna numbers is the antenna's own view.
-  channels = Object.entries(guide.channels || {})
-    .map(([key, channel]) => ({ ...channel, key: channel.key || key }))
-    .filter((channel) => isRoku(channel) ? !antennaNumbers
-      : isGames(channel) ? !antennaNumbers && channel.events.length > 0
-        : isInternet(channel) ? !antennaNumbers && channel.events.length > 0
-          : channel.events.length)
+  channels = allRows()
+    .filter((channel) => !antennaNumbers || channel.kind === 'digital')
     .sort(compareChannels);
 
-  if (!channels.some((channel) => channel.events.length)) {
+  if (!channels.length) {
     $('scroller').hidden = true;
     $('nowline').hidden = true;
     showEmptyState();
@@ -611,8 +659,7 @@ function shownNumber(channel) {
 
 // "· antenna 7.1" where the lineup number differs from the antenna's.
 function antennaNote(channel, before, after) {
-  return !isRoku(channel) && !isGames(channel) && !isInternet(channel)
-    && shownNumber(channel) !== channel.number
+  return channel.kind === 'digital' && shownNumber(channel) !== channel.number
     ? `${before}${channel.number}${after}` : '';
 }
 
@@ -678,6 +725,14 @@ function renderMeta() {
   } else if (sports && !sports.available) {
     parts.push(`<span title="${escape(missed.join('; '))}">Sports schedules unavailable</span>`);
   }
+  // The station's row comes from its own schedule, and is a projection: while
+  // Up next is paused, nothing changes on the air until it resumes.
+  const station = guide.vizelvision;
+  if (station && !station.available) {
+    parts.push(`<span title="${escape(station.last_error || '')}">VizelVision schedule unavailable</span>`);
+  } else if (station && station.paused) {
+    parts.push(`<span title="${escape(station.pause_reason || '')}">VizelVision <b>Up next paused</b></span>`);
+  }
   meta.innerHTML = parts.join('');
 }
 
@@ -722,7 +777,8 @@ function drawRows(list, width, now) {
         + (isRoku(channel) && !channel.listing ? ' — no listings are published for it' : '');
     // A game row is a different game each day: its name picks the one on now or next.
     chan.onclick = () => {
-      const event = isGames(channel) && eventAt(channel, Math.max(nowUnix(), windowStart));
+      const event = isGames(channel)
+        && (eventAt(channel, Math.max(nowUnix(), windowStart)) || unlisted(channel));
       if (event) { userMoved = true; select(channel, event, { keepTime: false }); }
       else if (!isGames(channel)) watch(channel);
     };
@@ -731,6 +787,7 @@ function drawRows(list, width, now) {
     const track = document.createElement('div');
     track.className = 'track';
     let cursor = windowStart;
+    let drawn = false;
     const windowEnd = windowStart + WINDOW_MIN * 60;
     for (const event of channel.events) {
       const end = event.start + event.duration;
@@ -738,8 +795,11 @@ function drawRows(list, width, now) {
       if (event.start > cursor) track.appendChild(gap(cursor, event.start));
       track.appendChild(block(channel, event, now));
       cursor = Math.max(cursor, end);
+      drawn = true;
     }
-    if (cursor < windowEnd) track.appendChild(gap(cursor, windowEnd));
+    // Nothing listed on this page: one cell you can still land on and tune from.
+    if (!drawn) track.appendChild(block(channel, unlisted(channel), now));
+    else if (cursor < windowEnd) track.appendChild(gap(cursor, windowEnd));
     row.appendChild(track);
     rows.appendChild(row);
   }
@@ -756,6 +816,22 @@ function gap(from, to) {
   return node;
 }
 
+// The cell for a channel with nothing listed on this page. A channel that plays
+// one thing (a web stream, a slide channel) is named for it, as the Roku app's
+// guide does; one that normally lists programmes says it has no information.
+function unlisted(channel) {
+  const named = isInternet(channel) || isSlides(channel) || isStation(channel)
+    || channel.source_id === 'roku-manual';
+  return { unlisted: true, named, start: windowStart, duration: WINDOW_MIN * 60,
+    title: named ? nameOf(channel) : 'No information' };
+}
+
+function isSelected(channel, event) {
+  return selected && keyOf(selected.channel) === keyOf(channel)
+    && Boolean(selected.event.unlisted) === Boolean(event.unlisted)
+    && (event.unlisted || selected.event.start === event.start);
+}
+
 function block(channel, event, now) {
   const end = event.start + event.duration;
   const windowEnd = windowStart + WINDOW_MIN * 60;
@@ -767,7 +843,7 @@ function block(channel, event, now) {
   const node = document.createElement('button');
   node.type = 'button';
   node.tabIndex = -1;
-  node.className = 'prog';
+  node.className = event.unlisted && !event.named ? 'prog no-info' : 'prog';
   if (event.start <= now && now < end) node.classList.add('live');
   if (right - left < 70) node.classList.add('narrow');
   if (right - left < 22) node.classList.add('sliver');
@@ -780,11 +856,11 @@ function block(channel, event, now) {
     `<span class="prog-title">${title}</span>` +
     (event.captions ? '<span class="cc">CC</span>' : '') +
     (end > windowEnd ? '<span class="arrow" style="margin-left:auto">&#9654;</span>' : '');
-  node.title = `${ListingTitle.listingTitle(event)} · ${fmtTime(event.start)}–${fmtTime(end)}`;
+  node.title = event.unlisted ? `${nameOf(channel)} · nothing listed`
+    : `${ListingTitle.listingTitle(event)} · ${fmtTime(event.start)}–${fmtEnd(event)}`;
   node.onclick = () => { userMoved = true; select(channel, event, { keepTime: false }); };
   node.ondblclick = () => watch(channel, event);
-  if (selected && keyOf(selected.channel) === keyOf(channel)
-      && selected.event.start === event.start) {
+  if (isSelected(channel, event)) {
     node.setAttribute('aria-current', 'true');
     node.tabIndex = 0;
   }
@@ -813,14 +889,19 @@ function eventAt(channel, time) {
     || null;
 }
 
+// What the cursor lands on in a row at this time: what is listed on this page,
+// or the row's own cell, rather than dragging the grid hours ahead.
+function airingOnPage(channel, time) {
+  const event = eventAt(channel, time);
+  return event && event.start < windowStart + WINDOW_MIN * 60 ? event : unlisted(channel);
+}
+
 function selectInitial() {
   const now = nowUnix();
   windowStart = minStart();
   const channel = channels.find((c) => keyOf(c) === tunedKey)
     || channels.find((c) => c.events.length) || channels[0];
-  const event = eventAt(channel, now);
-  if (event) select(channel, event, { keepTime: false, scroll: true });
-  else drawGrid();
+  select(channel, airingOnPage(channel, now), { keepTime: false, scroll: true });
 }
 
 // Page the window so the selected airing is on screen.
@@ -834,7 +915,7 @@ function reveal(event) {
 function select(channel, event, { keepTime = true, scroll = true } = {}) {
   selected = { channel, event };
   if (!keepTime) focusTime = Math.max(event.start, windowStart);
-  reveal(event);
+  if (!event.unlisted) reveal(event);
   drawGrid();
 
   const row = document.querySelector(`.row[data-key="${CSS.escape(keyOf(channel))}"]`);
@@ -851,11 +932,13 @@ function select(channel, event, { keepTime = true, scroll = true } = {}) {
   if (named || episode) {
     parts.push(`<span>${escape([episode, named].filter(Boolean).join(' · '))}</span>`);
   }
-  parts.push(
-    `<span>${fmtDay(event.start)} ${fmtTime(event.start)} – ${fmtTime(end)}</span>`,
-    `<span>${Math.round(event.duration / 60)} min</span>`,
-  );
-  if (event.start <= now && now < end) parts.push('<span class="badge live">ON NOW</span>');
+  if (!event.unlisted) {
+    parts.push(
+      `<span>${fmtDay(event.start)} ${fmtTime(event.start)} – ${fmtEnd(event)}</span>`,
+      `<span>${Math.round(event.duration / 60)} min</span>`,
+    );
+  }
+  if (!event.unlisted && event.start <= now && now < end) parts.push('<span class="badge live">ON NOW</span>');
   if (event.live) parts.push('<span class="badge">LIVE</span>');
   if (event.new) parts.push('<span class="badge">NEW</span>');
   if (event.captions) parts.push('<span class="badge">CC</span>');
@@ -872,34 +955,28 @@ function select(channel, event, { keepTime = true, scroll = true } = {}) {
       : isInternet(channel) ? '  · Internet' : '');
   $('d-title').textContent = ListingTitle.listingTitle(event);
   $('d-sub').innerHTML = parts.join('');
-  $('d-desc').textContent = event.description || (isRoku(channel)
+  $('d-desc').textContent = event.unlisted ? channel.note || 'Nothing is listed for this channel in this time.'
+    : event.description || (isRoku(channel)
       ? 'No description in the listing.' : event.teams_from
       ? `No description — this station sends titles only; the teams are from ${event.teams_from}'s schedule.`
       : 'No description — this station sends titles only.');
   $('d-watch').hidden = isGames(channel) && Boolean(gameRefusal(event));
   $('d-watch').textContent = `Watch ${shownNumber(channel)}`;
-  $('d-record').hidden = end <= now || isGames(channel) || isInternet(channel);
-  $('btn-record-key').disabled = end <= now || isGames(channel) || isInternet(channel);
+  // An airing of a channel a tuner takes, with a time to set the timer by.
+  const recordable = !event.unlisted && end > now && (isRoku(channel) || channel.kind === 'digital');
+  $('d-record').hidden = !recordable;
+  $('btn-record-key').disabled = !recordable;
   $('d-record').disabled = false;
   $('d-record').innerHTML = '<span class="rec">●</span> Record';
 }
 
-// Up/down keep to the same time slot. A row with nothing airing on this
-// page is skipped rather than allowed to drag the whole grid hours ahead.
+// Up/down keep to the same time slot, and stop at every channel.
 function moveRow(delta) {
   if (!selected) return;
   const index = channels.findIndex((c) => keyOf(c) === keyOf(selected.channel));
-  const windowEnd = windowStart + WINDOW_MIN * 60;
   const time = Math.max(focusTime, windowStart);
-  const step = Math.sign(delta);
-  let at = Math.max(0, Math.min(channels.length - 1, index + delta));
-  for (; at >= 0 && at < channels.length && at !== index; at += step) {
-    const event = eventAt(channels[at], time);
-    if (event && event.start < windowEnd) {
-      select(channels[at], event);
-      return;
-    }
-  }
+  const at = Math.max(0, Math.min(channels.length - 1, index + delta));
+  if (at !== index) select(channels[at], airingOnPage(channels[at], time));
 }
 
 function moveColumn(delta) {
@@ -938,7 +1015,7 @@ async function watch(channel, event) {
   }
   // The Roku takes a minute or two to find a YouTube TV channel, and may be
   // locked; the Watch page shows that progress and asks about the lock.
-  if (isRoku(channel) || isInternet(channel)) {
+  if (isRoku(channel) || isInternet(channel) || isStation(channel) || isSlides(channel)) {
     location.href = `./#watch=${encodeURIComponent(keyOf(channel))}`;
     return;
   }

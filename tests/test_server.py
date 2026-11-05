@@ -1103,6 +1103,73 @@ def test_guide_now_names_what_an_internet_stream_plays(monkeypatch):
     assert entry["next"]["title"] == "Train in the Snow"
 
 
+def _station_schedule(monkeypatch, now, **fields):
+    events = [{"start": now - 600, "duration": 1200, "title": "Eagles at Rams", "kind": "game", "live": True},
+              {"start": now + 600, "duration": 1800, "title": "News 10", "kind": "block"},
+              {"start": now + 7200, "duration": 3600, "title": "OFF AIR", "kind": "off_air"}]
+    monkeypatch.setattr(server.station_schedule, "read", lambda: {
+        "events": events, "available": True, "paused": False, "pause_reason": None,
+        "generated_at": now, "last_error": None, **fields})
+
+
+def test_the_guide_lists_the_stations_schedule_at_each_number_it_holds(monkeypatch):
+    now = 1_800_000_000
+    monkeypatch.setattr(server.epg, "load_guide", lambda: _stored_guide(now))
+    _station_schedule(monkeypatch, now)
+    payload = server.guide_payload(now=now)
+
+    house = payload["channels"]["vizelvision/0"]
+    assert (house["kind"], house["source_id"], house["tv_number"], house["tv_section"], house["name"]) == (
+        "vizelvision", "vizelvision", 0, "Our channels", "VizelVision")
+    assert house["stream_path"] == "/stream/vizelvision/index.m3u8"
+    assert [e["title"] for e in house["events"]] == ["Eagles at Rams", "News 10", "OFF AIR"]
+    assert payload["channels"]["vizelvision/70"]["tv_number"] == 70
+    assert payload["vizelvision"]["available"] is True
+    # VizelVision reads this guide back, by a row's "id" or by its YouTube TV channel: no row of
+    # its own may look like either.
+    assert "id" not in house and house["source_id"] != "youtube-tv"
+    # One row and a window, as for any other, and no read of the station for another's.
+    assert set(server.guide_payload(number="vizelvision/70", now=now)["channels"]) == {"vizelvision/70"}
+    narrow = server.guide_payload(window_hours=0.25, now=now)
+    assert [e["title"] for e in narrow["channels"]["vizelvision/0"]["events"]] == ["Eagles at Rams", "News 10"]
+    other = server.guide_payload(number="9.1", now=now)
+    assert "vizelvision/0" not in other["channels"] and "vizelvision" not in other
+
+
+def test_the_guide_has_no_station_row_when_there_is_nothing_to_list_and_says_why(monkeypatch):
+    now = 1_800_000_000
+    monkeypatch.setattr(server.epg, "load_guide", lambda: _stored_guide(now))
+    monkeypatch.setattr(server.station_schedule, "read", lambda: {
+        "events": [], "available": False, "paused": False, "pause_reason": None, "generated_at": None,
+        "last_error": "VizelVision's schedule did not answer (URLError)"})
+    payload = server.guide_payload(now=now)
+    assert "vizelvision/0" not in payload["channels"] and "9.1" in payload["channels"]
+    assert payload["vizelvision"]["available"] is False and "did not answer" in payload["vizelvision"]["last_error"]
+
+
+def test_guide_now_says_what_the_station_is_airing_and_what_follows(monkeypatch):
+    now = 1_800_000_000
+    monkeypatch.setattr(server.epg, "load_guide", lambda: _stored_guide(now))
+    _station_schedule(monkeypatch, now)
+    entries = server.guide_now_payload(now=now)["channels"]
+    for key in ("vizelvision/0", "vizelvision/70"):
+        assert entries[key]["now"]["title"] == "Eagles at Rams"
+        assert entries[key]["next"]["title"] == "News 10"
+
+
+def test_the_station_names_an_antenna_channel_as_the_lineup_does(monkeypatch):
+    monkeypatch.setattr(server, "load_channels", lambda: [{"id": "wjla_7_1", "name": "WJLA-HD", "tv_name": "WJLA"},
+                                                          {"id": "nhk_wld_22_4", "name": "NHK WLD"}])
+    assert server.station_channel_name("tv-thing-digital", "wjla_7_1") == "WJLA"
+    assert server.station_channel_name("tv-thing-digital", "nhk_wld_22_4") == "NHK WLD"
+    assert server.station_channel_name("tv-thing-digital", "gone") is None
+    assert server.station_channel_name("youtube-tv", "wjla_7_1") is None
+
+
+def test_the_station_is_read_where_its_media_is():
+    assert server.station_schedule.base_url == server.VIZELVISION_MEDIA_URL.removesuffix("/v1/master/media/")
+
+
 def test_guide_now_is_empty_without_a_guide(monkeypatch):
     monkeypatch.setattr(server.epg, "load_guide", lambda: None)
     payload = server.guide_now_payload()

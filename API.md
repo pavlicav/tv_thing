@@ -104,7 +104,7 @@ beside `date`, `sections`, `errors` and `lineup_error` as above:
   `date`), or null for a channel played by opening its `stream`;
 * `stream`: its playlist (a lane's carries whatever the lane was last tuned to);
 * `listings`: its row's key in `/api/v1/guide` (`22.4`, `youtube-tv/NBC`,
-  `games/<number>`, `internet/cabride`), or null;
+  `games/<number>`, `internet/cabride`, `vizelvision/0`), or null;
 * `detail`: what its kind adds: an antenna channel's `source_name`,
   `antenna_number` and `rf_channel`; a game's `date`, `start_time`, `state`,
   `status` and `playable`; a stream's `note`; a slide channel's `page_path` and
@@ -511,13 +511,27 @@ starting in the next N hours). Three kinds of row share it:
   Events have `start`, `duration`, `title` and sometimes `description`. The
   guide's Watch plays the relay (`#watch=internet%2FID` on the Watch page);
   there is nothing to record.
+* **VizelVision**, keyed `vizelvision/NUMBER` (`kind: "vizelvision"`, with
+  `source_id` `vizelvision`, `name` and `stream_path`), a row at each number
+  it holds. They list what the station's own `GET /v1/playback` says will air:
+  Up next and its schedule played forward, read at most every 30 seconds, for
+  a week ahead. Events add `kind` (`game`, `block`, `show`, `backup`, `manual`,
+  `recording`, `ident` or `off_air`, titled `OFF AIR`), `episode_title` (where
+  it comes from), and on a game `live` and, while its final is a guess,
+  `estimated`. The programme on air starts when it went on, from
+  `GET /v1/queue`. `vizelvision` describes them: `available`, `paused`,
+  `pause_reason` (Up next is paused, so nothing changes on the air until it
+  resumes), `generated_at` and `last_error`. When the station does not answer,
+  its last listing stands in for 15 minutes; after that it has no row. The
+  guide's Watch plays the relay (`#watch=vizelvision%2F0` on the Watch page);
+  there is nothing to record.
 
-Every row has `key` and `kind` (`digital`, `roku`, `games` or `internet`) and the
-channel-number fields above. Antenna events have `start`, `duration`, `title`, `captions`
+Every row has `key` and `kind` (`digital`, `roku`, `games`, `internet` or `vizelvision`)
+and the channel-number fields above. Antenna events have `start`, `duration`, `title`, `captions`
 and sometimes `description`. YouTube TV events may also have `episode_title`,
 `season`, `episode`, `new`, `live` and `rating`. GET `api/v1/guide/now` gives
 `now` and `next` per row under the same keys (Live Sports is not in it;
-internet streams with listings are).
+internet streams with listings and VizelVision are).
 Tune a YouTube TV row through its Roku source (`source: "youtube-tv"`,
 `channel_id`), and a game by its airing's `source_id`, `channel_id` and
 `date`, never by a row's key.

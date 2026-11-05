@@ -409,8 +409,27 @@ class StationChannels(Adapter):
     def channels(self, day, found):
         return [Channel(id=lineup.HOUSE, source_id=lineup.HOUSE, channel_id=None, number=view["tv_number"],
                         name=view["tv_name"], section=view["tv_section"], kind=self.kind, stream=self.STREAM,
+                        listings=f"{lineup.HOUSE}/{view['tv_number']}",
                         row=dict(view, kind="vizelvision", name="VizelVision", stream_path=self.STREAM))
                 for view in self.host.channel_lineup.house()]
+
+    def guide(self, window):
+        """What the station's schedule says will air, on a row keyed ``vizelvision/NUMBER`` for
+        each number it holds; with nothing to list (it has not answered for a while) no row,
+        as for an internet stream, and the summary says why."""
+        if not window.may_want(f"{lineup.HOUSE}/"):
+            return {}, {}
+        found, summary = self.host.station_guide_channels()
+        rows = {}
+        for key, channel in found.items():
+            events = window.current(channel["events"])
+            if window.wants(key) and events:
+                rows[key] = {**channel, "events": events}
+        return rows, {"vizelvision": summary}
+
+    def guide_now(self, now):
+        rows, _ = self.host.station_guide_channels()
+        return now_and_next(rows, now), {}
 
 
 class SlideChannels(Adapter):

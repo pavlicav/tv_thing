@@ -864,7 +864,7 @@
         nowHtml +=
           `<div class="bn-row"><span class="bn-k">NOW</span>` +
           `<span class="bn-title">${escapeHtml(ListingTitle.listingTitle(on))}</span>` +
-          `<span class="bn-time">${fmtClock(on.start)} – ${fmtClock(on.start + on.duration)}</span>` +
+          `<span class="bn-time">${fmtClock(on.start)} – ${on.estimated ? "~" : ""}${fmtClock(on.start + on.duration)}</span>` +
           (on.captions ? '<span class="bn-cc">CC</span>' : "") + `</div>` +
           `<div class="bn-progress"><i style="width:${progressOf(on, now).toFixed(1)}%"></i></div>`;
         const named = ListingTitle.namesTeams(on) ? null : on.episode_title;
@@ -901,7 +901,9 @@
       } else if (state.playing === "vizelvision") {
         num.textContent = state.houseNumber !== null ? String(state.houseNumber) : "VV";
         num.title = "";
-        body.innerHTML = '<div class="bn-row"><span class="bn-k">NOW</span>' +
+        // Its schedule, when the station has answered for the number chosen.
+        const listed = state.houseNumber !== null && listingHtml(`vizelvision/${state.houseNumber}`, now);
+        body.innerHTML = listed || '<div class="bn-row"><span class="bn-k">NOW</span>' +
           '<span class="bn-title">VizelVision</span></div>' +
           '<div class="bn-desc">The station’s live broadcast</div>';
       } else if (state.playing === "internet") {
@@ -1509,7 +1511,10 @@
         } else {
           current = state.playing === "vizelvision" && state.houseNumber === entry.number;
           if (!numbered) key = "VV";
-          sub = "The station’s live broadcast";
+          // The station shows what is on, as an antenna channel does.
+          const on = numbered ? listingFor(`vizelvision/${entry.number}`, Date.now() / 1000).now : null;
+          sub = on ? on.title || "No title" : "The station’s live broadcast";
+          if (on) progress = `<span class="item-bar"><i style="width:${progressOf(on, Date.now() / 1000).toFixed(0)}%"></i></span>`;
           button.addEventListener("click", () => tuneVizelVision(entry.number));
         }
         button.setAttribute("aria-current", String(current));
@@ -2796,7 +2801,9 @@
     // The guide links here as #watch=youtube-tv%2FNBC to put a Roku channel
     // on, so the tune shows its progress and asks about a lock as usual. A
     // game (#watch=mlb%2F823254) is one of today's, as the games are listed.
-    // An internet stream (#watch=internet%2Fcabride) plays its relay.
+    // An internet stream (#watch=internet%2Fcabride) and the station
+    // (#watch=vizelvision%2F0) play their relays; a slide channel
+    // (#watch=vizelvision%2Fsports-guide) its page.
     // The link is used once: a reload must not send the Roku off again.
     function linkedRokuTarget() {
       const match = /^#watch=(.+)$/.exec(location.hash);
@@ -2809,6 +2816,12 @@
       if (value.slice(0, slash) === "internet") {
         const entry = tunableChannels().find(e => e.kind === "internet" && e.id === `internet:${value.slice(slash + 1)}`);
         return entry ? { internet: entry } : null;
+      }
+      if (value.slice(0, slash) === "vizelvision") {
+        const id = value.slice(slash + 1);
+        const entry = tunableChannels().find(e => e.kind === "vizelvision" && String(e.number) === id);
+        const slide = tunableChannels().find(e => e.kind === "slides" && e.id === `slides:${id}`);
+        return entry ? { station: entry } : slide ? { slide } : null;
       }
       const source = state.roku.sources.find(s => s.id === value.slice(0, slash) && s.tunable !== false
         && (!s.dated || state.roku.date === gameDay()));
@@ -2824,6 +2837,8 @@
       loadGuideNow();
       const linked = /^#watch=/.test(location.hash) ? await rokuItems.then(linkedRokuTarget) : null;
       if (linked && linked.internet) tuneInternet(linked.internet);
+      else if (linked && linked.station) tuneVizelVision(linked.station.number);
+      else if (linked && linked.slide) tuneSlides(linked.slide);
       else if (linked) tuneRoku(linked.source, linked.item);
       else resume();
       startSourcePolling();

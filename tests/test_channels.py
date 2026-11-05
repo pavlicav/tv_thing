@@ -79,6 +79,7 @@ def test_every_kind_of_channel_is_one_shape_with_what_plays_it(lineup_sources):
     assert (puppies["kind"], puppies["lane"], puppies["tune"], puppies["node"]) == ("internet", None, None, node)
     assert puppies["stream"] == "/stream/internet/pentulive/index.m3u8"
     assert [c["number"] for c in listed if c["id"] == "vizelvision"] == [0, 70]
+    assert [c["listings"] for c in listed if c["id"] == "vizelvision"] == ["vizelvision/0", "vizelvision/70"]
     guide = by_id["vizelvision/sports-guide"]
     assert (guide["kind"], guide["number"], guide["stream"]) == ("slides", 6, "/stream/sports-guide/index.m3u8")
 

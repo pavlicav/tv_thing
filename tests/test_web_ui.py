@@ -519,11 +519,10 @@ def test_guide_lists_youtube_tv_and_sends_its_rows_to_the_watch_page():
     refusal = section(GUIDE, "function gameRefusal(event)", "async function load()")
     assert "event.date !== gameDay()" in refusal and "!event.playable" in refusal
     assert "watch(selected.channel, selected.event)" in GUIDE
-    # A row with no listing stays; Antenna numbers is the antenna's own view.
-    assert "isRoku(channel) ? !antennaNumbers\n" in GUIDE
-    assert "isGames(channel) ? !antennaNumbers && channel.events.length > 0" in GUIDE
+    # Every channel has a row, listed or not; Antenna numbers is the antenna's own view.
+    assert "fetch('api/v1/channels')" in GUIDE
+    assert ".filter((channel) => !antennaNumbers || channel.kind === 'digital')" in GUIDE
     # An internet stream with listings (internet/cabride) plays its relay from Watch.
-    assert "isInternet(channel) ? !antennaNumbers && channel.events.length > 0" in GUIDE
     assert "isRoku(channel) || isInternet(channel)" in watch
     assert "guide.sports" in GUIDE
     assert "guide.youtube_tv" in GUIDE
@@ -655,6 +654,26 @@ def test_watch_page_banner_uses_the_guide_without_tuning():
     assert "method:" not in banner and "api/tune" not in banner
     assert "escapeHtml(ListingTitle.listingTitle(on))" in banner
     assert "escapeHtml(ListingTitle.listingTitle(e))" in banner
+
+
+def test_the_guide_puts_the_station_on_through_the_watch_page_and_never_records_it():
+    assert "const isStation = (channel) => channel.kind === 'vizelvision';" in GUIDE
+    watch = section(GUIDE, "async function watch(", "async function record(")
+    assert "isRoku(channel) || isInternet(channel) || isStation(channel)" in watch
+    assert "!event.unlisted && end > now && (isRoku(channel) || channel.kind === 'digital')" in GUIDE
+    # Only an antenna channel has an antenna number to note.
+    assert "return channel.kind === 'digital' && shownNumber(channel) !== channel.number" in GUIDE
+    linked = section(INDEX, "function linkedRokuTarget()", "Promise.all(loaders)")
+    assert 'e.kind === "vizelvision" && String(e.number) === id' in linked
+    assert 'e.kind === "slides" && e.id === `slides:${id}`' in linked
+    assert "tuneVizelVision(linked.station.number)" in INDEX and "tuneSlides(linked.slide)" in INDEX
+
+
+def test_the_watch_page_says_what_the_station_is_airing():
+    banner = section(INDEX, "// ---------- info banner", "// Controls fade away")
+    assert "listingHtml(`vizelvision/${state.houseNumber}`, now)" in banner
+    assert "The station’s live broadcast" in banner    # until the station has answered
+    assert "listingFor(`vizelvision/${entry.number}`, Date.now() / 1000).now" in INDEX
 
 
 def test_watch_page_video_leaves_room_for_the_banner():
