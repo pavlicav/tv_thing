@@ -39,6 +39,32 @@ test('waits for continuous media and announces ready only after playing', () => 
   } finally { stop(); }
 });
 
+test('starts from what has loaded when it begins just past the parked position', () => {
+  // VizelVision, 2026-11-04: parked at the live window's start (0), its first frames at 0.1. The
+  // position never reached them, so it sat paused until the deadline called the stream unavailable.
+  const m = media(); let ready = 0;
+  const stop = prepare(m, { onReady: () => ready++, onFail: () => assert.fail('failure') });
+  try {
+    m.buffered = ranges([[0.1, 1.0]]); m.emit('progress');
+    assert.equal(m.calls, 0, 'not enough loaded yet');
+    m.buffered = ranges([[0.1, 7]]); m.emit('progress');
+    assert.equal(m.calls, 1);
+    assert.equal(m.currentTime, 0.1);
+    m.emit('playing'); assert.equal(ready, 1);
+  } finally { stop(); }
+});
+
+test('a position already in loaded media stays there, and a short stretch ahead is not jumped to', () => {
+  const m = media(); m.currentTime = 3;
+  const stop = prepare(m, { onFail: () => assert.fail('failure') });
+  try {
+    m.buffered = ranges([[3.5, 4]]); m.emit('progress');
+    assert.equal(m.calls, 0); assert.equal(m.currentTime, 3);
+    m.buffered = ranges([[0, 6]]); m.emit('progress');
+    assert.equal(m.calls, 1); assert.equal(m.currentTime, 3);
+  } finally { stop(); }
+});
+
 test('retuning cancels listeners and cannot start the old media', () => {
   const m = media(); const stop = prepare(m, { onReady: () => assert.fail('old generation ready'), onFail: () => assert.fail('failure') });
   stop(); m.buffered = ranges([[0, 10]]); m.emit('progress'); m.emit('playing');

@@ -9,6 +9,19 @@
     }
     return 0;
   }
+  // The start of the first stretch ahead of the position long enough to play from, or null.
+  // What has loaded can begin just past where playback is parked: a live window's audio can
+  // start a fraction after its video, and the window slides on while the first segments
+  // load. A paused player never crosses that gap by itself.
+  function loadedAhead(media, enough) {
+    for (let i = 0; i < media.buffered.length; i++) {
+      if (media.buffered.start(i) > media.currentTime &&
+          media.buffered.end(i) - media.buffered.start(i) >= enough) {
+        return media.buffered.start(i);
+      }
+    }
+    return null;
+  }
   function livePosition(media, hls) {
     if (hls && Number.isFinite(hls.liveSyncPosition)) return hls.liveSyncPosition;
     if (!media.seekable.length) return null;
@@ -34,7 +47,11 @@
         const target = livePosition(media, options.hls);
         if (target !== null) { media.currentTime = target; positioned = true; }
       }
-      if (bufferedAhead(media) < 1.8) return;
+      if (bufferedAhead(media) < 1.8) {
+        const later = loadedAhead(media, 1.8);
+        if (later === null) return;
+        media.currentTime = later;
+      }
       requested = true;
       if (options.onCanPlay) options.onCanPlay();
       media.play().catch(error => {
@@ -50,7 +67,7 @@
     const deadline = setTimeout(() => { cleanup(); options.onFail(); }, 20000);
     return cleanup;
   }
-  const api = { bufferedAhead, livePosition, prepare };
+  const api = { bufferedAhead, loadedAhead, livePosition, prepare };
   if (typeof module !== 'undefined') module.exports = api;
   else root.LivePlayer = api;
 })(globalThis);
