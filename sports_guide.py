@@ -10,7 +10,9 @@ Channel 6 plays it as slides (static/sports-guide.html, from
   station when its listings name it;
 * else on one of the Roku's game sources, on its Live Sports number: any
   other Sunday-afternoon game on Sunday Ticket, Thursday Night Football on
-  Prime Video, a baseball game on MLB.TV, an NHL or NWSL game on ESPN Unlimited.
+  Prime Video, a baseball game on MLB.TV, an NHL or NWSL game on ESPN Unlimited;
+* or, for a league in INTERNET_LEAGUES, on the internet stream that carries it,
+  its games read from that stream's own listings (CFL+ on 3).
 
 Streaming-only games (Peacock, Apple TV, ESPN+ outside hockey and the NWSL), regional
 sports networks and games already over are left out. Sports go in a fixed
@@ -19,7 +21,7 @@ order, each sport's games by start time, then by channel number.
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from roku_control.config import normalize_channel_name
@@ -31,13 +33,21 @@ from roku_control.sports import NETWORK_ALIASES, nhl_on_espn_unlimited, nwsl_on_
 SPORTS = (
     ("NFL Football", (("nfl", "NFL"),)),
     ("College Football", (("ncaaf", "NCAA"),)),
+    ("CFL Football", (("cfl", "CFL"),)),
     ("Baseball", (("mlb", "MLB"),)),
     ("Basketball", (("nba", "NBA"), ("wnba", "WNBA"), ("ncaam", "NCAA"), ("ncaaw", "NCAAW"))),
     ("Hockey", (("nhl", "NHL"),)),
     ("Soccer", (("epl", "EPL"), ("ucl", "UCL"), ("mls", "MLS"), ("nwsl", "NWSL"))),
 )
+# Leagues whose games come from an internet stream's listings, by stream id: (league, the
+# network column's name). A listed event titled "Away at Home" is a game; anything else the
+# stream airs ("Replay: Alouettes at Argonauts") is not. CFL+ is hazel's
+# cflplus.service, built for the 2026 CFL playoffs only (ESPN's CFL scoreboard stopped in 2023).
+INTERNET_LEAGUES = {"cflplus": ("cfl", "CFL+")}
 # The leagues read from ESPN's scoreboards; baseball comes from the Roku's MLB catalog.
-ESPN_LEAGUES = tuple(league for _, leagues in SPORTS for league, _ in leagues if league != "mlb")
+ESPN_LEAGUES = tuple(league for _, leagues in SPORTS for league, _ in leagues
+                     if league != "mlb" and league not in {found[0] for found in INTERNET_LEAGUES.values()})
+STREAM_GAME_TITLE = re.compile(r"(?P<away>[^:]+?) at (?P<home>[^:]+)")
 # A network's national games are on its station over the antenna (networks.json's antenna
 # market, Washington), by virtual channel number: no Roku needed. (YouTube TV's NBC and the
 # rest are its own market's, Lansing's.) Keyed by every name the network goes by.
@@ -208,6 +218,37 @@ def day_games(espn, catalogs, channels, *, live_only=False):
                 where = _where(league, game, numbered, channels)
                 if where is not None:
                     rows.append(_row(sport, league, tag, game, where, game.get("start_time"), state == "in"))
+    return rows
+
+
+def stream_games(streams, now, day_of, today):
+    """The games internet streams list (INTERNET_LEAGUES), as the guide's rows.
+
+    ``streams``: the internet streams' guide rows (``channel_id``, ``tv_number``, ``events``);
+    ``day_of``: a Unix time's games day; ``today``: this games day. A game is listed from its
+    day until its slot ends; one still on from last night stays, as day_games keeps it. Only
+    events titled "Away at Home" are games (STREAM_GAME_TITLE).
+    """
+    rows = []
+    for stream in streams:
+        found = INTERNET_LEAGUES.get(stream.get("channel_id"))
+        number = stream.get("tv_number")
+        if not found or not isinstance(number, int):
+            continue
+        league, network = found
+        sport, tag = next((sport, tag) for sport, leagues in SPORTS for name, tag in leagues if name == league)
+        for event in stream.get("events") or ():
+            start, title = event.get("start"), str(event.get("title") or "")
+            matchup = STREAM_GAME_TITLE.fullmatch(title)
+            if not isinstance(start, int) or not matchup or start + int(event.get("duration") or 0) <= now:
+                continue
+            live = start <= now
+            if not live and day_of(start) != today:
+                continue
+            game = {"away": {"short": matchup["away"]}, "home": {"short": matchup["home"]}}
+            start_time = datetime.fromtimestamp(start, timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+            rows.append(_row(sport, league, tag, game, {"network": network, "tv_number": number, "via": "internet"},
+                             start_time, live))
     return rows
 
 

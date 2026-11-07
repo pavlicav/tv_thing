@@ -1034,7 +1034,7 @@ Every channel has a TV Thing number, laid out like an old cable lineup card in
 
 | Numbers | Section |
 |---|---|
-| 0–9 | Our channels: VizelVision on 0, Trains (Cab Ride) on 1, pen2live (Yle's puppy cam) on 2, VizelVision's Sports Guide on 6 (see [The Sports Guide](#the-sports-guide-channel-6)); 3–5 and 7–9 held for more |
+| 0–9 | Our channels: VizelVision on 0, Trains (Cab Ride) on 1, pen2live (Yle's puppy cam) on 2, CFL+ on 3 (hazel's `cflplus.service` on `127.0.0.1:8795`: live CFL+ games for the 2026 Division Finals and Grey Cup only, its games on the Sports Guide), VizelVision's Sports Guide on 6 (see [The Sports Guide](#the-sports-guide-channel-6)); 4–5 and 7–9 held for more |
 | 10–24 | Washington & Baltimore: NHK World first on 10, then each network on the number ending in its channel on the air (14 NBC 4, 15 FOX 5, 17 ABC 7, 19 CBS 9), a station's second channel right after it, then ION, Univision, Telemundo, WDVM and Baltimore's CW |
 | 25–39 | Michigan, in the Lansing and Flint dial's order: the Roku's Lansing locals from YouTube TV (26 CBS, 27 NBC, 30 PBS, 32 FOX, 34 ABC, 35 The CW); the rest held for a Michigan antenna receiver |
 | 40–59 | Sports cable from YouTube TV: TBS, TNT, the ESPNs and the rest in their old order, then USA and truTV |

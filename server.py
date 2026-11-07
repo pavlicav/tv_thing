@@ -5043,6 +5043,11 @@ def api_v1_sports_guide(now=None):
                                            for source_id in sources if ("source_id", source_id, day) in results})
         espn = {league: results.get(("league", league, day)) for league in sports_guide.ESPN_LEAGUES}
         rows += sports_guide.day_games(espn, catalogs, channels, live_only=day != today)
+    # Leagues an internet stream carries (CFL+), from that stream's own listings.
+    rows += sports_guide.stream_games(
+        [row for row in internet_guide_channels().values()
+         if row["channel_id"] in sports_guide.INTERNET_LEAGUES],
+        clock, lambda moment: games_day(datetime.fromtimestamp(moment, _EASTERN)), today)
     payload = {**payload, "available": bool(rows) or not errors, "games": len(rows),
                "sports": sports_guide.by_sport(rows), "errors": errors}
     if now is None:

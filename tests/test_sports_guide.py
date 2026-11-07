@@ -271,3 +271,30 @@ def test_a_game_within_a_quarter_hour_of_its_airing_matches():
     assert sports_guide.name_games(channels, board("2026-10-24T19:42Z"))["9.1"]["events"][0][
         "episode_title"] == "Michigan St at UCLA"
     assert "episode_title" not in sports_guide.name_games(channels, board("2026-10-24T19:46Z"))["9.1"]["events"][0]
+
+
+def test_a_league_an_internet_stream_carries_is_listed_from_its_listings():
+    # CFL+ on 3: 3:00 and 6:30 PM ET games on Saturday 2026-11-07, the Grey Cup the next week.
+    cfl = {"channel_id": "cflplus", "tv_number": 3, "events": [
+        {"start": 1794081600, "duration": 12600, "title": "Blue Bombers at Alouettes"},
+        {"start": 1794094200, "duration": 12600, "title": "Lions at Elks"},
+        {"start": 1794697200, "duration": 14400, "title": "Blue Bombers at Elks"}]}
+    # A replay the stream airs between games is not a game.
+    cfl["events"].insert(0, {"start": 1794070000, "duration": 7200, "title": "Replay: Alouettes at Argonauts"})
+    trains = {"channel_id": "cabride", "tv_number": 1, "events": [
+        {"start": 1794081600, "duration": 600, "title": "A ride at Tokyo"}]}
+    day_of = lambda moment: "2026-11-07" if moment < 1794114000 else "2026-11-15"
+    rows = sports_guide.stream_games([cfl, trains], 1794070000, day_of, "2026-11-07")
+    assert [(row["title"], row["live"], row["network"], row["tv_number"], row["via"], row["tag"])
+            for row in rows] == [("Blue Bombers at Alouettes", False, "CFL+", 3, "internet", "CFL"),
+                                 ("Lions at Elks", False, "CFL+", 3, "internet", "CFL")]
+    assert rows[0]["start"] == 1794081600 and rows[0]["start_time"] == "2026-11-07T20:00Z"
+    # The first game is on, then over; next week's game is listed on its own day.
+    rows = sports_guide.stream_games([cfl], 1794090000, day_of, "2026-11-07")
+    assert [(row["title"], row["live"]) for row in rows] == [("Blue Bombers at Alouettes", True), ("Lions at Elks", False)]
+    assert [row["title"] for row in sports_guide.stream_games([cfl], 1794600000, day_of, "2026-11-15")] == [
+        "Blue Bombers at Elks"]
+    # CFL games have their own page, after the colleges'; ESPN is never asked for them.
+    guide = sports_guide.by_sport(rows)
+    assert [sport["sport"] for sport in guide] == ["CFL Football"]
+    assert "cfl" not in sports_guide.ESPN_LEAGUES

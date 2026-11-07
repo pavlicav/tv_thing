@@ -282,25 +282,26 @@ def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypat
         "channel_id": "cairo-radio", "page_path": "cairo-radio.html",
         "data_path": None, "stream_path": "/stream/cairo-radio/index.m3u8"}]
     assert {"first": 10, "last": 24, "name": "Washington & Baltimore"} in sources["lineup"]["sections"]
-    # 1 and 2 are internet streams, played from TV Thing's relay of them.
+    # 1-3 are internet streams, played from TV Thing's relay of them.
     assert [(view["tv_number"], view["tv_name"], view["channel_id"], view["stream_path"])
             for view in sources["lineup"]["internet"]] == [
         (2, "pen2live", "pentulive", "/stream/internet/pentulive/index.m3u8"),
-        (1, "Trains", "cabride", "/stream/internet/cabride/index.m3u8")]
+        (1, "Trains", "cabride", "/stream/internet/cabride/index.m3u8"),
+        (3, "CFL+", "cflplus", "/stream/internet/cflplus/index.m3u8")]
 
     code, card = request("/api/v1/lineup?date=2026-10-01")
     assert code == 200 and card["errors"] == [] and card["lineup_error"] is None
     assert [(row["tv_number"], row["kind"], row.get("channel_id")) for row in card["channels"]] == [
         (0, "vizelvision", None), (1, "internet", "cabride"), (2, "internet", "pentulive"),
-        (6, "slides", "sports-guide"), (14, "digital", "wrc_hd_4_1"), (27, "roku", "NBC"),
+        (3, "internet", "cflplus"), (6, "slides", "sports-guide"), (14, "digital", "wrc_hd_4_1"), (27, "roku", "NBC"),
         (42, "roku", "ESPN"), (70, "vizelvision", None), (71, "roku", "401872964"),
         (72, "roku", "823254"), (109, "roku", "manual"), (197, "slides", "cairo-radio"),
         (300, "digital", "surprise_7_5")]
     assert card["channels"][2]["stream_path"] == "/stream/internet/pentulive/index.m3u8"
-    assert card["channels"][3]["name"] == "VizelVision Sports Guide"
-    assert card["channels"][3]["page_path"] == "sports-guide.html"
-    assert card["channels"][8]["source_id"] == "thursday-night-football"
-    assert card["channels"][8]["date"] == "2026-10-01"
+    assert card["channels"][4]["name"] == "VizelVision Sports Guide"
+    assert card["channels"][4]["page_path"] == "sports-guide.html"
+    assert card["channels"][9]["source_id"] == "thursday-night-football"
+    assert card["channels"][9]["date"] == "2026-10-01"
     code, discovery = request("/api/v1")
     assert discovery["endpoints"]["lineup"]["path"] == "/api/v1/lineup"
     assert discovery["endpoints"]["sports_guide"]["path"] == "/api/v1/sports-guide"

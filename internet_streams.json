@@ -15,6 +15,9 @@
      "service": "web-basic", "note": "Yle's puppy cam, 24/7 through early December 2026"},
     {"id": "cabride", "name": "Cab Ride", "resolver": "url", "url": "http://127.0.0.1:8791/cab/index.m3u8",
      "guide": "http://127.0.0.1:8791/guide.json",
-     "note": "Train cab rides from Japan, Europe and the US, all day"}
+     "note": "Train cab rides from Japan, Europe and the US, all day"},
+    {"id": "cflplus", "name": "CFL+", "resolver": "url", "url": "http://127.0.0.1:8795/cfl/index.m3u8",
+     "guide": "http://127.0.0.1:8795/guide.json",
+     "note": "Live CFL games from CFL+ (the 2026 Division Finals and Grey Cup); a next-game card in between"}
   ]
 }
