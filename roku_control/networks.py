@@ -2,7 +2,8 @@
 
 ``networks.json``, at the checkout's root, lists them: the antenna's market
 (Washington's stations, by virtual channel) and the Roku's YouTube TV market
-(Lansing's, whose stations are YouTube TV's network rows). The sports code
+(Washington's again since 2026-11-07, Lansing's before; its stations are
+YouTube TV's network rows). The sports code
 (sports.py, sports_guide.py) and the channel list (channels.py) read them here
 rather than each keeping its own table.
 

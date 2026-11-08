@@ -86,7 +86,7 @@ Antenna → DVB frontend → minimal DVB source → localhost UDP
 |---|---|
 | `server.py` | Main HTTP server, streaming controller, tuner arbitration |
 | `channels.py` | The channel list: every channel as one `Channel`, one adapter per kind of source (antenna, cable, Roku, internet, the station, its slides) that the lineup, source catalog, guide and tune iterate |
-| `networks.json` | Which station carries each broadcast network in the antenna's market (Washington) and the Roku's YouTube TV market (Lansing); read by `roku_control/networks.py` |
+| `networks.json` | Which station carries each broadcast network in the antenna's market (Washington) and the Roku's YouTube TV market (Washington since 2026-11-07; Lansing before); read by `roku_control/networks.py` |
 | `analog_tuner.py` | Tuner-only V4L2 discovery, fixed US cable channel plan, direct analog tuner control |
 | `atsc_scan.py` | Native ATSC band scan, single-channel DX probe, PSIP/PSI parsing, signal statistics |
 | `epg.py` | Broadcast guide: PSIP MGT/EIT/ETT/STT parsing, scheduled schedule refresh |
@@ -605,9 +605,9 @@ never interrupts anything:
 
 - **Gracenote**, which supplies YouTube TV's own guide, serves two weeks for
   any station by its station id through the listings site Zap2it used to front.
-  The networks are their national East feeds. The locals are the Lansing
-  stations the Roku's YouTube TV market carries (WILX, WSYM, WLAJ, WLNS, WKAR,
-  and WLAJ-DT2 for The CW). 92 rows read this way.
+  The networks are their national East feeds. The locals are the stations
+  the Roku's YouTube TV market carries: Washington's since 2026-11-07 (WRC,
+  WTTG, WJLA, WUSA, WHUT, WDCW), Lansing's before. 92 rows read this way.
 - **Free streaming channels** in YouTube TV's guide (Stories by AMC, AMC
   Thrillers, Portlandia, Pickleball TV, T2, Scripps News, Bloomberg Originals,
   All Reality, Discovery Turbo) are in no public Gracenote lineup. Their
@@ -651,19 +651,21 @@ Power Play, 1,050 a season, each with home and away streams) and its ESPN+
 exclusives. ESPN's scoreboard marks both with a national "ESPN+" broadcast;
 an exclusive also lists Disney+ and Hulu. Games on ESPN, ABC, TNT or NHL
 Network are left out, since they are on those channels' rows. Out-of-market
-games are blacked out locally, and YouTube TV places the Roku in DC or
-Lansing, so Capitals and Red Wings games are marked "may be blacked out"
-(exclusives never are).
+games are blacked out locally, so games of YouTube TV's market's team
+(the Capitals since 2026-11-07, the Red Wings before) are marked "may be
+blacked out" (exclusives never are).
 
 **Sunday's football follows YouTube TV's market.** The Sunday-afternoon CBS
-and FOX games are regional, and the Roku's YouTube TV carries Lansing's
-stations (WLNS, WSYM), not Washington's. A game is suggested on YouTube TV's
-CBS or FOX only when YouTube TV's own listings (`yttv_epg.json`) name it at
-kickoff ("NFL Football", "Indianapolis Colts at Minnesota Vikings"), or, past
-the listings' two days, when the Lions play. Every other game in those windows
-is on Sunday Ticket, which blacks out only Lansing's games, and only those are
-in its Live Sports catalog (`roku_control/sports.py`). A Commanders or Ravens
-game is on CBS 9 or FOX 5 over the antenna either way.
+and FOX games are regional, and the Roku's YouTube TV carries its own
+market's stations: Washington's since 2026-11-07 (Lansing's, WLNS and WSYM,
+from 10-25 until then). A game is suggested on YouTube TV's CBS or FOX only
+when YouTube TV's own listings (`yttv_epg.json`) name it at kickoff ("NFL
+Football", "Indianapolis Colts at Minnesota Vikings"), or, past the listings'
+two days, when the market's teams play (`nfl_teams` in `networks.json`). Every
+other game in those windows is on Sunday Ticket, which blacks out only that
+market's games, and only those are in its Live Sports catalog
+(`roku_control/sports.py`). A Commanders or Ravens game is on CBS 9 or FOX 5
+over the antenna either way.
 
 The Roku finds a game on YouTube TV's ESPN page (`nhl` source,
 `roku_control/espn_unlimited.py`). The games have no guide rows of their
@@ -1036,14 +1038,14 @@ Every channel has a TV Thing number, laid out like an old cable lineup card in
 |---|---|
 | 0–9 | Our channels: VizelVision on 0, Trains (Cab Ride) on 1, pen2live (Yle's puppy cam) on 2, CFL+ on 3 (hazel's `cflplus.service` on `127.0.0.1:8795`: live CFL+ games for the 2026 Division Finals and Grey Cup only, its games on the Sports Guide), VizelVision's Sports Guide on 6 (see [The Sports Guide](#the-sports-guide-channel-6)); 4–5 and 7–9 held for more |
 | 10–24 | Washington & Baltimore: NHK World first on 10, then each network on the number ending in its channel on the air (14 NBC 4, 15 FOX 5, 17 ABC 7, 19 CBS 9), a station's second channel right after it, then ION, Univision, Telemundo, WDVM and Baltimore's CW |
-| 25–39 | Michigan, in the Lansing and Flint dial's order: the Roku's Lansing locals from YouTube TV (26 CBS, 27 NBC, 30 PBS, 32 FOX, 34 ABC, 35 The CW); the rest held for a Michigan antenna receiver |
+| 25–39 | Michigan, in the Lansing and Flint dial's order, held for viviserv2's antenna in Lansing (the Roku's Lansing locals from YouTube TV had 26 CBS, 27 NBC, 30 PBS, 32 FOX, 34 ABC, 35 The CW until 2026-11-07) |
 | 40–59 | Sports cable from YouTube TV: TBS, TNT, the ESPNs and the rest in their old order, then USA and truTV |
 | 60–69 | News and more: CNN, MS NOW, FOX News, CNBC, the Weather Channel, Discovery, HGTV, Smithsonian, FX, Comedy Central |
 | 70 | VizelVision again |
 | 71–99 | Live Sports: the day's games, football, baseball, hockey and soccer together by start time (NFL Sunday Ticket, Thursday Night Football, MLB, and the NHL and NWSL on ESPN Unlimited) |
 | 100–109 | Roku (Manual Roku on 109) |
 | 110–289 | The digital tier, by genre, YouTube TV's other channels and the antenna's subchannels together: news and business, learning and lifestyle, kids, entertainment, music (Cairo Radio on 197), classic TV, movies and westerns, crime and reality, game shows, Spanish, shopping, faith |
-| 290–299 | Repeaters and other markets; 292–297 held for YouTube TV's Lansing locals once a Michigan antenna takes their numbers |
+| 290–299 | Repeaters and other markets; 292–297 YouTube TV's DC locals, copies of the antenna's (292 NBC, 293 FOX, 294 ABC, 295 CBS, 296 PBS, 297 The CW) |
 | 300–349 | New on the antenna |
 | 350–369 | New on YouTube TV |
 | 370–379 | New internet streams |
@@ -1074,8 +1076,8 @@ tune iterate, so a new kind of source is one new adapter.
 
 Which station is NBC, FOX, ABC, CBS and CW in each market is
 [`networks.json`](networks.json): the antenna's (Washington, by virtual
-channel) and the Roku's YouTube TV market (Lansing, whose stations are YouTube
-TV's network rows), with each market's NFL and NHL teams. The Sports Guide and
+channel) and the Roku's YouTube TV market (Washington since 2026-11-07, Lansing
+before; its stations are YouTube TV's network rows), with each market's NFL and NHL teams. The Sports Guide and
 the Roku's Sunday NFL routing read it. If YouTube TV moves the Roku to another
 market, change `youtube_tv_market` there and restart control. A broken file is
 reported in control's log and leaves the sports without station placement;
@@ -1120,8 +1122,8 @@ A game is listed only when it can be watched here, and shows where:
   number: TBS 40, ESPN 42. A network game is on its DC station over the
   antenna (ABC 17, FOX 15, CBS 19, NBC 14, CW 18). Sunday afternoon's CBS and FOX
   NFL games are regional: a Commanders or Ravens game is on CBS 19 or FOX 15,
-  and the game YouTube TV's listings name on Lansing's CBS 26 or FOX 32 is
-  there.
+  and the game YouTube TV's listings name on its CBS 295 or FOX 293 is
+  there (the same game, while YouTube TV's market is DC).
 * **On a Roku game source**, by its Live Sports number and the service:
   Sunday Ticket for any other Sunday-afternoon CBS or FOX game, Prime Video
   for Thursday Night Football, MLB.TV, and ESPN+ for the NHL and NWSL on ESPN

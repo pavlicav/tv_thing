@@ -4843,8 +4843,8 @@ def _nhl_text(game, stream):
                  for team in (game.get("away") or {}, game.get("home") or {})}
         out = " and ".join(f"the {names.get(team) or team} in {market}"
                            for team, market in stream["blackout"].items())
-        text += (f" May be blacked out: ESPN Unlimited blacks out {out}, and YouTube TV"
-                 " places the Roku in DC or Lansing.")
+        text += (f" May be blacked out: ESPN Unlimited blacks out {out}, where YouTube TV"
+                 " places the Roku.")
     return text
 
 

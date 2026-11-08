@@ -4,6 +4,7 @@ import gzip
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 from roku_control.controller import RokuStreamController
 from roku_control.errors import NavigationError, SundayTicketBlackoutError
@@ -315,7 +316,14 @@ STATIONS = [{'name': 'NBC', 'guide_index': 0}, {'name': 'FOX', 'guide_index': 1,
 
 
 class RegionalMarketTests(unittest.TestCase):
-    """The Roku's YouTube TV carries Lansing's CBS and FOX; the antenna Washington's."""
+    """The Roku's YouTube TV carries Lansing's CBS and FOX; the antenna Washington's
+    (as it was 2026-10-25 to 11-07: YouTube TV's market is networks.json's)."""
+
+    def setUp(self):
+        from roku_control import sports
+        patcher = mock.patch.object(sports, 'YOUTUBE_TV_NFL_TEAMS', {'DET'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def suggest(self, listings, games=SLATE):
         from roku_control.sports import SportsCatalog

@@ -266,7 +266,7 @@ def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypat
     assert [(i["number"], i["tv_number"]) for i in digital["items"]] == [("4.1", 14), ("7.5", 300)]
     code, feeds = request("/api/v1/sources/youtube-tv")
     assert [(i["id"], i["tv_number"], i["tv_name"]) for i in feeds["items"]] == [
-        ("NBC", 27, "WILX"), ("ESPN", 42, "ESPN")]
+        ("NBC", 292, "NBC"), ("ESPN", 42, "ESPN")]
     code, tnf = request("/api/v1/sources/thursday-night-football?date=2026-10-01")
     assert [(i["id"], i["tv_number"], i["tv_section"]) for i in tnf["items"]] == [
         ("401872964", 71, "Live Sports")]
@@ -293,15 +293,15 @@ def test_every_channel_carries_its_tv_thing_number_over_http(roku_api, monkeypat
     assert code == 200 and card["errors"] == [] and card["lineup_error"] is None
     assert [(row["tv_number"], row["kind"], row.get("channel_id")) for row in card["channels"]] == [
         (0, "vizelvision", None), (1, "internet", "cabride"), (2, "internet", "pentulive"),
-        (3, "internet", "cflplus"), (6, "slides", "sports-guide"), (14, "digital", "wrc_hd_4_1"), (27, "roku", "NBC"),
+        (3, "internet", "cflplus"), (6, "slides", "sports-guide"), (14, "digital", "wrc_hd_4_1"),
         (42, "roku", "ESPN"), (70, "vizelvision", None), (71, "roku", "401872964"),
         (72, "roku", "823254"), (109, "roku", "manual"), (197, "slides", "cairo-radio"),
-        (300, "digital", "surprise_7_5")]
+        (292, "roku", "NBC"), (300, "digital", "surprise_7_5")]
     assert card["channels"][2]["stream_path"] == "/stream/internet/pentulive/index.m3u8"
     assert card["channels"][4]["name"] == "VizelVision Sports Guide"
     assert card["channels"][4]["page_path"] == "sports-guide.html"
-    assert card["channels"][9]["source_id"] == "thursday-night-football"
-    assert card["channels"][9]["date"] == "2026-10-01"
+    assert card["channels"][8]["source_id"] == "thursday-night-football"
+    assert card["channels"][8]["date"] == "2026-10-01"
     code, discovery = request("/api/v1")
     assert discovery["endpoints"]["lineup"]["path"] == "/api/v1/lineup"
     assert discovery["endpoints"]["sports_guide"]["path"] == "/api/v1/sports-guide"

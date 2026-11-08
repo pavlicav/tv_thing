@@ -708,7 +708,7 @@ def load(config_path, *, capture_source, record=None, reuse_max_age=900.0, ecp=N
     controller = RokuStreamController(config, ecp=ecp, feedback=feedback)
     controller.recover_operations()
     baseball = BaseballCatalog(config)
-    # YouTube TV's own (Lansing's) listings say which regional NFL games its CBS and FOX show.
+    # YouTube TV's own market's listings say which regional NFL games its CBS and FOX show.
     sports = SportsCatalog(config, baseball, listings=lambda: (yttv_epg.load_guide() or {}).get("channels"))
     return RokuLane(config, controller, baseball=baseball, sports=sports,
                     capture_source=capture_source, record=record, reuse_max_age=reuse_max_age,

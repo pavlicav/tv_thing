@@ -2657,7 +2657,7 @@ class RokuStreamController:
         """Verify the top guide row, then read each row below it until the game
         is found in two fresh observations: on its Sunday Ticket row, or on a
         local station's row above them. Sunday Ticket blacks out a game a local
-        station in YouTube TV's market carries, and that market moves between
+        station in YouTube TV's market carries, and that market has moved between
         DC and Lansing, so the local row, when it names both teams, wins."""
         if self.feedback is None or getattr(self.feedback, "ocr", None) is None:
             raise NavigationError("Sunday Ticket selection needs the direct capture and local OCR")

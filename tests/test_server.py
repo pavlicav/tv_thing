@@ -1275,8 +1275,8 @@ def _youtube_tv(monkeypatch, now, stored=True):
         "generated_at": now - 3600, "event_count": 3, "channels_with_events": 2,
         "horizon": now + 30 * 3600,
         "channels": {
-            "NBC": {"name": "NBC", "source": "gracenote", "station": 35543,
-                    "call_sign": "WILXDT",
+            "NBC": {"name": "NBC", "source": "gracenote", "station": 19578,
+                    "call_sign": "WRCDT",
                     "events": [{"start": now - 9000, "duration": 1800, "title": "Over"},
                                {"start": now - 600, "duration": 3600, "title": "NFL Football",
                                 "episode_title": "Cowboys at Packers", "live": True},
@@ -1298,8 +1298,8 @@ def test_guide_lists_youtube_tv_rows_keyed_by_source_and_numbered(monkeypatch):
 
     nbc = payload["channels"]["youtube-tv/NBC"]
     assert (nbc["kind"], nbc["source_id"], nbc["channel_id"], nbc["tv_number"]) == (
-        "roku", "youtube-tv", "NBC", 27)
-    assert nbc["listing"] == {"source": "gracenote", "station": 35543, "call_sign": "WILXDT"}
+        "roku", "youtube-tv", "NBC", 292)
+    assert nbc["listing"] == {"source": "gracenote", "station": 19578, "call_sign": "WRCDT"}
     assert [e["title"] for e in nbc["events"]] == ["NFL Football", "News"]
     assert payload["channels"]["youtube-tv/CNN"]["stale"] is True
     # A row with no listing anywhere is still offered, with nothing in it.

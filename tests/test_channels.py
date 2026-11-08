@@ -66,7 +66,7 @@ def test_every_kind_of_channel_is_one_shape_with_what_plays_it(lineup_sources):
 
     nbc = by_id["youtube-tv/NBC"]
     assert (nbc["lane"], nbc["network"], nbc["market"], nbc["listings"]) == (
-        "roku", "NBC", "lansing", "youtube-tv/NBC")
+        "roku", "NBC", "dc", "youtube-tv/NBC")
     assert nbc["tune"] == {"source": "youtube-tv", "channel_id": "NBC"}
     assert by_id["youtube-tv/CNN"]["network"] is None
 
@@ -197,11 +197,12 @@ def test_a_guide_window_keeps_what_overlaps_it_and_asks_only_for_its_row():
 
 def test_networks_json_places_each_market_and_its_stations():
     found = networks.load()
-    assert (found.antenna.id, found.youtube_tv.id) == ("dc", "lansing")
+    assert (found.antenna.id, found.youtube_tv.id) == ("dc", "dc")
+    assert found.markets["lansing"].stations["NBC"].call_sign == "WILX"   # viviserv2's antenna, later
     assert found.antenna_channel("4.1") == ("NBC", "dc")
     assert found.antenna_channel("54.1") == ("CW", None)     # Baltimore's CW: an affiliate
     assert found.antenna_channel("22.4") is None
-    assert found.youtube_tv_row(("The CW",)) == ("CW", "lansing")
+    assert found.youtube_tv_row(("The CW",)) == ("CW", "dc")
     assert found.youtube_tv_row(("CNN",)) is None
 
 
@@ -212,11 +213,11 @@ def test_the_sports_tables_come_from_networks_json_as_they_were_written():
         "cw": ("CW", "50.1"), "thecw": ("CW", "50.1"), "ion": ("ION", "66.1"),
         "univision": ("Univision", "14.1"), "telemundo": ("Telemundo", "44.1")}
     assert sports_guide.AFFILIATES == {"54.1": "CW"}
-    assert (sports.LOCAL_NFL_TEAMS, sports.YOUTUBE_TV_NFL_TEAMS) == ({"WSH", "BAL"}, {"DET"})
+    assert (sports.LOCAL_NFL_TEAMS, sports.YOUTUBE_TV_NFL_TEAMS) == ({"WSH", "BAL"}, {"WSH", "BAL"})
     assert sports.ANTENNA_STATIONS == {"CBS": "WUSA", "FOX": "FOX 5"}
     assert sports.LOCAL_SIMULCASTS == {"WSH": {"NFL Network": "WTTG"}}
-    assert sports.NHL_LOCAL_TEAMS == {"WSH": "DC", "DET": "Lansing"}
-    assert (sports.ANTENNA_MARKET.name, sports.YOUTUBE_TV_MARKET.name) == ("Washington", "Lansing")
+    assert sports.NHL_LOCAL_TEAMS == {"WSH": "DC"}
+    assert (sports.ANTENNA_MARKET.name, sports.YOUTUBE_TV_MARKET.name) == ("Washington", "Washington")
 
 
 @pytest.mark.parametrize("document, complaint", [

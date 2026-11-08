@@ -6,8 +6,8 @@ Channel 6 plays it as slides (static/sports-guide.html, from
 * on a national broadcaster in the lineup, by that channel's name and number:
   a network on its DC station over the antenna (ABC 7), else a cable channel
   from YouTube TV (TBS 31). A regional Sunday NFL game on CBS or FOX is on
-  Washington's station only for a DC team, else on YouTube TV's Lansing
-  station when its listings name it;
+  Washington's station only for a DC team, else on YouTube TV's own
+  market's station when its listings name it;
 * else on one of the Roku's game sources, on its Live Sports number: any
   other Sunday-afternoon game on Sunday Ticket, Thursday Night Football on
   Prime Video, a baseball game on MLB.TV, an NHL or NWSL game on ESPN Unlimited;
@@ -50,7 +50,7 @@ ESPN_LEAGUES = tuple(league for _, leagues in SPORTS for league, _ in leagues
 STREAM_GAME_TITLE = re.compile(r"(?P<away>[^:]+?) at (?P<home>[^:]+)")
 # A network's national games are on its station over the antenna (networks.json's antenna
 # market, Washington), by virtual channel number: no Roku needed. (YouTube TV's NBC and the
-# rest are its own market's, Lansing's.) Keyed by every name the network goes by.
+# rest are its own market's, networks.json's youtube_tv_market.) Keyed by every name the network goes by.
 NETWORK_STATIONS = {normalize_channel_name(name): (station.network, station.antenna)
                     for station in NETWORKS.antenna.stations.values() if station.antenna
                     for name in station.names()}
@@ -105,7 +105,7 @@ class Channels:
 
     def youtube_tv(self, name):
         """``(label, tv_number)`` of YouTube TV's row for a broadcaster, or None. A network's
-        row is its Lansing station."""
+        row is its market's station."""
         found = self.rows.get(_key(name))
         return (SHORT_NAMES.get(found[0], found[0]), found[1]) if found else None
 
@@ -152,7 +152,7 @@ def _where(league, game, numbered, channels):
     game_id = str(game.get("game_id"))
     if league == "nfl":
         # A Sunday-afternoon CBS or FOX game is regional: on Washington's station
-        # over the antenna for a DC team, else on Lansing's in YouTube TV when its
+        # over the antenna for a DC team, else on YouTube TV's market's when its
         # listings say so, else on Sunday Ticket. Thursday's is on Prime Video.
         target = game.get("suggested_target") or {}
         source, markets = target.get("source_id"), game.get("markets") or {}

@@ -8,7 +8,7 @@ nothing TV Thing can read, but their schedules are published, free:
   the one Zap2it used to front, serves two weeks for any station by its
   station id (``api/sslgrid``). A cable network sends one national feed, so
   its listing is the same whichever lineup it is read through; the locals
-  are the Lansing stations the Roku's YouTube TV market carries.
+  are the stations of the Roku's YouTube TV market (Washington's since 2026-11-07).
 * The **free streaming channels** YouTube TV lists alongside them (Stories by
   AMC, Pickleball TV...) are in no public Gracenote lineup. The Plex, Roku,
   Pluto and Samsung TV Plus apps publish their schedules, and i.mjh.nz

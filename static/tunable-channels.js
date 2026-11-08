@@ -10,7 +10,7 @@
     const number = from && Number.isInteger(from.tv_number) ? from.tv_number : null;
     entry.number = number;
     entry.section = (from && from.tv_section) || null;
-    // Found by the lineup's name too (a Lansing station's call sign).
+    // Found by the lineup's name too (a renamed row, such as FOX SOUL).
     if (from && from.tv_name) { entry.name = from.tv_name; entry.search = `${entry.search} ${from.tv_name}`; }
     if (number !== null) entry.search = `${number} ch ${number} ${entry.search}`;
     return entry;

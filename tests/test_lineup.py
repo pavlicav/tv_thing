@@ -289,12 +289,13 @@ def test_the_card_reads_like_a_cable_lineup():
     assert by_number[10] == "digital/22.4" and by_number[24] == "digital/54.1"
     assert [by_number[n] for n in (14, 15, 16, 17, 18, 19)] == [
         "digital/4.1", "digital/5.1", "digital/20.1", "digital/7.1", "digital/50.1", "digital/9.1"]
-    # 25-39: Michigan, on the Lansing and Flint dial. YouTube TV's Lansing rows hold their
-    # stations' numbers; the Flint stations' are held for an antenna there.
+    # 25-39: Michigan, on the Lansing and Flint dial, held for viviserv2's antenna there.
+    # YouTube TV's locals are Washington's since 2026-11-07: copies of the antenna's, on 292-297.
     assert {section(n) for n in range(25, 40)} == {"Michigan"}
-    assert {n: by_number[n] for n in range(25, 40) if n in by_number} == {
-        26: "youtube-tv/CBS", 27: "youtube-tv/NBC", 30: "youtube-tv/PBS", 32: "youtube-tv/FOX",
-        34: "youtube-tv/ABC", 35: "youtube-tv/The CW"}
+    assert not any(n in by_number for n in range(25, 40))
+    assert {n: by_number[n] for n in range(292, 298)} == {
+        292: "youtube-tv/NBC", 293: "youtube-tv/FOX", 294: "youtube-tv/ABC", 295: "youtube-tv/CBS",
+        296: "youtube-tv/PBS", 297: "youtube-tv/The CW"}
     # 40-59: sports cable in its old order; 60-69 the news and the rest; all YouTube TV.
     assert [by_number[n] for n in (40, 42, 53, 57, 58, 59)] == [
         "youtube-tv/TBS", "youtube-tv/ESPN", "youtube-tv/NFL Network", "youtube-tv/Pickleball TV",
@@ -309,9 +310,9 @@ def test_the_card_reads_like_a_cable_lineup():
     assert by_number[109] == "roku-manual/manual"
     assert (by_number[134], by_number[144], by_number[246]) == (
         "youtube-tv/Food Network", "youtube-tv/GLIV", "youtube-tv/HLN")
-    # Held: 112, 177 and 227 left by moves (197 is Cairo Radio, a slide channel); 291-297 for YouTube TV's
-    # Lansing copies once a Michigan antenna takes theirs; 380-399 for its subchannels.
-    assert not any(n in by_number for n in (112, 177, 197, 227, *range(291, 298), *range(380, 400)))
+    # Held: 112, 177 and 227 left by moves (197 is Cairo Radio, a slide channel); 291; 380-399 for the
+    # Michigan antenna's subchannels. (292-297 are YouTube TV's DC locals since 2026-11-07.)
+    assert not any(n in by_number for n in (112, 177, 197, 227, 291, *range(380, 400)))
     assert section(380) == "Michigan extras" and not plan.section_of(380).new
     assert plan.new_section("digital").first >= 300 and plan.new_section("youtube-tv").first >= 300
     assert plan.new_section("internet").first == 370
