@@ -16,6 +16,9 @@
     {"id": "cabride", "name": "Cab Ride", "resolver": "url", "url": "http://127.0.0.1:8791/cab/index.m3u8",
      "guide": "http://127.0.0.1:8791/guide.json",
      "note": "Train cab rides from Japan, Europe and the US, all day"},
+    {"id": "ads5", "name": "Ads 5", "resolver": "url", "url": "http://127.0.0.1:6975/ads5/index.m3u8",
+     "guide": "http://127.0.0.1:6975/ads5/guide.json",
+     "note": "Nothing but ads: VizelVision's ad library and idents, with its own settings (vizelVision's vizelvision-ads5.service)"},
     {"id": "cflplus", "name": "CFL+", "resolver": "url", "url": "http://127.0.0.1:8795/cfl/index.m3u8",
      "guide": "http://127.0.0.1:8795/guide.json",
      "note": "Live CFL games from CFL+ (the 2026 Division Finals and Grey Cup); a next-game card in between"}
