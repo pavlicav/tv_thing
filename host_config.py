@@ -93,6 +93,10 @@ SETTINGS = (
     Setting("yttv_guide", "YouTube TV guide", "TV_THING_YTTV_GUIDE", ("auto", "off"), ("control",),
             "The daily read of YouTube TV's listings from the web. Auto: whenever the Roku "
             "lane runs."),
+    Setting("ota_guide", "Antenna guide from the web", "TV_THING_OTA_GUIDE", ("auto", "off"), ("control",),
+            "Twice a day, the antenna's listings for this market from Gracenote's over-the-air "
+            "grid (ota_listings.json names each market's ZIP code), continuing each channel past "
+            "the twelve hours the broadcast's own guide carries. Auto: on."),
     Setting("digital_adapter", "Digital tuner", "TV_THING_DIGITAL_ADAPTER", (), ("feed", "control"),
             "The DVB adapter (/dev/dvb/adapterN) the digital lane, the scan, the DX meter and the "
             "guide read use. Auto: feed.json's, or else the first one this host has."),
@@ -378,6 +382,14 @@ class Host:
             return Resolved("off", source, "set")
         roku = self.roku().value
         return Resolved(roku, source or "auto", f"follows the Roku lane, {roku}")
+
+    def _resolve_ota_guide(self):
+        value, source = self._given("ota_guide")
+        if source == "environment":
+            value = "off" if value.strip() in ("0", "off") else "auto"
+        if value == "off":
+            return Resolved("off", source, "set")
+        return Resolved("on", source or "auto", "reads the market's listings from the web")
 
     def _resolve_digital_adapter(self):
         value, source = self._given("digital_adapter")

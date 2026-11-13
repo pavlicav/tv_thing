@@ -6,12 +6,14 @@ tuner is a dict in ``/api/v1/tuners``' shape. Each has a signal grade for a chan
 (``grade``): how well its antenna plays that station, good or not yet measured before fair
 before poor. ``choose`` takes, in order:
 
-1. a tuner already playing the channel, healthily: watching along changes nothing, so
+1. a tuner already playing the channel, healthily (its stream ready, and its sound with its
+   picture: av_skew.py): watching along changes nothing, so
    this is allowed even when it is locked (server.lane_plays). Unless it plays it worse
    than an available tuner would: then the channel moves to that one;
 2. an available tuner, the best graded first; of those, this node's before the peer's,
    and an idle one before a running one: an unlocked tuner is anyone's to retune, and the
-   peer's is relayed through this node's front door;
+   peer's is relayed through this node's front door. One that just dropped a relayed tune
+   (``failing``: server.mark_failing) comes after every other, however poorly they play;
 3. nothing: every tuner that could play the channel is locked, scanning or unknown.
 
 So with both nodes' tuners healthy a tune stays on this node; one that this node's antenna
@@ -68,7 +70,9 @@ def plays(tuner, channel_id):
     stream = tuner.get("stream") or {}
     return (tuner.get("reachable", True)
             and (tuner.get("selection") or {}).get("id") == channel_id
-            and stream.get("active") and stream.get("ready") and not stream.get("error"))
+            and stream.get("active") and stream.get("ready") and not stream.get("error")
+            # Its sound and picture apart (av_skew.py): not playing it healthily.
+            and not stream.get("av_skewed"))
 
 
 def in_market(tuner, channel):
@@ -100,9 +104,10 @@ def choose(tuners, channel):
                      # holder's quality, which an unlocked one need not impose.
                      key=lambda tuner: (rank(tuner, channel), not tuner.get("available"), not tuner.get("local")))
     free = sorted((tuner for tuner in able if tuner.get("available") and tuner not in playing),
-                  key=lambda tuner: (rank(tuner, channel), not tuner.get("local"),
+                  key=lambda tuner: (bool(tuner.get("failing")), rank(tuner, channel), not tuner.get("local"),
                                      bool((tuner.get("stream") or {}).get("active"))))
-    if playing and not (free and rank(free[0], channel) < rank(playing[0], channel)):
+    if playing and not (free and not free[0].get("failing")
+                        and rank(free[0], channel) < rank(playing[0], channel)):
         return playing[0], "playing"
     if free:
         if playing:

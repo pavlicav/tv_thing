@@ -190,10 +190,12 @@ class AntennaChannels(Adapter):
         """The broadcast guide's rows, keyed by antenna number, its games named from ESPN;
         and the summary of the stored guide, which the page's top line describes."""
         host = self.host
-        guide = host.epg.load_guide()
+        # The broadcast's own guide, each channel continued from the web where it ends.
+        guide = host.antenna_guide()
         refresh_times = [f"{h:02d}:{m:02d}" for h, m in host.EPG_REFRESH_TIMES]
+        web = host.ota_guide_summary(host.ota_epg.load_guide() if host.OTA_GUIDE_ENABLED else None, window.now)
         if not guide:
-            return {}, {"available": False, "refresh_times": refresh_times,
+            return {}, {"available": False, "refresh_times": refresh_times, "web": web,
                         "refreshing": host.guide_refreshing, "last_error": host.guide_status["last_error"]}
         numbers = {}
         for channel in host.numbered_channels(host.load_channels()):
@@ -227,11 +229,12 @@ class AntennaChannels(Adapter):
             "next_refresh": host.next_refresh_at(host.EPG_REFRESH_TIMES),
             "refreshing": host.guide_refreshing,
             "last_error": host.guide_status["last_error"],
+            "web": web,
         }
 
     def guide_now(self, now):
         host = self.host
-        guide = host.epg.load_guide()
+        guide = host.antenna_guide()
         entries = now_and_next({key: channel for key, channel in (guide or {}).get("channels", {}).items()
                                 if not host.channel_lineup.hides(lineup.ANTENNA, key)}, now)
         # The antenna's games named by their teams, as the guide names them; the

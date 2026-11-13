@@ -46,3 +46,7 @@ def _private_lineup_state(tmp_path, monkeypatch):
     yttv_epg = sys.modules.get("yttv_epg")
     if yttv_epg is not None:
         monkeypatch.setattr(yttv_epg, "GUIDE_FILE", tmp_path / "yttv_epg.json")
+    # And the antenna's web listings (ota_epg.py): never the checkout's ota_epg.json.
+    ota_epg = sys.modules.get("ota_epg")
+    if ota_epg is not None:
+        monkeypatch.setattr(ota_epg, "GUIDE_FILE", tmp_path / "ota_epg.json")

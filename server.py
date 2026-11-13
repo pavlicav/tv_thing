@@ -42,6 +42,8 @@ import feed_node
 import host_config
 import internet_streams
 import lineup
+import av_skew
+import ota_epg
 import peers
 import signal_health
 import recorder
@@ -169,6 +171,15 @@ YTTV_GUIDE_MIN_COVERAGE_HOURS = float(
 )
 YTTV_GUIDE_RETRY_SECONDS = 3600
 YTTV_GUIDE_STARTUP_DELAY = 30.0
+
+# The antenna's listings from the web (ota_epg.py): Gracenote's over-the-air grid for this
+# market, continuing each channel where the broadcast's twelve hours end. No tuner, so a read
+# interrupts nobody; it stores two days, and runs twice a day so a changed plan shows up.
+OTA_GUIDE_ENABLED = HOST.value("ota_guide") != "off"     # TV_THING_OTA_GUIDE=0, or the Config page
+OTA_GUIDE_REFRESH_TIMES = parse_refresh_times(
+    os.environ.get("TV_THING_OTA_GUIDE_TIMES", "04:40,16:40")
+)
+OTA_GUIDE_MIN_COVERAGE_HOURS = 24
 
 
 def next_refresh_at(times, now=None):
@@ -430,6 +441,9 @@ guide_status = {"last_error": None, "last_reason": None, "running": False,
 yttv_guide_status = {"running": False, "last_error": None, "last_attempt": None,
                      "failed_channels": {}}
 yttv_guide_wakeup = threading.Event()
+# The antenna's web listings; see ota_guide_worker.
+ota_guide_status = {"running": False, "last_error": None, "last_attempt": None}
+ota_guide_wakeup = threading.Event()
 always_on_wakeup = threading.Event()
 _video_encoder_config = None
 _disabled_video_encoders = set()
@@ -576,7 +590,7 @@ def program_end_for(channel_id, now):
     )
     if channel is None:
         return None, "that channel is not in the channel list"
-    event = epg.upcoming(epg.load_guide(), channel["number"], at=int(now))
+    event = epg.upcoming(antenna_guide(), channel["number"], at=int(now))
     if not event:
         return None, (f"nothing is listed on {channel['number']} right now; "
                       "refresh the guide, or lock for a fixed time instead")
@@ -819,9 +833,32 @@ def sample_signals():
             print(f"Signal health: could not sample {lane}: {error}")
 
 
+def sample_av_skew():
+    """One A/V skew reading of each running digital lane's newest segment (av_skew.py): a
+    stream out of sync no longer plays its channel healthily (lane_plays), so the next tune
+    for it starts a fresh encode."""
+    for lane in DIGITAL_TUNER_LANES:
+        try:
+            state = feed_client.lane(lane)
+            stream_id = state.get("stream_id")
+            if not state.get("running") or state.get("unknown") or not stream_id or lane in tuning_lanes:
+                av_skews.forget(lane)
+                continue
+            segment = av_skew.newest_segment(STREAMS_DIR, LANE_SEGMENT_PREFIX[lane], stream_id)
+            seconds = av_skew.segment_skew(segment) if segment else None
+            if av_skews.record(lane, stream_id, seconds):
+                name = (state.get("selection") or {}).get("name") or "its channel"
+                print(f"A/V skew: {lane} plays {name} with its sound {seconds:+.1f} s off its picture; "
+                      "the next tune for it starts a fresh encode", flush=True)
+        except Exception as error:   # noqa: BLE001 - the next pass tries again
+            av_skews.forget(lane)
+            print(f"A/V skew: could not read {lane}: {error}")
+
+
 def signal_health_worker():
     while not shutting_down.wait(signal_health.SAMPLE_SECONDS):
         sample_signals()
+        sample_av_skew()
 
 
 def tuner_id(lane, node=None):
@@ -910,8 +947,9 @@ def local_tuners():
                 # channel (signal_health.py, tuner_pool.grade).
                 "signal": signal_grades.live(lane, rf) if stream["active"] else None,
                 "health": health,
-                "stream": {key: stream[key] for key in (
+                "stream": {**{key: stream[key] for key in (
                     "id", "state", "active", "ready", "error", "playlist_path", "playback", "revision")},
+                    **dict(zip(("av_skew_seconds", "av_skewed"), av_skews.view(lane, stream["id"])))},
             })
     return result
 
@@ -943,8 +981,69 @@ def extra_tuner_worker():
 
 
 def pool_tuners():
-    """Every tuner in the pool: this node's, then the peer's as last read."""
-    return local_tuners() + (peer.tuners() if peer is not None else [])
+    """Every tuner in the pool: this node's, then the peer's as last read; one that just
+    dropped a relayed tune says so (``failing``, mark_failing)."""
+    return mark_failing(local_tuners() + (peer.tuners() if peer is not None else []))
+
+
+# A peer's tuner that drops a relayed tune at once is passed over for a while, and the tune
+# goes to the next tuner. On 2026-11-10 viviserv2's tuner A ended every tune within a second
+# (buffering, then idle, no error) yet read free, so the pool kept sending it NHK, which this
+# node's antenna plays poorly, and nothing played.
+RELAY_CONFIRM_SECONDS = float(os.environ.get("TV_THING_RELAY_CONFIRM_SECONDS", 3))
+RELAY_CONFIRM_POLL_SECONDS = 0.5
+FAILING_TUNER_SECONDS = float(os.environ.get("TV_THING_FAILING_TUNER_SECONDS", 600))
+failing_tuners = {}     # tuner id -> {"until": time.time(), "reason": words}
+
+
+def mark_failing(tuners, now=None):
+    """``tuners``, each one that dropped a relayed tune lately carrying ``failing`` (why, and
+    for how much longer); tuner_pool.choose takes it only when no other tuner can. One seen
+    playing healthily again is cleared at once."""
+    now = time.time() if now is None else now
+    for tuner in tuners:
+        mark = failing_tuners.get(tuner["id"])
+        if mark is None:
+            continue
+        stream = tuner.get("stream") or {}
+        if now >= mark["until"] or (stream.get("ready") and not stream.get("error")):
+            failing_tuners.pop(tuner["id"], None)
+            continue
+        tuner["failing"] = {"reason": mark["reason"], "seconds_remaining": round(mark["until"] - now)}
+    return tuners
+
+
+def relayed_tune_dropped(chosen, channel_id):
+    """Why the peer dropped the tune of its tuner ``chosen`` it just took, or None while that
+    tune lives.
+
+    The peer is read now (its own listing, not the poller's), for up to
+    RELAY_CONFIRM_SECONDS: a stream that turns ready, or still runs at the end, lives; one
+    that stops, fails or errs on two readings in a row was dropped. A peer that stops
+    answering, or whose tuner someone else retunes meanwhile, is not blamed.
+    """
+    deadline = time.monotonic() + RELAY_CONFIRM_SECONDS
+    dead = 0
+    while True:
+        time.sleep(RELAY_CONFIRM_POLL_SECONDS)
+        if not peer.refresh():
+            return None
+        tuner = peer_tuner(chosen["id"])
+        if tuner is None or (tuner.get("selection") or {}).get("id") not in (channel_id, None):
+            return None
+        stream = tuner.get("stream") or {}
+        error = stream.get("error")
+        if stream.get("active") and not error and stream.get("state") != "failed":
+            if stream.get("ready"):
+                return None
+            dead = 0
+        else:
+            dead += 1
+            if dead >= 2:
+                message = error.get("message") if isinstance(error, dict) else error
+                return message or "its stream stopped at once"
+        if time.monotonic() >= deadline:
+            return None
 
 
 def peer_payload():
@@ -1010,8 +1109,28 @@ def api_v1_digital_tune(body, quality):
     if channel is None:
         return here()               # 404, in the usual words
     tuners = local_tuners() if local_only else pool_tuners()
-    chosen, why = tuner_pool.choose(tuners, channel)
+    dropped = None
+    while True:
+        chosen, why = tuner_pool.choose(tuners, channel)
+        if chosen is None or chosen["local"]:
+            break
+        payload, status = relay_tune(chosen, body, quality)
+        if status != 200:
+            return payload, status
+        reason = relayed_tune_dropped(chosen, channel_id)
+        if reason is None:
+            return payload, status
+        failing_tuners[chosen["id"]] = {"until": time.time() + FAILING_TUNER_SECONDS, "reason": reason}
+        print(f"Pool: {chosen['id']} dropped {channel_id} at once ({reason}); "
+              f"passed over for {FAILING_TUNER_SECONDS:.0f} s")
+        dropped = (chosen["id"], reason)
+        # The next tuner, if any: the one that dropped it is not asked again.
+        tuners = [tuner for tuner in pool_tuners() if tuner["id"] != chosen["id"]]
     if chosen is None:
+        if dropped and why != "locked":
+            return api_v1_error(f"{dropped[0]} dropped the tune at once ({dropped[1]}), and no other "
+                                "tuner can play it", 503, "tuner_failed",
+                                extra={"tuner": dropped[0], "tuners": tuners})
         if why == "none":
             unscanned = sorted({tuner["node"] for tuner in tuners if tuner.get("unscanned")})
             return api_v1_error(f"No tuner's antenna gets RF {channel.get('rf_channel')} "
@@ -1029,9 +1148,7 @@ def api_v1_digital_tune(body, quality):
                 extra={"lock": held["lock"], "tuner": held["id"], "tuners": tuners})
         return api_v1_error("No tuner is free: the others are scanning or not answering",
                             503, "no_tuner", extra={"tuners": tuners})
-    if chosen["local"]:
-        return here(chosen["lane"])
-    return relay_tune(chosen, body, quality)
+    return here(chosen["lane"])
 
 
 def relay_tune(chosen, body, quality):
@@ -2354,6 +2471,17 @@ def start_digital(channel, quality="medium", taps=None, lane=LANE_DIGITAL):
                 procs[packager_role] = None
                 kill_process(packager, timeout=TV_PACKAGER_STOP_TIMEOUT)
                 reset_lane(lane, "error")
+                # Why it died stays on the lane until its next start, so a lease holder
+                # reads "Could not retrieve signal for NHK-WLD (RF 21): the antenna got no
+                # lock in 3 s", not an empty lane.
+                why = recent[-1] if recent else f"exit code {source_proc.returncode}"
+                why = why.removeprefix("DVB source failed: ")
+                rf = f" (RF {channel['rf_channel']})" if channel.get("rf_channel") else ""
+                head, sep, detail = why.partition(": ")
+                if sep and head == "Could not retrieve signal":
+                    lanes[lane]["error"] = f"{head} for {channel['name']}{rf}: {detail}"
+                else:
+                    lanes[lane]["error"] = f"{channel['name']}{rf}: {why}"
                 if ALWAYS_ON and primary:
                     always_on_wakeup.set()
 
@@ -3050,6 +3178,8 @@ PEER_PLAN_FILE = STATE_DIR / "peer_plan.json"
 if peer is not None:
     peer.keep_plan_in(PEER_PLAN_FILE)
 signal_grades = signal_health.SignalHealth(SIGNAL_HEALTH_FILE)
+# Whether each digital lane's stream keeps its sound with its picture (av_skew.py).
+av_skews = av_skew.AvSkew()
 # The feed's recorder processes (feed_node.Recorders); the timers, pieces and
 # finalizing below are control's.
 recorders = feed_node.Recorders(RECORDINGS_JOURNAL, spawn=lambda command: _spawn_recorder(command),
@@ -3402,7 +3532,7 @@ def create_recording(body):
 
     if mode == "guide":
         number = body.get("channel_number")
-        found = recorder.find_event(epg.load_guide(), number,
+        found = recorder.find_event(antenna_guide(), number,
                                     body.get("event_start"))
         channel = _channel_by(number=number)
         if found is None or channel is None:
@@ -3428,7 +3558,7 @@ def create_recording(body):
         if channel is None:
             return api_v1_error("nothing is tuned on the digital lane", 409,
                                 "nothing_tuned")
-        event = epg.upcoming(epg.load_guide(), channel.get("number"),
+        event = epg.upcoming(antenna_guide(), channel.get("number"),
                              at=int(now))
         if event:
             end = event["start"] + event["duration"] \
@@ -3585,7 +3715,7 @@ def create_recording_rule(body):
         rule = {"id": recorder.new_id(), "title": title[:120],
                 "channel_number": number, "created_at": int(time.time())}
         state["rules"].append(rule)
-        added = recorder.expand_rules(state, epg.load_guide(), load_channels(),
+        added = recorder.expand_rules(state, antenna_guide(), load_channels(),
                                       time.time())
         save_recording_schedule()
     recording_wakeup.set()
@@ -3628,7 +3758,7 @@ def erase_recording(body):
 
 def recording_search_payload(query):
     now = time.time()
-    results = recorder.search_guide(epg.load_guide(), query, now)
+    results = recorder.search_guide(antenna_guide(), query, now)
     with lock:
         timers = recording_state()["timers"]
         for result in results:
@@ -3643,7 +3773,7 @@ def recording_search_payload(query):
             result["conflict"] = None if result["scheduled"] or not clash \
                 else recorder.describe(clash)
     return {"api_version": API_VERSION, "query": query, "results": results,
-            "guide_available": epg.load_guide() is not None}
+            "guide_available": antenna_guide() is not None}
 
 
 # --- the worker -----------------------------------------------------------
@@ -4362,8 +4492,9 @@ def recording_tick(now=None):
         ))
         guide = None
         if state["rules"]:
-            guide = epg.load_guide()
-            stamp = (guide or {}).get("generated_at")
+            guide = antenna_guide()
+            # Either read changes what the rules can find.
+            stamp = ((guide or {}).get("generated_at"), ((guide or {}).get("web") or {}).get("generated_at"))
             # Expand when the guide changes, and every tick costs nothing
             # when it has not: rules only ever add airings they have not seen.
             if stamp != _rules_expanded_for or changed:
@@ -4769,6 +4900,88 @@ def yttv_guide_worker():
         yttv_guide_wakeup.wait(timeout=wait)
         yttv_guide_wakeup.clear()
         due = True
+
+
+def antenna_guide():
+    """The antenna's guide as every reader sees it: the broadcast's own (epg.json), each
+    channel continued from the web listing where its events end (ota_epg.combine)."""
+    return ota_epg.combine(epg.load_guide(), ota_epg.load_guide() if OTA_GUIDE_ENABLED else None)
+
+
+def run_ota_guide_refresh(reason="manual"):
+    """Read the antenna's listings for this market from the web and store them.
+
+    Returns True when anything was read. A channel a read misses keeps its last listing,
+    marked stale, until that runs out.
+    """
+    ota_guide_status.update(running=True, last_attempt=int(time.time()))
+    try:
+        settings = ota_epg.market_settings(ota_epg.load_listings(), MARKET)
+        if settings is None:
+            raise RuntimeError(f"{ota_epg.LISTINGS_FILE.name} has no ZIP code for the {MARKET} market")
+        fresh = ota_epg.refresh(settings, load_channels())
+        guide = ota_epg.merge_guides(ota_epg.load_guide(), fresh)
+        guide["reason"] = reason
+        ota_epg.save_guide(guide)
+    except Exception as error:   # noqa: BLE001 - the worker must not die
+        ota_guide_status["last_error"] = str(error)
+        print(f"Antenna web guide ({reason}) failed: {error}", flush=True)
+        return False
+    finally:
+        ota_guide_status["running"] = False
+    ota_guide_status["last_error"] = None
+    print(f"Antenna web guide ({reason}): {guide['event_count']} programmes on "
+          f"{guide['channels_with_events']} channels, {guide['coverage_hours']}h ahead, "
+          f"in {fresh['elapsed_seconds']}s"
+          + (f"; unlisted: {', '.join(fresh['unlisted'])}" if fresh["unlisted"] else "")
+          + (f"; {len(fresh['failed_spans'])} spans failed" if fresh["failed_spans"] else ""),
+          flush=True)
+    return True
+
+
+def ota_guide_next_wait(succeeded, now=None):
+    """``(seconds, reason)`` until the next web read of the antenna's listings; None to stop."""
+    now = time.time() if now is None else now
+    slot = next_refresh_at(OTA_GUIDE_REFRESH_TIMES, now)
+    wait = slot - now if slot else None
+    if not succeeded and (wait is None or wait > YTTV_GUIDE_RETRY_SECONDS):
+        return YTTV_GUIDE_RETRY_SECONDS, "retry"
+    return (None, None) if wait is None else (max(1.0, wait), "scheduled")
+
+
+def ota_guide_worker():
+    """Read the antenna's web listings on their schedule, and at startup when short."""
+    if not OTA_GUIDE_ENABLED:
+        return
+    due = remaining_coverage_hours(ota_epg.load_guide()) < OTA_GUIDE_MIN_COVERAGE_HOURS
+    if due:
+        ota_guide_wakeup.wait(timeout=YTTV_GUIDE_STARTUP_DELAY)
+        ota_guide_wakeup.clear()
+    reason = "startup"
+    while True:
+        succeeded = run_ota_guide_refresh(reason) if due else True
+        wait, reason = ota_guide_next_wait(succeeded)
+        if wait is None:
+            return
+        ota_guide_wakeup.wait(timeout=wait)
+        ota_guide_wakeup.clear()
+        due = True
+
+
+def ota_guide_summary(web, now):
+    """The antenna's web listing, for the guide's meta line."""
+    return {
+        "available": bool(web and web.get("channels_with_events")),
+        "generated_at": (web or {}).get("generated_at"),
+        "age_seconds": now - web["generated_at"] if web and web.get("generated_at") else None,
+        "coverage_hours": remaining_coverage_hours(web, now),
+        "channels_with_events": (web or {}).get("channels_with_events", 0),
+        "unlisted": (web or {}).get("unlisted") or [],
+        "refresh_times": [f"{h:02d}:{m:02d}" for h, m in OTA_GUIDE_REFRESH_TIMES],
+        "next_refresh": next_refresh_at(OTA_GUIDE_REFRESH_TIMES) if OTA_GUIDE_ENABLED else None,
+        "refreshing": ota_guide_status["running"],
+        "last_error": ota_guide_status["last_error"],
+    }
 
 
 def remaining_coverage_hours(guide, now=None):
@@ -5838,7 +6051,9 @@ def lane_plays(lane, key, value):
             and state["stream_id"] is not None
             and not state.get("error")
             and (state["selection"] or {}).get(key) == value
-            and (state["health"] or {}).get("ok", True))
+            and (state["health"] or {}).get("ok", True)
+            # Sound and picture apart (av_skew.py): a fresh encode, not this one.
+            and not av_skews.skewed(lane, state["stream_id"]))
 
 
 def perform_digital_tune(channel_id, quality="medium", token=None,
@@ -7737,6 +7952,7 @@ def main():
         threading.Thread(target=signal_health_worker, daemon=True).start()
         threading.Thread(target=guide_worker, daemon=True).start()
         threading.Thread(target=yttv_guide_worker, daemon=True).start()
+        threading.Thread(target=ota_guide_worker, daemon=True).start()
         threading.Thread(target=recording_worker, daemon=True).start()
     if owns_feed:
         if ROLE == "feed":

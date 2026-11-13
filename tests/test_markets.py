@@ -35,9 +35,16 @@ class Peer:
     def tuners(self):
         return self._tuners
 
+    def refresh(self):
+        return True
+
     def tune(self, body):
         self.sent.append(body)
-        return {"ok": True, "lane": "digital", "stream": {"id": "g1", "playlist_path": "/stream/peer/digital.m3u8"}}, 200
+        stream = {"id": "g1", "active": True, "ready": True, "playlist_path": "/stream/peer/digital.m3u8"}
+        # Its listing shows the tune it took (server.relayed_tune_dropped reads it).
+        self._tuners = [dict(tuner, selection={"id": body["channel_id"]}, stream=stream)
+                        if tuner["id"] == body.get("tuner") else tuner for tuner in self._tuners]
+        return {"ok": True, "lane": "digital", "stream": stream}, 200
 
 
 def served(rows, numbers):
@@ -120,6 +127,7 @@ def test_another_markets_channel_is_relayed_from_its_owner(home, monkeypatch):
     there = dict(here, id="viviserv2:digital", node="viviserv2", local=False, market="lansing")
     home._tuners = [there]
     monkeypatch.setattr(server, "local_tuners", lambda: [here])
+    monkeypatch.setattr(server, "RELAY_CONFIRM_POLL_SECONDS", 0)
     payload, status = server.api_v1_digital_tune({"channel_id": "lansing/wlns_6_1"}, "low")
     assert status == 200 and payload["relayed"] and payload["tuner"] == "viviserv2:digital"
     assert home.sent[0]["channel_id"] == "lansing/wlns_6_1"

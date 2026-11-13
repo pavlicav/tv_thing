@@ -244,6 +244,17 @@ alone. Every tuner locked is 423 `locked` with the `lock` and `tuner` of one of 
 all `tuners`. No antenna that gets the station is 409 `not_received`, naming any node never scanned. A peer that stops answering
 mid-tune is 503 `peer_unavailable`.
 
+A relayed tune is watched for up to 3 s (`TV_THING_RELAY_CONFIRM_SECONDS`) before it is
+answered, by reading the peer's own listing every half second: a stream that turns ready
+or is still running lives. One the peer drops (its stream stops, fails or errs on two
+readings in a row) marks that tuner `failing: {reason, seconds_remaining}` in this node's
+listings for 10 minutes (`TV_THING_FAILING_TUNER_SECONDS`), and the tune goes to the next
+tuner, as if the failing one were not there. Nothing else to play it on is 503
+`tuner_failed`, naming the `tuner`. A failing tuner stays `available`, but the pool takes it
+only when no other tuner can play the channel. Its mark ends as soon as it is seen playing
+healthily. A tune that names its `tuner` is never moved. (On 2026-11-10 viviserv2's tuner A
+dropped every tune within a second, with no error, yet read free.)
+
 Locks: `POST /api/v1/tuner/lock` and `/release` with `lane: "<peer node>:digital"` are the
 peer's own lock calls. The peer issues and checks the token, and the response's `lock.lane`
 is the tuner id. This node's own tuner id is its lane. `GET /api/v1/tuner/lock` adds `pool`:
@@ -297,6 +308,15 @@ poor tuner moves to a better available one (that tune's tuner is new, `stream_re
 "healthily" above means this. The Watch page, when the tuner it plays reads `poor` and another
 available tuner grades better, tunes the same channel again (at most every two minutes), and
 the pool moves it. A locked tuner is never moved, so VizelVision's tune stays where it is.
+
+A stream also has to keep its sound with its picture (`av_skew.py`). Every 5 s control reads
+each running digital lane's newest segment for its first video and audio timestamps. A
+tuner's `stream` carries the last reading, `av_skew_seconds` (video minus audio: positive
+when the sound runs behind), and `av_skewed`, which is true after three readings in a row more
+than 1 s apart. A skewed stream is not playing its channel healthily. The pool does not
+watch along with it, and a tune for its channel starts a fresh encode (`stream_reused`
+false) instead of handing it out. VizelVision's master refuses any feed whose tracks are
+more than 1 s apart.
 
 Each box has a `location` (Config, or the Inputs page's Set location): a short name for where
 it is, read on every use, so it waits for no restart. It is in `/api/v1/inputs`, in
@@ -481,8 +501,18 @@ starting in the next N hours). Three kinds of row share it:
 
 * **Antenna channels**, keyed by antenna number (`7.1`), read off the air
   (PSIP) at the `refresh_times`. A read retunes the digital lane, so it runs
-  at night. `available`, `event_count`, `coverage_hours` and the other
-  top-level figures describe this guide.
+  at night. A/65 only promises twelve hours of it, so each channel continues
+  from the web where its own events end: Gracenote's over-the-air grid for
+  the market's ZIP code (`ota_listings.json`, read by `ota_epg.py` twice a
+  day, two days ahead, no tuner; the `ota_guide` host setting). A row the web
+  continued has `web_from` (where its listing takes over) and `listing`.
+  `available`, `event_count`, `coverage_hours` and the other top-level
+  figures describe the combined guide; `generated_at` and
+  `coverage_hours_at_refresh` the broadcast read. `web` describes the web
+  listing: `available`, `generated_at`, `coverage_hours`,
+  `channels_with_events`, `unlisted` (numbers Gracenote does not list),
+  `next_refresh`, `refreshing`, `last_error`. The VCR's guide timers, rules
+  and search read the same combined guide.
 * **YouTube TV's channels**, keyed `youtube-tv/NAME` (the Roku catalog's
   `channel_id`), with `kind: "roku"`, `source_id`, `channel_id` and `listing`
   (where the schedule came from, or null where none is published, as for

@@ -156,3 +156,39 @@ def test_the_feed_api_tunes_tuner_b_through_its_own_lane(tuner_b):
     for lane in ("digital-b", "digital"):
         assert api._route("POST", ["lanes", lane, "tune"], {"op_id": "x", "channel": WUSA}, None)[0] == 200
     assert calls == ["digital-b", None]
+
+
+def test_a_source_that_never_locks_leaves_its_reason_on_the_lane(tuner_b, monkeypatch):
+    """The lane is cleared when its source dies, but why stays on it until the next start:
+    a lease holder reads "Could not retrieve signal for WUSA-HD (RF 9): …", not an empty tuner."""
+    threads = []
+
+    class FakeProcess:
+        returncode = 1
+        stderr = iter(["DVB source failed: Could not retrieve signal: the antenna got no lock in 3 s\n"])
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 1
+
+    class FakeThread:
+        def __init__(self, target=None, args=(), **_):
+            self.target, self.args = target, args
+
+        def start(self):
+            threads.append(self)
+
+    monkeypatch.setattr(server, "start_digital_packager", lambda q, s, u, lane: (True, None))
+    monkeypatch.setattr(server.subprocess, "Popen", lambda cmd, **k: FakeProcess())
+    monkeypatch.setattr(server.threading, "Thread", FakeThread)
+    monkeypatch.setattr(server, "clear_streams", lambda prefixes: None)
+
+    ok, _, _ = server.start_digital(WUSA, "low", lane="digital-b")
+    assert ok
+    [monitor] = threads
+    monitor.target(*monitor.args)
+    state = server.lanes["digital-b"]
+    assert state["selection"] is None and not state["active"]
+    assert state["error"] == "Could not retrieve signal for WUSA-HD (RF 9): the antenna got no lock in 3 s"

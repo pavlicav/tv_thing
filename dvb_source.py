@@ -339,7 +339,7 @@ def wait_for_lock(fd, timeout, stopped):
         if status.value & FE_HAS_LOCK:
             return status.value
         time.sleep(0.05)
-    raise TimeoutError(f"no tuner lock within {timeout:g}s")
+    raise TimeoutError(f"Could not retrieve signal: the antenna got no lock in {timeout:g} s")
 
 
 def open_transport_tap(adapter):
@@ -380,10 +380,14 @@ def run(args):
     tap_sock = None
     try:
         frontend_fd = open_frontend(args.adapter, args.frequency)
+        tuned_at = time.monotonic()
         status = wait_for_lock(frontend_fd, args.lock_timeout,
                                lambda: stopping)
-        print(f"DVB lock {args.frequency}Hz status=0x{status:02x}",
-              flush=True)
+        # On stderr, which the feed logs (stdout goes nowhere): a lock and how
+        # long it took, for the tune log beside each "Could not retrieve signal".
+        print(f"DVB lock {args.frequency}Hz in "
+              f"{time.monotonic() - tuned_at:.2f}s status=0x{status:02x}",
+              file=sys.stderr, flush=True)
 
         demux_fd, transport_fd = open_transport_tap(args.adapter)
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -401,7 +405,8 @@ def run(args):
             if not readable:
                 if sent == 0 and time.monotonic() >= first_packet_deadline:
                     raise TimeoutError(
-                        f"no transport packets within {args.packet_timeout:g}s"
+                        f"Could not retrieve signal: the tuner locked, but no data "
+                        f"arrived in {args.packet_timeout:g} s"
                     )
                 continue
 

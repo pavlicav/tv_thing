@@ -148,6 +148,28 @@ def test_a_channel_playing_poorly_stays_when_nothing_plays_it_better():
     assert tuner_pool.choose([here, there, locked], WTTG) == (here, "playing")
 
 
+FAILING = {"reason": "its stream stopped at once", "seconds_remaining": 590}
+
+
+def test_a_failing_tuner_comes_after_one_that_plays_it_poorly():
+    """NHK, 2026-11-10: viviserv2's tuner dropped every tune; viviserv's poor RF 21 still plays."""
+    here = graded(tuner("viviserv", True), health={"36": "poor"})
+    there = {**graded(tuner("viviserv2", False, active=False)), "failing": FAILING}
+    assert tuner_pool.choose([here, there], WTTG) == (here, "retune")
+
+
+def test_a_failing_tuner_is_still_tried_when_nothing_else_can():
+    here = graded(tuner("viviserv", True, lock=LOCK), health={"36": "good"})
+    there = {**graded(tuner("viviserv2", False, active=False)), "failing": FAILING}
+    assert tuner_pool.choose([here, there], WTTG) == (there, "idle")
+
+
+def test_a_channel_playing_poorly_never_moves_to_a_failing_tuner():
+    here = graded(tuner("viviserv", True, playing="wttg_5_1"), live="poor")
+    there = {**graded(tuner("viviserv2", False, active=False), health={"36": "good"}), "failing": FAILING}
+    assert tuner_pool.choose([here, there], WTTG) == (here, "playing")
+
+
 def test_the_live_verdict_counts_only_for_the_rf_it_was_measured_on():
     here = graded(tuner("viviserv", True), live="poor", rf=9, health={"36": "good"})
     assert tuner_pool.grade(here, WTTG) == "good"
@@ -236,9 +258,14 @@ def _run_rescan(monkeypatch):
 
 # -- tunes and locks across the pool ----------------------------------------------------------
 class FakePeer:
-    def __init__(self, tuners, answer=None):
-        self._tuners, self.answer, self.sent = tuners, answer, []
+    def __init__(self, tuners, answer=None, after=None):
+        """``after``: its tuners once it has taken a tune (a tuner that dropped it, say)."""
+        self._tuners, self.answer, self.after, self.sent = tuners, answer, after, []
         self.reachable, self.last_error = True, None
+        self.answering = True
+
+    def refresh(self):
+        return self.answering
 
     def node(self):
         return "viviserv2"
@@ -256,6 +283,8 @@ class FakePeer:
         self.sent.append(("tune", body))
         if isinstance(self.answer, Exception):
             raise self.answer
+        if self.after is not None:
+            self._tuners = self.after
         return self.answer or ({"ok": True, "lane": "digital", "tuner": "viviserv2:digital",
                                 "stream": {"id": "g7", "playlist_path": "/stream/peer/digital.m3u8"}}, 200)
 
@@ -268,9 +297,12 @@ class FakePeer:
         return {"ok": True, "released": True}, 200
 
 
-def pool(monkeypatch, here, there, answer=None):
-    peer = FakePeer([there], answer)
+def pool(monkeypatch, here, there, answer=None, after=None):
+    peer = FakePeer([there], answer, after)
     monkeypatch.setattr(server, "peer", peer)
+    monkeypatch.setattr(server, "failing_tuners", {})
+    monkeypatch.setattr(server, "RELAY_CONFIRM_POLL_SECONDS", 0)
+    monkeypatch.setattr(server, "RELAY_CONFIRM_SECONDS", 0.05)
     monkeypatch.setattr(server, "local_tuners", lambda: [here])
     monkeypatch.setattr(server, "load_channels", lambda: [WUSA])
     tuned_here = []
@@ -334,6 +366,79 @@ def test_a_peer_that_stops_answering_mid_tune_is_a_503(monkeypatch):
          answer=peers.PeerUnavailable("timed out"))
     payload, status = server.api_v1_digital_tune({"channel_id": "wusa_hd_9_1"}, "low")
     assert status == 503 and payload["error"]["code"] == "peer_unavailable"
+
+
+def dropped(node="viviserv2"):
+    """A peer's tuner just after it dropped a tune: idle, no selection, no error
+    (viviserv2's tuner A, 2026-11-10)."""
+    return {**tuner(node, False, active=False, ready=False),
+            "stream": {"id": None, "state": "idle", "active": False, "ready": False, "error": None,
+                       "playlist_path": "/stream/peer/digital.m3u8"}}
+
+
+def poor_here():
+    return {**tuner("viviserv", True), "health": {"9": "poor"}}
+
+
+def test_a_relayed_tune_the_peer_drops_falls_back_to_this_nodes_tuner(monkeypatch):
+    peer, tuned_here = pool(monkeypatch, poor_here(), tuner("viviserv2", False, active=False),
+                            after=[dropped()])
+    payload, status = server.api_v1_digital_tune({"channel_id": "wusa_hd_9_1"}, "low")
+    assert status == 200 and payload["tuner"] == "viviserv:digital" and not payload["relayed"]
+    assert tuned_here == [("wusa_hd_9_1", False)] and len(peer.sent) == 1
+    assert server.failing_tuners["viviserv2:digital"]["reason"] == "its stream stopped at once"
+    failing = next(t for t in server.pool_tuners() if t["id"] == "viviserv2:digital")["failing"]
+    assert 0 < failing["seconds_remaining"] <= server.FAILING_TUNER_SECONDS
+    # The next tune goes straight to this node's tuner: the peer's is not asked again.
+    server.api_v1_digital_tune({"channel_id": "wusa_hd_9_1"}, "low")
+    assert len(peer.sent) == 1 and len(tuned_here) == 2
+
+
+def test_a_relayed_tune_that_plays_is_kept(monkeypatch):
+    playing = tuner("viviserv2", False, playing="wusa_hd_9_1")
+    peer, tuned_here = pool(monkeypatch, poor_here(), tuner("viviserv2", False, active=False),
+                            after=[playing])
+    payload, status = server.api_v1_digital_tune({"channel_id": "wusa_hd_9_1"}, "low")
+    assert status == 200 and payload["relayed"] and tuned_here == []
+    assert server.failing_tuners == {}
+
+
+def test_a_relayed_tune_still_starting_is_kept(monkeypatch):
+    starting = {**tuner("viviserv2", False, playing="wusa_hd_9_1", ready=False)}
+    starting["stream"]["state"] = "buffering"
+    pool(monkeypatch, poor_here(), tuner("viviserv2", False, active=False), after=[starting])
+    payload, status = server.api_v1_digital_tune({"channel_id": "wusa_hd_9_1"}, "low")
+    assert status == 200 and payload["relayed"] and server.failing_tuners == {}
+
+
+def test_a_peer_that_stops_answering_after_the_tune_is_not_blamed(monkeypatch):
+    peer, tuned_here = pool(monkeypatch, poor_here(), tuner("viviserv2", False, active=False),
+                            after=[dropped()])
+    peer.answering = False
+    payload, status = server.api_v1_digital_tune({"channel_id": "wusa_hd_9_1"}, "low")
+    assert status == 200 and payload["relayed"] and server.failing_tuners == {}
+
+
+def test_a_dropped_tune_with_no_other_tuner_says_so(monkeypatch):
+    here = {**tuner("viviserv", True), "rf_channels": [7]}       # this antenna misses RF 9
+    pool(monkeypatch, here, tuner("viviserv2", False, active=False), after=[dropped()])
+    payload, status = server.api_v1_digital_tune({"channel_id": "wusa_hd_9_1"}, "low")
+    assert status == 503 and payload["error"]["code"] == "tuner_failed"
+    assert "viviserv2:digital dropped the tune" in payload["error"]["message"]
+
+
+def test_a_failing_mark_ends_when_the_tuner_plays_again_or_its_time_is_up(monkeypatch):
+    monkeypatch.setattr(server, "failing_tuners", {
+        "viviserv2:digital": {"until": 1000.0, "reason": "gone"},
+        "viviserv2:digital-b": {"until": 1000.0, "reason": "gone"}})
+    healthy = tuner("viviserv2", False, playing="wusa_hd_9_1")
+    idle = dropped()
+    idle["id"] = "viviserv2:digital-b"
+    marked = server.mark_failing([healthy, idle], now=900.0)
+    assert "failing" not in marked[0] and marked[1]["failing"]["seconds_remaining"] == 100
+    assert list(server.failing_tuners) == ["viviserv2:digital-b"]
+    server.mark_failing([idle], now=1000.0)
+    assert server.failing_tuners == {}
 
 
 def test_a_lock_on_the_peers_tuner_is_the_peers(monkeypatch):

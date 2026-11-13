@@ -1,0 +1,8 @@
+{
+  "_comment": "Where ota_epg.py reads the antenna's listings from the web: Gracenote's over-the-air grid (lineup USA-OTA<ZIP>, the public listings site Zap2it used to front) for this box's market (the market setting). It answers six hours at a time, for every station receivable around that ZIP code, by channel number. The broadcast's own guide (epg.py) wins wherever it reaches; this continues each channel past its twelve hours, and fills the channels whose PSIP carries none. A number Gracenote lists twice (DC's 44.1: WRC's and WZDC's) is matched by call sign to the channel's name.",
+  "gracenote": {"url": "https://tvlistings.gracenote.com/api/grid"},
+  "markets": {
+    "dc": {"postal_code": "20036"},
+    "lansing": {"postal_code": "48933"}
+  }
+}

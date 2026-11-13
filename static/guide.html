@@ -703,6 +703,18 @@ function renderMeta() {
         guide.compressed_strings}</b> compressed titles skipped</span>`);
     }
   }
+  // The antenna's channels continue from the web where the broadcast's own guide ends.
+  const web = guide.web;
+  if (web && web.available) {
+    const note = `Gracenote's over-the-air listings, read ${fmtAge(web.age_seconds)}`
+      + (web.next_refresh ? `; next at ${fmtTime(web.next_refresh)}` : '')
+      + ((web.unlisted || []).length ? `; not listed there: ${web.unlisted.join(', ')}` : '');
+    parts.push(`<span title="${escape(note)}">Antenna web listings <b>${web.channels_with_events}</b> channels · <b>${
+      web.coverage_hours} h</b> ahead</span>`);
+  } else if (web && (web.refreshing || web.last_error)) {
+    parts.push(`<span title="${escape(web.last_error || '')}">Antenna web listings ${
+      web.refreshing ? 'loading…' : 'unavailable'}</span>`);
+  }
   // YouTube TV's listings come from the web on their own daily schedule.
   const yttv = guide.youtube_tv;
   if (yttv && yttv.available) {
