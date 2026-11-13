@@ -186,8 +186,8 @@ def test_the_summary_counts_the_free_tuners():
 def test_every_plan_channel_has_its_own_number_on_the_dial():
     """Both nodes number the dial alike only if no plan channel is left to a node's own
     lineup_state.json: each has a fixed number in lineup.json, or is hidden."""
-    plan = lineup.Lineup(ROOT / "lineup.json", ROOT / "no-such-lineup-state.json").plan()
-    channels = json.loads((ROOT / "channels.json").read_text())
+    plan = lineup.Lineup(ROOT / "lineup.default.json", ROOT / "no-such-lineup-state.json").plan()
+    channels = json.loads((ROOT / "channels.default.json").read_text())
     keys = [f"{lineup.ANTENNA}/{key}" for key in lineup.antenna_keys(channels)]
     assert [key for key in keys if key not in plan.fixed and key not in plan.hidden] == []
 

@@ -215,7 +215,7 @@ def test_game_partners_name_the_shared_block(make):
 # -- the real lineup card ---------------------------------------------------------
 
 def real_plan():
-    return lineup.parse_plan(json.loads((ROOT / "lineup.json").read_text()))
+    return lineup.parse_plan(json.loads((ROOT / "lineup.default.json").read_text()))
 
 
 # -- off the dial -----------------------------------------------------------------
@@ -259,7 +259,7 @@ def test_a_hidden_list_that_contradicts_itself_is_refused(hidden, message):
 
 def test_every_channel_today_has_a_place_on_the_card_or_is_off_the_dial():
     plan = real_plan()
-    channels = json.loads((ROOT / "channels.json").read_text())
+    channels = json.loads((ROOT / "channels.default.json").read_text())
     placed = {key for key in (*plan.fixed, *plan.hidden) if key.startswith("digital/")}
     assert {f"digital/{key}" for key in lineup.antenna_keys(channels)} == placed
     roku_rows = [row["name"] for row in json.loads((ROOT / "roku.json").read_text())["channels"]]
@@ -330,3 +330,19 @@ def test_a_state_file_that_cannot_be_written_still_numbers(tmp_path):
     numbering = lineup.Lineup(tmp_path / "lineup.json", tmp_path / "missing-dir" / "state.json")
     assert numbers(numbering.number("digital", antenna("7.5"))) == [250]
     assert numbers(numbering.number("digital", antenna("2.1", "7.5"))) == [251, 250]
+
+
+def test_a_box_runs_on_the_tracked_default_until_it_has_its_own(tmp_path):
+    """channels.json and lineup.json are each box's own and untracked; until a box has
+    one, it reads the tracked *.default.json beside it."""
+    own, default = tmp_path / "lineup.json", tmp_path / "lineup.default.json"
+    assert lineup.local_or_default(own) == str(own)          # neither: the box's own name
+    default.write_text(json.dumps(plan_document()))
+    assert lineup.local_or_default(own) == str(default)
+    numbering = lineup.Lineup(own, tmp_path / "state.json")
+    assert [number for number, _ in numbering.plan().house] == [0, 70]
+    mine = plan_document()
+    mine["channels"] = [row for row in mine["channels"] if row["number"] != 70]
+    own.write_text(json.dumps(mine))
+    assert lineup.local_or_default(own) == str(own)
+    assert [number for number, _ in numbering.plan().house] == [0]

@@ -29,6 +29,7 @@ from datetime import datetime
 from pathlib import Path
 
 import epg
+import lineup
 import yttv_epg
 
 BASE_DIR = Path(__file__).parent
@@ -308,7 +309,7 @@ def main(argv=None):
     settings = market_settings(load_listings(), args.market)
     if settings is None:
         parser.error(f"ota_listings.json has no ZIP code for {args.market}")
-    with open(epg.CHANNELS_FILE) as f:
+    with open(lineup.local_or_default(epg.CHANNELS_FILE)) as f:
         channels = json.load(f)
     channels = channels.get("channels", channels) if isinstance(channels, dict) else channels
     fresh = refresh(settings, channels, hours=args.hours, progress=print)

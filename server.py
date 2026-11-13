@@ -805,7 +805,8 @@ def tuner_lock_payload():
 # ---------------------------------------------------------------------------
 # The tuner pool: this node's digital tuners and its peer's (tuner_pool.py)
 #
-# Both nodes run the same channel plan (the tracked channels.json); what each one's antenna
+# Each node runs its own channel plan (its untracked channels.json, from channels.default.json
+# until its first rescan); what each one's antenna
 # actually gets is its reception, state/reception.json, written by its own scans. A tune
 # takes a tuner that already plays the channel, else an unlocked one of this node's, else an
 # unlocked one of the peer's, whose stream the front door relays (/stream/peer/). Each node
@@ -1257,8 +1258,8 @@ def api_v1_peer_inputs():
 # Markets: one dial across cities (Phase B)
 #
 # A station is its TSID and service ID wherever it is received (tuner_pool.receives). Each box
-# owns the plan of its own antenna's market: the home market's (the primary's) is the tracked
-# channels.json; a box in another market keeps its own, state/channels.json, from its own
+# owns the plan of its own antenna's market: in the home market its own untracked channels.json
+# (the tracked channels.default.json until it scans); a box in another market keeps its own, state/channels.json, from its own
 # scans. Each serves it (GET /api/v1/plan) and reads its peer's (peers.PeerClient.plan). The
 # dial (antenna_dial) is the home market's channels, keyed digital/<number> as always, then
 # each other market's that the home market does not carry, keyed digital@<market>/<number>,
@@ -1282,7 +1283,14 @@ def away():
 
 
 def own_plan_file():
+    """Where this box's plan is written (a rescan): its own, untracked channels.json."""
     return AWAY_CHANNELS_FILE if away() else CHANNELS_FILE
+
+
+def plan_file():
+    """Where this box's plan is read: its own, else the tracked channels.default.json until it
+    has scanned (home market only; away, nothing until scanned there)."""
+    return AWAY_CHANNELS_FILE if away() else Path(lineup.local_or_default(CHANNELS_FILE))
 
 
 def market_source(market):
@@ -1301,15 +1309,16 @@ def read_plan(path):
 
 def load_channels():
     """This box's antenna's plan: what its own tuners tune, its guide reads and its VCR
-    records. The tracked channels.json in the home market; this box's own in another
+    records. Its own channels.json in the home market (channels.default.json until it scans);
+    state/channels.json in another
     (nothing until it is scanned there). The dial adds the other market's (antenna_dial)."""
-    return read_plan(own_plan_file())
+    return read_plan(plan_file())
 
 
 def plan_revision():
     """Changes whenever this box's plan does: the peer then reads it again."""
     try:
-        stat = own_plan_file().stat()
+        stat = plan_file().stat()
         return f"{MARKET}:{stat.st_mtime_ns}:{stat.st_size}"
     except OSError:
         return f"{MARKET}:none"
@@ -1341,7 +1350,7 @@ def antenna_dial():
         parts = [theirs]
     else:
         # No box in the home market answers: the tracked plan, numbered here.
-        parts = [(home, None, numbered_on_dial(read_plan(CHANNELS_FILE), lineup.ANTENNA))]
+        parts = [(home, None, numbered_on_dial(read_plan(lineup.local_or_default(CHANNELS_FILE)), lineup.ANTENNA))]
     if MARKET != home:
         parts.append(own)
     if theirs and theirs[0] not in (home, MARKET):
@@ -3171,7 +3180,7 @@ RECEPTION_FILE = STATE_DIR / "reception.json"
 # play (signal_health.py; signal_health_worker writes it).
 SIGNAL_HEALTH_FILE = STATE_DIR / "signal_health.json"
 # A box outside the home market keeps its own antenna's plan here, written by its rescans; in
-# the home market its plan is the tracked channels.json (own_plan_file).
+# the home market its plan is its own channels.json (own_plan_file; plan_file reads the default).
 AWAY_CHANNELS_FILE = STATE_DIR / "channels.json"
 # The peer's plan as last read (GET /api/v1/plan): its channels stay on the dial while it is down.
 PEER_PLAN_FILE = STATE_DIR / "peer_plan.json"

@@ -1032,7 +1032,11 @@ the rides hours ahead.
 ### TV Thing channel numbers
 
 Every channel has a TV Thing number, laid out like an old cable lineup card in
-[`lineup.json`](lineup.json):
+each box's own `lineup.json`. It and the box's `channels.json` (what its antenna
+gets, written by its rescans) are untracked: each box decides its own. Until it
+has one, a box runs on the tracked [`lineup.default.json`](lineup.default.json)
+and [`channels.default.json`](channels.default.json), which a fresh checkout
+starts from (copy one to its own name to change it). The shared default:
 
 | Numbers | Section |
 |---|---|

@@ -12,3 +12,6 @@ lineup_state.json
 yttv_epg.json
 state/
 ota_epg.json
+# Each box's own channel plan and lineup (the tracked *.default.json start them)
+channels.json
+lineup.json

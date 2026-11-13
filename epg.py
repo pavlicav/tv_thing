@@ -34,6 +34,7 @@ import time
 from pathlib import Path
 
 import atsc_scan
+import lineup
 
 BASE_DIR = Path(__file__).parent
 GUIDE_FILE = BASE_DIR / "epg.json"
@@ -665,8 +666,10 @@ def summarize(guide):
 # ---------------------------------------------------------------------------
 
 def load_channels():
-    if CHANNELS_FILE.exists():
-        with open(CHANNELS_FILE) as f:
+    """This box's plan: its own channels.json, else the tracked channels.default.json."""
+    path = lineup.local_or_default(CHANNELS_FILE)
+    if os.path.exists(path):
+        with open(path) as f:
             return json.load(f)
     return []
 

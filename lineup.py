@@ -47,6 +47,20 @@ OTHER_ANTENNAS = "digital@*"
 SLIDES = {"sports-guide": "VizelVision Sports Guide", "cairo-radio": "Cairo Radio"}
 
 
+def local_or_default(path):
+    """This box's own plan file, or the tracked default beside it until the box has one.
+
+    channels.json and lineup.json are each box's own, untracked: its antenna and its owner
+    decide them. channels.default.json and lineup.default.json are the shared starting point
+    a fresh checkout (or a box that never scanned or edited its lineup) runs on."""
+    path = os.fspath(path)
+    if os.path.exists(path):
+        return path
+    root, ext = os.path.splitext(path)
+    default = f"{root}.default{ext}"
+    return default if os.path.exists(default) else path
+
+
 class LineupError(ValueError):
     """lineup.json is missing or does not describe a usable lineup."""
 
@@ -211,19 +225,20 @@ class Lineup:
     # -- files ----------------------------------------------------------------
     def plan(self):
         """The current Plan; LineupError when lineup.json is unusable."""
+        path = local_or_default(self.plan_path)   # this box's own, else the tracked default
         try:
-            stat = os.stat(self.plan_path)
-            signature = (stat.st_mtime_ns, stat.st_size)
+            stat = os.stat(path)
+            signature = (path, stat.st_mtime_ns, stat.st_size)
         except OSError as error:
-            raise LineupError(f"cannot read {self.plan_path}: {error.strerror}") from None
+            raise LineupError(f"cannot read {path}: {error.strerror}") from None
         cached_signature, cached = self._plan_cache
         if cached_signature != signature:
             try:
-                with open(self.plan_path) as f:
+                with open(path) as f:
                     cached = parse_plan(json.load(f))
             except (OSError, ValueError) as error:
                 cached = error if isinstance(error, LineupError) else LineupError(
-                    f"{os.path.basename(self.plan_path)}: {error}")
+                    f"{os.path.basename(path)}: {error}")
             self._plan_cache = (signature, cached)
         if isinstance(cached, LineupError):
             raise cached
