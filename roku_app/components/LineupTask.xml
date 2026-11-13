@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Loads every source's channels and the guide's listings, and builds the lineup. -->
+<component name="LineupTask" extends="Task">
+  <interface>
+    <field id="serverUrl" type="string"/>
+    <field id="date" type="string"/>
+    <field id="hours" type="integer" value="6"/>
+    <!-- {entries: [entry, ...], complete: false when a catalog it needs did not load, error: ""} -->
+    <field id="result" type="assocarray"/>
+  </interface>
+  <script type="text/brightscript" uri="pkg:/components/Lineup.brs"/>
+  <script type="text/brightscript" uri="pkg:/components/LineupTask.brs"/>
+</component>

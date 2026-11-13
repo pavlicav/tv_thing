@@ -1,0 +1,5 @@
+{
+  "rootDir": "./",
+  "files": ["manifest", "source/**/*", "components/**/*", "images/**/*", "fonts/**/*"],
+  "createPackage": false
+}

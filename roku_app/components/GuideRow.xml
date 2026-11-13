@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  One row of the cable-box guide, 1240 x 40, as static/guide.html draws it:
+  the channel (number and name) and its programmes across the window. The
+  scene works out the cells (Guide.brs); this only draws them.
+-->
+<component name="GuideRow" extends="Group">
+  <interface>
+    <!-- {number, name, focused, tuned, enabled, cells: [{x, w, title, gap, focused, before, after}]}; {} hides it -->
+    <field id="row" type="assocarray" onChange="OnRow"/>
+  </interface>
+  <script type="text/brightscript" uri="pkg:/components/GuideRow.brs"/>
+  <children>
+    <Poster id="chan" uri="pkg:/images/chan.9.png" width="180" height="40"/>
+    <!-- The channel on screen -->
+    <Rectangle id="tuned" color="0xFFD23FFF" width="4" height="40" visible="false"/>
+    <Label id="numShadow" translation="[13, 1]" width="58" height="40" vertAlign="center" color="0x000000FF">
+      <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="17"/>
+    </Label>
+    <Label id="num" translation="[12, 0]" width="58" height="40" vertAlign="center" color="0xFFFFFFFF">
+      <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="17"/>
+    </Label>
+    <Label id="name" translation="[72, 0]" width="102" height="40" vertAlign="center" color="0xAEBFE8FF">
+      <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="13"/>
+    </Label>
+    <Group id="cells" translation="[182, 0]"/>
+  </children>
+</component>

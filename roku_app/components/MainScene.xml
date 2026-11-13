@@ -1,71 +1,262 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  1280 x 720, a cable box like the website's: the picture full screen with
+  the Watch page's info banner along the bottom on a channel change, and the
+  Guide page (static/guide.html) full screen on OK, the picture shrunk into
+  its preview box. Colours are the website's set-top-box palette (stb in its CSS); the face is
+  DejaVu Sans, what that CSS's font stack renders in on viviserv.
+-->
 <component name="MainScene" extends="Scene">
   <interface>
-    <field id="serverUrl" type="string" onChange="onServerUrl"/>
+    <field id="serverUrl" type="string" onChange="OnServerUrl"/>
   </interface>
-  <children>
-
-    <!-- Full-screen video (behind everything) -->
-    <Video id="videoPlayer" width="1280" height="720" visible="false"/>
-
-    <!-- Channel list panel — shown in idle and overlay states -->
-    <Group id="channelPanel" visible="false">
-      <Rectangle color="0xd0000000" width="380" height="720"/>
-      <Label text="TV THING"
-             font="font:SmallBoldSystemFont"
-             color="0x8a7a5aff"
-             translation="[20, 14]"/>
-      <Label id="channelCount"
-             text="Loading..."
-             font="font:SmallSystemFont"
-             color="0x444444ff"
-             translation="[20, 38]"/>
-      <MarkupList id="channelList"
-                  translation="[0, 68]"
-                  itemSize="[380, 58]"
-                  itemSpacing="[0, 1]"
-                  numRows="11"
-                  itemComponentName="ChannelItem"
-                  visible="false"/>
-      <BusySpinner id="spinner" translation="[170, 370]"/>
-    </Group>
-
-    <!-- Tuning overlay — shown on top of everything while tuning -->
-    <Group id="tuningOverlay" visible="false">
-      <Rectangle color="0xb0000000" width="1280" height="720"/>
-      <Label id="tuningMsg"
-             text="Tuning..."
-             font="font:LargeSystemFont"
-             color="0xb8a070ff"
-             horizAlign="center"
-             width="1280"
-             translation="[0, 290]"/>
-      <Label id="tuningCh"
-             text=""
-             font="font:MediumSystemFont"
-             color="0x777777ff"
-             horizAlign="center"
-             width="1280"
-             translation="[0, 360]"/>
-    </Group>
-
-    <!-- Channel info banner (shown during up/down browse in playing state) -->
-    <Group id="channelInfo" visible="false" translation="[0, 620]">
-      <Rectangle color="0xd0000000" width="1280" height="100"/>
-      <Label id="infoNumber"
-             font="font:LargeBoldSystemFont"
-             color="0xd4c090ff"
-             translation="[40, 18]"/>
-      <Label id="infoName"
-             font="font:MediumSystemFont"
-             color="0xccccccff"
-             translation="[160, 22]"/>
-      <Label id="infoRF"
-             font="font:SmallSystemFont"
-             color="0x666666ff"
-             translation="[160, 58]"/>
-    </Group>
-
-  </children>
+  <script type="text/brightscript" uri="pkg:/components/Lineup.brs"/>
+  <script type="text/brightscript" uri="pkg:/components/Guide.brs"/>
   <script type="text/brightscript" uri="pkg:/components/MainScene.brs"/>
+  <children>
+    <!-- Under the picture while the guide is up: its screen, and a slate in the preview box -->
+    <Group id="under" visible="false">
+      <Poster uri="pkg:/images/screen_hd.jpg" width="1280" height="720"/>
+      <Rectangle color="0x0B1C4DFF" width="320" height="180" translation="[20, 20]"/>
+      <Label id="pipSlate" width="320" height="180" translation="[20, 20]" horizAlign="center" vertAlign="center" color="0xAEBFE8FF" text="TUNING">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="14"/>
+      </Label>
+    </Group>
+
+    <Video id="video" width="1280" height="720" enableUI="false" enableTrickPlay="false" disableScreenSaver="true"/>
+
+    <!-- When the picture is missing -->
+    <Group id="notice" visible="false">
+      <Rectangle color="0x030A1FFF" width="804" height="84" translation="[238, 318]"/>
+      <Poster uri="pkg:/images/gap.9.png" width="800" height="80" translation="[240, 320]"/>
+      <Rectangle color="0x8AA4DCFF" width="800" height="2" translation="[240, 320]"/>
+      <Label id="noticeText" width="760" height="80" translation="[260, 320]" horizAlign="center" vertAlign="center" wrap="true" maxLines="2" color="0xFFFFFFFF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="20"/>
+      </Label>
+    </Group>
+
+    <!-- The info banner (the Watch page's .banner): channel, NOW, LATER, clock -->
+    <Group id="banner" visible="false" translation="[0, 566]">
+      <Poster uri="pkg:/images/banner_hd.jpg" width="1280" height="154"/>
+      <Label id="bnNumShadow" translation="[31, 15]" width="200" height="54" color="0x000000FF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="44"/>
+      </Label>
+      <Label id="bnNum" translation="[28, 12]" width="200" height="54" color="0xFFFFFFFF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="44"/>
+      </Label>
+      <Label id="bnCall" translation="[28, 70]" width="200" height="24" color="0xFFD23FFF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="18"/>
+      </Label>
+      <Label id="bnSub" translation="[28, 96]" width="200" height="44" wrap="true" maxLines="2" color="0x7086BDFF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="13"/>
+      </Label>
+      <Rectangle color="0x8AA4DC40" width="1" height="122" translation="[242, 16]"/>
+
+      <Label translation="[260, 22]" width="44" height="20" color="0x7086BDFF" text="NOW">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="12"/>
+      </Label>
+      <Label id="bnTitleShadow" translation="[307, 15]" width="470" height="32" color="0x000000FF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="22"/>
+      </Label>
+      <Label id="bnTitle" translation="[306, 14]" width="470" height="32" color="0xFFFFFFFF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="22"/>
+      </Label>
+      <Label id="bnTime" translation="[306, 48]" width="470" height="20" color="0xAEBFE8FF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="14"/>
+      </Label>
+      <Group id="bnBar" translation="[306, 74]">
+        <Rectangle color="0x8AA4DC59" width="422" height="8"/>
+        <Rectangle color="0x030A1FFF" width="420" height="6" translation="[1, 1]"/>
+        <Rectangle id="bnFill" color="0xFFD23FFF" width="0" height="6" translation="[1, 1]"/>
+      </Group>
+      <Label id="bnDesc" translation="[306, 88]" width="470" height="38" wrap="true" maxLines="2" color="0xAEBFE8FF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans.ttf" size="14"/>
+      </Label>
+      <Label id="bnStatus" translation="[260, 126]" width="770" height="22">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="15"/>
+      </Label>
+
+      <Group id="bnLater" translation="[800, 14]">
+        <Label width="100" height="18" color="0x7086BDFF" text="LATER">
+          <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="12"/>
+        </Label>
+        <Rectangle color="0x030A1FFF" width="246" height="92" translation="[0, 20]"/>
+        <Group id="later0" translation="[2, 22]">
+          <Poster uri="pkg:/images/cell.9.png" width="242" height="28"/>
+          <Label id="later0Time" translation="[8, 0]" width="74" height="28" vertAlign="center" color="0xAEBFE8FF">
+            <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="12"/>
+          </Label>
+          <Label id="later0Title" translation="[84, 0]" width="152" height="28" vertAlign="center" color="0xFFFFFFFF">
+            <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="13"/>
+          </Label>
+        </Group>
+        <Group id="later1" translation="[2, 52]">
+          <Poster uri="pkg:/images/cell.9.png" width="242" height="28"/>
+          <Label id="later1Time" translation="[8, 0]" width="74" height="28" vertAlign="center" color="0xAEBFE8FF">
+            <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="12"/>
+          </Label>
+          <Label id="later1Title" translation="[84, 0]" width="152" height="28" vertAlign="center" color="0xFFFFFFFF">
+            <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="13"/>
+          </Label>
+        </Group>
+        <Group id="later2" translation="[2, 82]">
+          <Poster uri="pkg:/images/cell.9.png" width="242" height="28"/>
+          <Label id="later2Time" translation="[8, 0]" width="74" height="28" vertAlign="center" color="0xAEBFE8FF">
+            <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="12"/>
+          </Label>
+          <Label id="later2Title" translation="[84, 0]" width="152" height="28" vertAlign="center" color="0xFFFFFFFF">
+            <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="13"/>
+          </Label>
+        </Group>
+      </Group>
+
+      <Label id="bnClockShadow" translation="[1062, 16]" width="156" height="48" horizAlign="right" color="0x000000FF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="36"/>
+      </Label>
+      <Label id="bnClock" translation="[1060, 14]" width="156" height="48" horizAlign="right" color="0xFFFFFFFF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="36"/>
+      </Label>
+      <Label id="bnAmPm" translation="[1220, 34]" width="44" height="22" color="0xAEBFE8FF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="14"/>
+      </Label>
+      <Label id="bnDate" translation="[1056, 66]" width="200" height="20" horizAlign="right" color="0xAEBFE8FF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="13"/>
+      </Label>
+    </Group>
+
+    <!-- The guide (static/guide.html): preview, info, clock, then the grid -->
+    <Group id="guide" visible="false">
+      <!-- The preview box's frame: the grid line, then the bevel -->
+      <Rectangle color="0x030A1FFF" width="328" height="2" translation="[16, 16]"/>
+      <Rectangle color="0x030A1FFF" width="328" height="2" translation="[16, 202]"/>
+      <Rectangle color="0x030A1FFF" width="2" height="188" translation="[16, 16]"/>
+      <Rectangle color="0x030A1FFF" width="2" height="188" translation="[342, 16]"/>
+      <Rectangle color="0x8AA4DCFF" width="324" height="2" translation="[18, 18]"/>
+      <Rectangle color="0x8AA4DCFF" width="324" height="2" translation="[18, 200]"/>
+      <Rectangle color="0x8AA4DCFF" width="2" height="184" translation="[18, 18]"/>
+      <Rectangle color="0x8AA4DCFF" width="2" height="184" translation="[340, 18]"/>
+      <Poster uri="pkg:/images/shade.9.png" width="320" height="44" translation="[20, 156]"/>
+      <Label id="pipBug" translation="[28, 176]" width="304" height="20" color="0xFFFFFFFF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="13"/>
+      </Label>
+
+      <Poster uri="pkg:/images/panel.9.png" width="712" height="184" translation="[360, 18]"/>
+      <Label id="infoChan" translation="[378, 30]" width="560" height="20" color="0xFFD23FFF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="15"/>
+      </Label>
+      <Group id="infoBadge" translation="[960, 28]" visible="false">
+        <Poster uri="pkg:/images/gold.9.png" width="96" height="22"/>
+        <Label id="infoBadgeText" width="96" height="22" horizAlign="center" vertAlign="center" color="0x14120AFF">
+          <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="12"/>
+        </Label>
+      </Group>
+      <Label id="infoTitleShadow" translation="[379, 55]" width="676" height="34" color="0x000000FF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="25"/>
+      </Label>
+      <Label id="infoTitle" translation="[378, 54]" width="676" height="34" color="0xFFFFFFFF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="25"/>
+      </Label>
+      <Label id="infoTime" translation="[378, 92]" width="676" height="20" color="0xAEBFE8FF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="15"/>
+      </Label>
+      <Label id="infoDesc" translation="[378, 118]" width="676" height="74" wrap="true" maxLines="3" color="0xAEBFE8FF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans.ttf" size="15"/>
+      </Label>
+
+      <Label translation="[1080, 22]" width="180" height="18" horizAlign="right" color="0xAEBFE8FF" text="G U I D E">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="13"/>
+      </Label>
+      <Label id="gClockShadow" translation="[1078, 44]" width="140" height="48" horizAlign="right" color="0x000000FF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="38"/>
+      </Label>
+      <Label id="gClock" translation="[1076, 42]" width="140" height="48" horizAlign="right" color="0xFFFFFFFF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="38"/>
+      </Label>
+      <Label id="gAmPm" translation="[1220, 64]" width="44" height="22" color="0xAEBFE8FF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="15"/>
+      </Label>
+      <Label id="gDate" translation="[1060, 94]" width="200" height="20" horizAlign="right" color="0xAEBFE8FF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="14"/>
+      </Label>
+
+      <!-- The grid: its frame shows as the 2 px lines between cells -->
+      <Rectangle color="0x030A1FFF" width="1244" height="454" translation="[18, 214]"/>
+      <Poster uri="pkg:/images/ruler.9.png" width="1240" height="30" translation="[20, 216]"/>
+      <Label id="gDay" translation="[30, 216]" width="166" height="30" vertAlign="center" color="0xFFFFFFFF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="14"/>
+      </Label>
+      <Rectangle color="0x030A1FFF" width="2" height="30" translation="[200, 216]"/>
+      <Rectangle color="0x030A1FFF" width="2" height="30" translation="[466, 216]"/>
+      <Rectangle color="0x030A1FFF" width="2" height="30" translation="[731, 216]"/>
+      <Rectangle color="0x030A1FFF" width="2" height="30" translation="[995, 216]"/>
+      <Label id="gTick0" translation="[210, 216]" width="250" height="30" vertAlign="center" color="0xFFFFFFFF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="14"/>
+      </Label>
+      <Label id="gTick1" translation="[476, 216]" width="250" height="30" vertAlign="center" color="0xFFFFFFFF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="14"/>
+      </Label>
+      <Label id="gTick2" translation="[741, 216]" width="250" height="30" vertAlign="center" color="0xFFFFFFFF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="14"/>
+      </Label>
+      <Label id="gTick3" translation="[1005, 216]" width="250" height="30" vertAlign="center" color="0xFFFFFFFF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="14"/>
+      </Label>
+      <!-- The time now, on the ruler -->
+      <Label id="gNow" translation="[202, 238]" width="12" height="10" color="0xFFD23FFF" text="▲">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="9"/>
+      </Label>
+      <GuideRow id="row0" translation="[20, 248]"/>
+      <GuideRow id="row1" translation="[20, 290]"/>
+      <GuideRow id="row2" translation="[20, 332]"/>
+      <GuideRow id="row3" translation="[20, 374]"/>
+      <GuideRow id="row4" translation="[20, 416]"/>
+      <GuideRow id="row5" translation="[20, 458]"/>
+      <GuideRow id="row6" translation="[20, 500]"/>
+      <GuideRow id="row7" translation="[20, 542]"/>
+      <GuideRow id="row8" translation="[20, 584]"/>
+      <GuideRow id="row9" translation="[20, 626]"/>
+
+      <!-- The remote's keys, as the guide page's legend shows them -->
+      <Group translation="[20, 680]">
+        <Poster uri="pkg:/images/pill.9.png" width="62" height="22"/>
+        <Label width="62" height="22" horizAlign="center" vertAlign="center" color="0xFFFFFFFF" text="▲▼◀▶">
+          <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="11"/>
+        </Label>
+        <Label translation="[70, 0]" width="60" height="22" vertAlign="center" color="0xFFFFFFFF" text="Move">
+          <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="13"/>
+        </Label>
+        <Poster uri="pkg:/images/pill.9.png" width="36" height="22" translation="[128, 0]"/>
+        <Label translation="[128, 0]" width="36" height="22" horizAlign="center" vertAlign="center" color="0xFFFFFFFF" text="OK">
+          <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="11"/>
+        </Label>
+        <Label translation="[172, 0]" width="60" height="22" vertAlign="center" color="0xFFFFFFFF" text="Watch">
+          <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="13"/>
+        </Label>
+        <Poster uri="pkg:/images/pill.9.png" width="56" height="22" translation="[240, 0]"/>
+        <Label translation="[240, 0]" width="56" height="22" horizAlign="center" vertAlign="center" color="0xFFFFFFFF" text="◀◀ ▶▶">
+          <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="10"/>
+        </Label>
+        <Label translation="[304, 0]" width="60" height="22" vertAlign="center" color="0xFFFFFFFF" text="Page">
+          <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="13"/>
+        </Label>
+        <Poster uri="pkg:/images/pill.9.png" width="50" height="22" translation="[360, 0]"/>
+        <Label translation="[360, 0]" width="50" height="22" horizAlign="center" vertAlign="center" color="0xFFFFFFFF" text="BACK">
+          <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="10"/>
+        </Label>
+        <Label translation="[418, 0]" width="60" height="22" vertAlign="center" color="0xFFFFFFFF" text="Exit">
+          <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="13"/>
+        </Label>
+      </Group>
+      <Label id="gStatus" translation="[500, 680]" width="760" height="22" horizAlign="right" vertAlign="center" color="0x7086BDFF">
+        <Font role="font" uri="pkg:/fonts/DejaVuSans-Bold.ttf" size="13"/>
+      </Label>
+    </Group>
+
+    <!-- Left/Right settle on a channel before it is tuned -->
+    <Timer id="surfTimer" duration="1.0" repeat="false"/>
+    <Timer id="bannerTimer" duration="6" repeat="false"/>
+    <Timer id="retryTimer" duration="3" repeat="false"/>
+    <Timer id="tickTimer" duration="1" repeat="true"/>
+    <Timer id="lineupTimer" duration="180" repeat="true"/>
+  </children>
 </component>

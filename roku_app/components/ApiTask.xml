@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One request to TV Thing's API, off the render thread. -->
+<component name="ApiTask" extends="Task">
+  <interface>
+    <field id="tag" type="string"/>
+    <field id="serial" type="integer"/>
+    <field id="method" type="string" value="GET"/>
+    <field id="url" type="string"/>
+    <field id="body" type="assocarray"/>
+    <field id="timeoutMs" type="integer" value="10000"/>
+    <!-- {code, data, error}: code 0 when TV Thing never answered -->
+    <field id="result" type="assocarray"/>
+  </interface>
+  <script type="text/brightscript" uri="pkg:/components/ApiTask.brs"/>
+</component>
