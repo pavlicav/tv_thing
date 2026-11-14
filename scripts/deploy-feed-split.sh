@@ -6,7 +6,7 @@
 #     ffmpeg, the VCR's recorders and the relays. It serves /stream/, and /feed/v1/ to this host.
 #   * tv-thing (server.py as control, 127.0.0.1:8087): the API, the pages, locks, the Roku's
 #     navigation, guides, the VCR's timers and finishing. It serves /internal/ to the feed.
-#   * Apache on :8080 (127.0.0.1, 192.168.1.98 and 10.0.0.98, never tailscale0's): /stream/ to the
+#   * Apache on :8080 (127.0.0.1 and 10.0.0.98, never tailscale0's): /stream/ to the
 #     feed and everything else to control. viviserv-proxy.conf's /tv/ already proxies to
 #     127.0.0.1:8080, so the main site is not touched. Client URLs do not change.
 # Afterwards a restart, or a crash, of tv-thing drops no stream. The drill at the end proves it.
@@ -73,7 +73,7 @@ CF=8091 CC=8092 CD=8098           # the candidate's feed, control and front door
 C=http://127.0.0.1:$CD
 VV=http://127.0.0.1:6970
 VV_CONFIG=/home/vivian/vizelVision/config.master.json
-LAN_ADDRESSES="192.168.1.98 10.0.0.98"
+LAN_ADDRESSES="10.0.0.98"   # 192.168.1.98 (Astound) was disconnected on 2026-11-11
 UNITS=/etc/systemd/system
 APACHE_SITE=/etc/apache2/sites-available/tv-thing-front-door.conf
 APACHE_DROPIN=$UNITS/apache2.service.d/tv-thing-front-door.conf

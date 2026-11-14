@@ -303,8 +303,8 @@ along with capture-card support.
 ### Reverse proxy
 
 Apache owns `:8080`. The front door (`deploy/apache/tv-thing-front-door.conf`,
-which includes `tv-thing-routes.conf`) listens on `127.0.0.1`, `192.168.1.98`
-and `10.0.0.98`; sends `/stream/` to the feed on `127.0.0.1:8086` and
+which includes `tv-thing-routes.conf`) listens on `127.0.0.1` and
+`10.0.0.98`; sends `/stream/` to the feed on `127.0.0.1:8086` and
 everything else to control on `127.0.0.1:8087`; never routes `/internal/` or
 `/feed/v1/`; and answers `/api/` with a JSON 503 while control restarts.
 

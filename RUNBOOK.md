@@ -138,7 +138,7 @@ The candidate is production's tree as it runs: its uncommitted files, Roku calib
 
 | | Production | Candidate |
 |---|---|---|
-| HTTP | `:8080` on 127.0.0.1, 192.168.1.98, 10.0.0.98 | `:8098`, 127.0.0.1 only |
+| HTTP | `:8080` on 127.0.0.1, 10.0.0.98 | `:8098`, 127.0.0.1 only |
 | DVB source UDP | 18320 | 18420 |
 | Recording taps | 18384+ | 18484+ |
 | Roku verifier tap | 18370 | 18470 |
@@ -263,7 +263,7 @@ git -C "$TV" merge --ff-only "$BRANCH"            # roku_app/'s uncommitted work
 git -C "$TV" log --oneline -1
 sudo systemctl start tv-thing.service
 wait_ready $P digital 120 && wait_ready $P roku 60
-ss -ltnH 'sport = :8080'                          # 127.0.0.1, 192.168.1.98 and 10.0.0.98 (and tailscale's, not ours)
+ss -ltnH 'sport = :8080'                          # 127.0.0.1 and 10.0.0.98 (and tailscale's, not ours)
 sleep 20
 PPID_TV=$(systemctl show -p MainPID --value tv-thing)
 journalctl -u tv-thing --since -5min --no-pager | grep -E 'Reaped|Traceback|FeedConfigError' || echo "clean start"
@@ -384,7 +384,7 @@ Row A1, a restart with nothing changing, only passes after Phase 2. On Phase 1 i
 |---|---|---|
 | `tv-thing-feed` (`deploy/systemd/tv-thing-feed.service`) | `feed_server.py` | 127.0.0.1:8086 |
 | `tv-thing` (`deploy/systemd/tv-thing.service`) | `server.py`, control | 127.0.0.1:8087 |
-| Apache (`deploy/apache/tv-thing-front-door.conf`) | the front door | 127.0.0.1, 192.168.1.98 and 10.0.0.98 on :8080 |
+| Apache (`deploy/apache/tv-thing-front-door.conf`) | the front door | 127.0.0.1 and 10.0.0.98 on :8080 |
 
 - Every client URL stays the same.
 - `viviserv-proxy.conf` is not touched: its `/tv/` already proxies to `127.0.0.1:8080`, which becomes the front door.
