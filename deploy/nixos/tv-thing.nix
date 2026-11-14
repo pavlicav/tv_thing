@@ -123,7 +123,7 @@ in
     extraConfig = ''
       Define TV_THING_FEED_PORT 8086
       Define TV_THING_CONTROL_PORT 8087
-      Define TV_THING_PEER_URL http://10.0.0.98:8080
+      Define TV_THING_PEER_URL http://100.68.34.34:8080
     '' + builtins.readFile "${tv}/deploy/apache/tv-thing-routes.conf";
   };
   # TV Thing at http://viviserv2/tv/ too, on the dashboard's site, as viviserv's main site has it:

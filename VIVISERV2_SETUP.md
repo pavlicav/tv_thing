@@ -13,7 +13,8 @@ It has been running since 2026-10-31. Since 2026-11-03 its checkout is `master`,
 GitHub and never committed to here (section 5). This file says how it was set up, how it is
 run, and what does not work here.
 
-- The Watch page: <http://10.0.0.99:8080/> or <http://viviserv2.local:8080/>.
+- The Watch page: <http://100.70.6.82:8080/> over Tailscale (on the old LAN also
+  <http://10.0.0.99:8080/> or <http://viviserv2.local:8080/>).
 - The Config page (this host's settings and hardware): `/config.html`.
 - The dashboard is still on `:80`, in the same Apache.
 
@@ -30,7 +31,7 @@ run, and what does not work here.
 | GPU | Quadro K4200 (encoder pinned to `cpu`) | Intel UHD 630 (`i915`). Encoder `vaapi` (h264_vaapi, iHD driver) |
 | CPU / RAM | 14 cores / 28 threads at 2.6 GHz | i5-9500: 6 cores / 6 threads, 3.0–4.4 GHz; 15 GiB |
 | Disk | Nearly full boot SSD + 4 TB `/mnt/sda1` for recordings | One 225 GB NVMe. Recordings in `~/tv-recordings` |
-| Address | `10.0.0.98` (static) | `10.0.0.99` on `eno1`, DHCP; also `viviserv2.local` (avahi) |
+| Address | `10.0.0.98` (static); Tailscale `100.68.34.34` | Tailscale `100.70.6.82`; on the old LAN `10.0.0.99` on `eno1`, DHCP, and `viviserv2.local` (avahi) |
 | Front door | Apache, explicit addresses on `:8080`; the main site's `/tv/` proxies to it; Tailscale Serve forwards the tailnet's `:8080` to it | Apache, `*:8080`, sharing the dashboard's Apache on `:80`, whose `/tv/` proxies to it (the dashboard's TV Thing card links there) |
 | Neighbours | VizelVision, Trains, Cairo Radio's audio | None. Cairo Radio and VizelVision media come from viviserv |
 
@@ -49,8 +50,8 @@ Here that gives:
 | Digital tuner | adapter 0 | auto: feed.json's |
 | Video encoder | vaapi | the feed's environment (`tv-thing.nix`) |
 | Recordings folder | `~/tv-recordings` | auto: no `/mnt/sda1/media` here |
-| Primary's address | `10.0.0.98` | `~/.config/tv-thing/host.json` |
-| Peer's address | `10.0.0.98` | auto: a second node pools with its primary (section 4) |
+| Primary's address | `100.68.34.34` (viviserv's Tailscale address) | `~/.config/tv-thing/host.json` |
+| Peer's address | `100.68.34.34` | auto: a second node pools with its primary (section 4) |
 | Second digital tuner | adapter 1 (`digital-b`) | auto: the first DVB adapter besides the digital tuner's |
 | Location | (unset) | the Inputs page's Set location; read on every use, no restart |
 
@@ -251,9 +252,12 @@ an `inpoint` also worked, but needs a playlist file per generation.
 
 viviserv and viviserv2 pool their digital tuners: viviserv's one, and this box's tuner A and
 tuner B. Each box still owns its own tuners, locks and feed; neither ever commands the other's
-feed. They talk only through each other's public front door on `:8080`, so moving to Tailscale
-means changing `peer_host` (Config, both boxes) and the `TV_THING_PEER_URL` Define (here, in
-`/etc/nixos/tv-thing.nix`; on viviserv, in `deploy/apache/tv-thing-front-door.conf`).
+feed. They talk only through each other's public front door on `:8080`, and only over
+Tailscale (viviserv2 is moving to Michigan): `peer_host` (Config, both boxes) and the
+`TV_THING_PEER_URL` Define (here, in `/etc/nixos/tv-thing.nix` from `deploy/nixos/tv-thing.nix`;
+on viviserv, in `deploy/apache/tv-thing-front-door.conf`) are the other box's Tailscale
+address, never its LAN one. viviserv's tailnet `:8080` is Tailscale Serve, forwarding to its
+front door on 127.0.0.1.
 
 - **A live tune** takes, in order: a tuner already playing that channel (watching along, even a
   locked one); a free tuner of this box's, an idle one before a running one; a free tuner of the
@@ -358,9 +362,12 @@ viviserv; that branch is kept locally (`git branch -v`) and no longer used.
 - **Cairo Radio and VizelVision media** come from viviserv (`primary_host`), so they work only
   while viviserv is up. The feed relays VizelVision, so a new `primary_host` reaches it at the
   feed's next restart.
-- **Leaving this LAN.** `peer_host` and `primary_host` can be Tailscale addresses, but
-  `/stream/peer/` is Apache's: `TV_THING_PEER_URL` is a LAN address here and in viviserv's
-  `deploy/apache/tv-thing-front-door.conf`. Both must change before this box moves.
+- **Leaving this LAN.** Since 2026-11-14 everything between the boxes uses Tailscale
+  addresses: `peer_host` and `primary_host` (100.68.34.34 here, 100.70.6.82 on viviserv) and
+  both `TV_THING_PEER_URL` Defines. Every viviserv service this box uses (`:8080`, `:80`,
+  VizelVision's `:6970`, Cairo Radio's `:1615`) answers on its Tailscale address. Each relayed
+  viewer still fetches its own copy across the link (section 4), so the Michigan line's upload
+  limits how many can watch a viviserv2 tuner from viviserv.
 - **The lineup card PDF.** It needs `tectonic` (`pkgs.tectonic`).
 - **Tuner B as the guide and scan tuner**, so the 03:00 and 15:00 guide reads stop interrupting
   live TV on tuner A: not done. Tuner B is a live lane (section 4).
