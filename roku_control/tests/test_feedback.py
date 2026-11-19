@@ -65,6 +65,36 @@ class FeedbackTests(unittest.TestCase):
         with self.assertRaises(NavigationError):
             f._selected_row_bounds(PpmFrame(width, height, bytes(rgb)))
 
+    def test_720p_unlit_station_tile_still_marks_a_guide_row(self):
+        # Since 2026-11-17 YouTube TV no longer lights the focused row's station tile:
+        # it stays dark grey (~24) over the guide's dimmed art (~4), and art behind one
+        # gap can be nearly as bright as the tile.
+        width, height = 1280, 720
+        def guide(tile, right_gap=4):
+            rgb = bytearray([4] * width * height * 3)
+            for y in range(400, 464):
+                rgb[(y*width+80)*3:(y*width+162)*3] = bytes([tile]) * (162-80)*3
+                rgb[(y*width+162)*3:(y*width+174)*3] = bytes([right_gap]) * (174-162)*3
+                rgb[(y*width+174)*3:(y*width+979)*3] = bytes([235]) * (979-174)*3
+            return PpmFrame(width, height, bytes(rgb))
+        f = SnapshotFeedback(FeedbackConfig(ocr_enabled=False))
+        for frame in (guide(24), guide(24, right_gap=13)):
+            top, bottom = f._selected_row_bounds(frame)
+            self.assertTrue(396 <= top <= 400 and 464 <= bottom <= 468, (top, bottom))
+        # The same white highlight with nothing tile-like beside it is still no guide row.
+        with self.assertRaises(NavigationError):
+            f._selected_row_bounds(guide(4))
+
+    def test_720p_unlit_station_tile_real_frames(self):
+        import gzip
+        f = SnapshotFeedback(FeedbackConfig(ocr_enabled=False))
+        fixtures = Path(__file__).parent / 'fixtures'
+        # CBS's The Amazing Race (11/18) and ABC's 7News with the art bright in its right gap (11/17).
+        for name in ('yttv-guide-dark-tile-cbs.ppm.gz', 'yttv-guide-dark-tile-abc-art-in-gap.ppm.gz'):
+            frame = PpmFrame.parse(gzip.decompress((fixtures / name).read_bytes()))
+            self.assertEqual(f._selected_row_bounds(frame), (397, 468), name)
+            self.assertTrue(f.assert_current_program_focus(frame)['matched'], name)
+
     def test_720p_dark_crops_require_wordmark_shape_agreement(self):
         with tempfile.TemporaryDirectory() as directory:
             f = SnapshotFeedback(FeedbackConfig(

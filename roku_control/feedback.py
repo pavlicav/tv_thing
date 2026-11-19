@@ -186,13 +186,21 @@ class VisualFeedback:
 
     @staticmethod
     def _has_guide_station_tile(frame: PpmFrame, top: int, bottom: int) -> bool:
-        """Require the separate, inset station tile beside a program highlight."""
+        """Require the separate, inset station tile beside a program highlight.
+
+        Until mid-November 2026 YouTube TV lit the focused row's tile (luma 70-85). Since
+        2026-11-17 it stays the dark grey of every other tile (luma 16-35), with the guide's
+        dimmed programme art behind it showing through the gaps. So the tile is told by its
+        edges, each corner against the gap just outside it, not by being bright, and not
+        against the brightest gap anywhere (art behind one gap is no reason to doubt the tile).
+        """
         ys = (top + 9, bottom - 9)
         corners = [frame.mean_luma(int(frame.width*x), y, int(frame.width*x)+3, y+3)
                    for x in (.066, .121) for y in ys]
         surrounds = [frame.mean_luma(int(frame.width*x), y, int(frame.width*x)+3, y+3)
                      for x in (.056, .132) for y in ys]
-        return min(corners) >= 35 and max(corners)-min(corners) <= 35 and min(corners)-max(surrounds) >= 12
+        return (min(corners) >= 14 and max(corners)-min(corners) <= 35
+                and min(c - s for c, s in zip(corners, surrounds)) >= 10)
 
     @staticmethod
     def _guide_row_geometry(frame: PpmFrame) -> tuple[int, int]:
