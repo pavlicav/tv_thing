@@ -399,9 +399,63 @@ lanes = {name: new_lane_state() for name in ALL_LANES}
 # The feed's own record of each lane: its revision and lifecycle, this run's epoch, and
 # the commands applied (feed_node.py). Every start, stop and crash below reports to it.
 feed = feed_node.FeedNode(FEED_CONFIG)
+
+
+class ControlFeed(feed_api.RemoteFeed):
+    """RemoteFeed, for a feed that lacks one of control's lanes.
+
+    Control and the feed each resolve tuner B (host_config's tuner_b) at their own start, from
+    the DVB adapters there then. A feed that started before the USB tuner enumerated has no
+    digital-b, and a control restarted after it has (viviserv2, 2026-11-22: every API request,
+    and both samplers, failed on ``KeyError: 'digital-b'``). Such a lane reads as unknown, as
+    every lane of a feed that is not answering does (RemoteFeed._unknown): never free, never
+    chosen, never sampled. Stopping it is a no-op (nothing of it runs) and tuning it is
+    refused as the feed not answering (503). When the feed has it, after a feed restart, it
+    reads as the feed says, with no restart of control. A lane the feed has and control does
+    not (control started first) is the feed's alone: control never uses it.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._absent = frozenset()
+
+    def snapshot(self, max_age=None):
+        snap = super().snapshot(max_age)
+        if snap.get("unknown"):
+            return snap                # every lane of control's is in it, unknown
+        absent = frozenset(lane.id for lane in self.config.lanes if lane.id not in snap["lanes"])
+        with self._lock:
+            changed, self._absent = absent != self._absent, absent
+        if changed:
+            print(f"Feed: the feed has no {', '.join(sorted(absent))}: it started without that "
+                  "tuner, which reads as unknown until tv-thing-feed restarts" if absent else
+                  "Feed: the feed has every lane of control's", flush=True)
+        if not absent:
+            return snap
+        lanes = dict(snap["lanes"])
+        for lane in absent:
+            lanes[lane] = {**self.blank_state(),
+                           "running": True, "alive": False, "ready": False, "lifecycle": "unknown",
+                           "revision": None, "navigating": False, "unknown": True, "absent": True,
+                           "error": f"the feed has no {lane}: it started without this tuner"}
+        return {**snap, "lanes": lanes}
+
+    def lacks(self, lane):
+        return bool(self.snapshot()["lanes"][lane].get("absent"))
+
+    def stop(self, lane):
+        if not self.lacks(lane):
+            super().stop(lane)
+
+    def tune_digital(self, channel, quality, taps=(), lane=LANE_DIGITAL):
+        if self.lacks(lane):
+            raise feed_api.FeedUnavailable(f"the feed has no {lane}: it started without this tuner")
+        return super().tune_digital(channel, quality, taps=taps, lane=lane)
+
+
 # The control plane's only way to the feed: its lanes' state, and every change to them.
 # In one process it calls the functions below; split, it speaks HTTP (see INVARIANTS.md).
-feed_client = (feed_api.RemoteFeed(FEED_URL, FEED_CONFIG, new_lane_state) if ROLE == "control"
+feed_client = (ControlFeed(FEED_URL, FEED_CONFIG, new_lane_state) if ROLE == "control"
                else feed_node.LocalFeed(feed, sys.modules[__name__]))
 # The feed's /feed/v1/, which RemoteFeed asks (the feed role only).
 feed_http = feed_api.FeedAPI(feed_client) if ROLE == "feed" else None

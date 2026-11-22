@@ -1,8 +1,16 @@
 """Tuner B: a second DVB adapter as a live-only lane (host_config's tuner_b, digital-b)."""
+import io
+import json
+import threading
+import urllib.error
+import urllib.request
 from dataclasses import replace
+from http.server import ThreadingHTTPServer
+from types import SimpleNamespace
 
 import pytest
 
+import feed_api
 import feed_node
 import server
 
@@ -192,3 +200,167 @@ def test_a_source_that_never_locks_leaves_its_reason_on_the_lane(tuner_b, monkey
     state = server.lanes["digital-b"]
     assert state["selection"] is None and not state["active"]
     assert state["error"] == "Could not retrieve signal for WUSA-HD (RF 9): the antenna got no lock in 3 s"
+
+
+# -- a feed that started without tuner B ------------------------------------------------------
+# viviserv2, 2026-11-22: the WinTV-dualHD enumerated after the services started, so the feed
+# had no digital-b; control, restarted later, had. Every API request failed on KeyError.
+
+class _Response(io.BytesIO):
+    status = 200
+
+
+class FakeFeedHTTP:
+    """The feed's /feed/v1/ as RemoteFeed's opener: its snapshot, and every request asked."""
+
+    def __init__(self, snapshot):
+        self.snap, self.asked = snapshot, []
+
+    def __call__(self, request, timeout=None):
+        path = request.full_url.split(feed_api.PREFIX, 1)[1]
+        self.asked.append((request.get_method(), path))
+        if path == "lanes":
+            body = self.snap
+        elif path.endswith("/tune"):
+            body = {"result": [True, None, False]}
+        else:
+            body = {}
+        return _Response(json.dumps(body).encode())
+
+
+def feed_snapshot(config):
+    """What a feed started with ``config`` answers at GET /feed/v1/lanes, over the wire."""
+    return json.loads(json.dumps(feed_node.LocalFeed(feed_node.FeedNode(config), server).snapshot(), default=str))
+
+
+@pytest.fixture
+def feed_without_b(tuner_b, monkeypatch):
+    """Control with tuner B (the tuner_b fixture), its feed without: started before adapter 1."""
+    fake = FakeFeedHTTP(feed_snapshot(BASE_CONFIG))
+    assert "digital-b" not in fake.snap["lanes"] and "digital" in fake.snap["lanes"]
+    remote = server.ControlFeed("http://127.0.0.1:1/", tuner_b, server.new_lane_state,
+                                cache_seconds=0, opener=fake, sleep=lambda s: None)
+    monkeypatch.setattr(server, "feed_client", remote)
+    monkeypatch.setattr(server, "peer", None)
+    monkeypatch.setattr(server, "scanning", False)
+    monkeypatch.setattr(server, "tuning_lanes", set())
+    monkeypatch.setattr(server, "active_lock", lambda lane, now=None: None)
+    return SimpleNamespace(remote=remote, http=fake)
+
+
+BASE_CONFIG = server.FEED_CONFIG
+
+
+def test_a_lane_the_feed_lacks_reads_unknown_never_free(feed_without_b, capsys):
+    remote = feed_without_b.remote
+    b = remote.lane("digital-b")
+    assert b["unknown"] and b["absent"] and b["lifecycle"] == "unknown"
+    # Busy and broken, as every lane of a feed that is not answering: never free.
+    assert b["running"] and not b["alive"] and not b["ready"] and b["selection"] is None
+    assert "has no digital-b" in b["error"]
+    a = remote.lane("digital")
+    assert not a.get("unknown") and not a.get("absent")
+    assert remote.status()["lanes"]["digital-b"]["lifecycle"] == "unknown"
+    # What runs is the feed's word: nothing of digital-b does.
+    assert "digital-b" not in remote.running_lanes()
+    remote.lane("digital-b")
+    assert capsys.readouterr().out.count("the feed has no digital-b") == 1    # said once
+
+
+def test_stopping_a_lane_the_feed_lacks_asks_nothing_and_tuning_it_is_refused(feed_without_b):
+    remote, http = feed_without_b.remote, feed_without_b.http
+    remote.stop("digital-b")
+    assert [path for method, path in http.asked if method == "POST"] == []
+    remote.stop_all()                         # every lane but digital-b, and no 404 from the feed
+    stopped = [path for method, path in http.asked if method == "POST"]
+    assert stopped == [f"lanes/{lane.id}/stop" for lane in BASE_CONFIG.lanes]
+    with pytest.raises(feed_api.FeedUnavailable, match="no digital-b"):
+        remote.tune_digital(WUSA, "low", lane="digital-b")
+    assert not any(path == "lanes/digital-b/tune" for _, path in http.asked)
+    assert remote.tune_digital(WUSA, "low", lane="digital") == (True, None, False)
+
+
+def test_the_pool_and_the_samplers_pass_over_a_lane_the_feed_lacks(feed_without_b, monkeypatch, capsys):
+    tuners = {tuner["lane"]: tuner for tuner in server.local_tuners()}
+    b = tuners["digital-b"]
+    assert not b["reachable"] and not b["available"] and b["state"] == "unknown"
+    assert tuners["digital"]["reachable"] and tuners["digital"]["available"]
+    server.sample_signals()
+    server.sample_av_skew()
+    assert "could not" not in capsys.readouterr().out
+    assert not any("digital-b" in path for _, path in feed_without_b.http.asked)
+    # Tuner A locked, no peer: tuner B is not chosen, and nothing is tuned.
+    now = server.time.time()
+    lock = {"lane": "digital", "owner": "VCR", "token": "t", "acquired_at": now, "expires_at": now + 600}
+    monkeypatch.setattr(server, "active_lock", lambda lane, now=None: lock if lane == "digital" else None)
+    monkeypatch.setattr(server, "load_channels", lambda: [WUSA])
+    asked = []
+    monkeypatch.setattr(server, "perform_digital_tune",
+                        lambda channel_id, quality, token=None, override=False, lane="digital":
+                        asked.append(lane) or ({"ok": True}, 200))
+    payload, status = server.api_v1_digital_tune({"channel_id": "wusa_hd_9_1"}, "low")
+    assert asked == [] and status == 423, payload
+
+
+def test_the_api_answers_with_a_lane_the_feed_lacks(feed_without_b, monkeypatch):
+    monkeypatch.setattr(server, "tuner_locks", {})
+    monkeypatch.setattr(server, "load_channels", lambda: [WUSA])
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.TVHandler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+
+    def request(path, payload=None):
+        req = urllib.request.Request(f"http://127.0.0.1:{httpd.server_port}{path}",
+                                     data=None if payload is None else json.dumps(payload).encode(),
+                                     headers={"Content-Type": "application/json"})
+        try:
+            response = urllib.request.urlopen(req, timeout=5)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            return response.status, json.load(response)
+
+    try:
+        status, payload = request("/api/v1/status")
+        assert status == 200, payload
+        lanes = {lane["id"]: lane for lane in payload["lanes"]} if isinstance(payload["lanes"], list) \
+            else payload["lanes"]
+        assert lanes["digital-b"]["lifecycle"] == "unknown"
+        status, payload = request("/api/v1/tuners")
+        assert status == 200, payload
+        b = next(tuner for tuner in payload["tuners"] if tuner["lane"] == "digital-b")
+        assert b["state"] == "unknown" and not b["available"]
+        # Named, tuner B is refused as a feed that is not answering, not a 500.
+        status, payload = request("/api/v1/tune", {"source": "digital", "channel_id": "wusa_hd_9_1",
+                                                   "tuner": server.tuner_id("digital-b")})
+        assert status == 503, payload
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=3)
+
+
+def test_the_lane_reads_as_the_feed_says_once_the_feed_has_it(feed_without_b, tuner_b, capsys):
+    remote, http = feed_without_b.remote, feed_without_b.http
+    assert remote.lane("digital-b")["absent"]
+    http.snap = feed_snapshot(tuner_b)          # the feed restarted after adapter 1 came up
+    b = remote.lane("digital-b")
+    assert not b.get("absent") and not b.get("unknown") and b["lifecycle"] != "unknown"
+    assert next(t for t in server.local_tuners() if t["lane"] == "digital-b")["reachable"]
+    remote.stop("digital-b")
+    assert ("POST", "lanes/digital-b/stop") in http.asked
+    assert "the feed has every lane of control's" in capsys.readouterr().out
+
+
+def test_a_feed_not_answering_still_reads_every_lane_unknown(feed_without_b):
+    remote = feed_without_b.remote
+
+    def down(request, timeout=None):
+        raise feed_api.URLError("connection refused")
+
+    remote.opener = down
+    snap = remote.snapshot()
+    assert snap["unknown"] and set(snap["lanes"]) == {lane.id for lane in remote.config.lanes}
+    assert not snap["lanes"]["digital-b"].get("absent")
+    with pytest.raises(feed_api.FeedUnavailable):
+        remote.stop("digital-b")

@@ -297,7 +297,11 @@ front door on 127.0.0.1.
   has fetched one of its segments for five minutes (`TV_THING_EXTRA_TUNER_IDLE_SECONDS`) and it
   is unlocked, which leaves it idle: the pool's first choice for the next tune here. The scan,
   the guide read, the DX meter and the VCR stay on tuner A. `TV_THING_TUNER_B=off` in a unit's
-  environment, or `tuner_b: off` on the Config page, takes it away.
+  environment, or `tuner_b: off` on the Config page, takes it away. The feed and control each
+  take it from the adapters there when they start, so a feed that started before the dualHD came
+  up has none while a control started after it does: control then reads `digital-b` as unknown
+  (never chosen; its journal says "the feed has no digital-b") until `tv-thing-feed` is restarted,
+  when nothing is recording.
 
 ```bash
 curl -s http://127.0.0.1:8080/api/v1/tuners | python3 -m json.tool      # the pool, as this box sees it
