@@ -891,23 +891,46 @@ def load_tsids():
         return {}
 
 
-def save_reception(scanned, received):
+def load_reception_names():
+    """``{rf: [PSIP names]}``: what each RF channel this node received was called when scanned
+    (the market setting's auto reads their call signs: host_config.detect_market)."""
+    try:
+        return {int(rf): [str(name) for name in names]
+                for rf, names in (_reception().get("names") or {}).items() if isinstance(names, list)}
+    except (AttributeError, TypeError, ValueError):
+        return {}
+
+
+def save_reception(scanned, received, names=None):
     """A scan's reception: the RF channels it ``scanned`` are replaced by those it ``received``,
-    ``{rf: TSID or None}``. Never scanned before, the rest of the plan's are kept, as the
-    primary takes them (local_tuners)."""
+    ``{rf: TSID or None}``, with the PSIP ``names`` heard on each (``{rf: [names]}``). Never
+    scanned before, the rest of the plan's are kept, as the primary takes them (local_tuners)."""
     known = load_reception()
     if known is None:
         known = {channel.get("rf_channel") for channel in load_channels()} - {None}
     kept = (set(known) - set(scanned)) | set(received)
     tsids = {rf: tsid for rf, tsid in load_tsids().items() if rf not in scanned}
     tsids.update((rf, tsid) for rf, tsid in received.items() if tsid is not None)
+    heard = {rf: found for rf, found in load_reception_names().items() if rf not in scanned and rf in kept}
+    heard.update((rf, list(found)) for rf, found in (names or {}).items() if rf in received and found)
     path = RECEPTION_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(".tmp")
     temp.write_text(json.dumps({"node": FEED_CONFIG.node, "scanned_at": round(time.time()),
                                 "rf_channels": sorted(kept),
-                                "tsids": {str(rf): tsids[rf] for rf in sorted(tsids)}}, indent=2) + "\n")
+                                "tsids": {str(rf): tsids[rf] for rf in sorted(tsids)},
+                                "names": {str(rf): heard[rf] for rf in sorted(heard)}}, indent=2) + "\n")
     os.replace(temp, path)
+
+
+def receivable(channels):
+    """The plan's ``channels`` this node's antenna got at its last scan (tuner_pool.receives),
+    in order; all of them on a node that never scanned (local_tuners)."""
+    reception = load_reception()
+    if reception is None:
+        return list(channels)
+    antenna = {"rf_channels": reception, "tsids": {str(rf): tsid for rf, tsid in load_tsids().items()}}
+    return [channel for channel in channels if tuner_pool.receives(antenna, channel)]
 
 
 def local_tuners():
@@ -1282,6 +1305,18 @@ def away():
     return MARKET != home_market()
 
 
+def refresh_market():
+    """Resolve the market setting again (host_config): a second node with none set takes its
+    market from its last scan, so a rescan that hears another city's stations moves it there
+    at once, before the scan's plan is saved (own_plan_file). A market that is set (the Config
+    page, the unit's environment) stays as it is."""
+    global MARKET
+    if HOST.get("market").source == "auto":
+        HOST._cache.pop("market", None)
+        MARKET = HOST.value("market")
+    return MARKET
+
+
 def own_plan_file():
     """Where this box's plan is written (a rescan): its own, untracked channels.json."""
     return AWAY_CHANNELS_FILE if away() else CHANNELS_FILE
@@ -1617,8 +1652,13 @@ def save_channels(channels):
 
 
 def load_playback_state():
-    """Return the saved channel and quality, falling back to channel one."""
-    channels = load_channels()
+    """Return the saved channel and quality, falling back to channel one.
+
+    Only a channel of this box's own plan that its antenna got at its last scan (receivable):
+    a box moved to another city, or one whose rescan lost an RF channel, never keeps a station
+    it cannot receive buffering forever. Away from the home market its channels go by their
+    ids on the dial, ``<market>/<id>`` (own_channel), as a tune would give them."""
+    channels = receivable(load_channels())
     if not channels:
         return None, "medium"
 
@@ -1630,7 +1670,12 @@ def load_playback_state():
         pass
 
     channel_id = saved.get("channel_id")
+    prefix = f"{MARKET}/" if away() else None
+    if prefix and isinstance(channel_id, str) and channel_id.startswith(prefix):
+        channel_id = channel_id[len(prefix):]
     channel = next((c for c in channels if c["id"] == channel_id), channels[0])
+    if prefix:
+        channel = dict(channel, id=prefix + channel["id"])
     quality = saved.get("quality", "medium")
     if quality not in QUALITY_PRESETS:
         quality = "medium"
@@ -7325,7 +7370,12 @@ class TVHandler(SimpleHTTPRequestHandler):
             elapsed = time.monotonic() - scan_started
             channels = channels_from_scan(found)
             if channels:
-                save_reception(channels_to_scan, {result["rf_channel"]: result.get("tsid") for result in found})
+                save_reception(channels_to_scan, {result["rf_channel"]: result.get("tsid") for result in found},
+                               {result["rf_channel"]: [service.get("name") for service in result["virtual_channels"]
+                                                       if service.get("name")] for result in found})
+                # Where its antenna is now (a second node with no market set finds it from
+                # this scan's stations: host_config.detect_market).
+                refresh_market()
                 # The home market's plan is the primary's: a second node there says what
                 # its antenna gets (its reception) and leaves the plan as it is. A box in
                 # another market owns its market's plan (own_plan_file).
@@ -7333,6 +7383,7 @@ class TVHandler(SimpleHTTPRequestHandler):
                     save_channels(channels)
                 send_sse("done", {
                     "ok": True,
+                    "market": MARKET,
                     "count": len(channels),
                     "frequencies": len(found),
                     "scanned": total,

@@ -1042,7 +1042,7 @@ starts from (copy one to its own name to change it). The shared default:
 |---|---|
 | 0–9 | Our channels: VizelVision on 0, Trains (Cab Ride) on 1, pen2live (Yle's puppy cam) on 2, CFL+ on 3 (hazel's `cflplus.service` on `127.0.0.1:8795`: live CFL+ games for the 2026 Division Finals and Grey Cup only, its games on the Sports Guide), VizelVision's Sports Guide on 6 (see [The Sports Guide](#the-sports-guide-channel-6)); 4–5 and 7–9 held for more |
 | 10–24 | Washington & Baltimore: NHK World first on 10, then each network on the number ending in its channel on the air (14 NBC 4, 15 FOX 5, 17 ABC 7, 19 CBS 9), a station's second channel right after it, then ION, Univision, Telemundo, WDVM and Baltimore's CW |
-| 25–39 | Michigan, in the Lansing and Flint dial's order, held for viviserv2's antenna in Lansing (the Roku's Lansing locals from YouTube TV had 26 CBS, 27 NBC, 30 PBS, 32 FOX, 34 ABC, 35 The CW until 2026-11-07) |
+| 25–39 | Michigan, in the Lansing and Flint dial's order: viviserv2's antenna in mid-Michigan (`digital@lansing`): 25 WNEM, 26 WLNS, 27 WILX, 28 WJRT, 29 WDCQ, 30 WKAR, 31 NBC 25, 32–33 WSYM, 34–35 WLAJ, 36 FOX 66, 37 WAQP; 38–39 free (the Roku's Lansing locals from YouTube TV had 26 CBS, 27 NBC, 30 PBS, 32 FOX, 34 ABC, 35 The CW until 2026-11-07) |
 | 40–59 | Sports cable from YouTube TV: TBS, TNT, the ESPNs and the rest in their old order, then USA and truTV |
 | 60–69 | News and more: CNN, MS NOW, FOX News, CNBC, the Weather Channel, Discovery, HGTV, Smithsonian, FX, Comedy Central |
 | 70 | VizelVision again |
@@ -1053,8 +1053,9 @@ starts from (copy one to its own name to change it). The shared default:
 | 300–349 | New on the antenna |
 | 350–369 | New on YouTube TV |
 | 370–379 | New internet streams |
-| 380–399 | Held for a Michigan receiver's subchannels |
-| 400 up | Overflow |
+| 380–429 | Michigan extras: the Michigan antenna's subchannels on 380–406, station by station; its other finds, DX included, from 407 |
+| 430–449 | Other cities' antennas (and Michigan's, once its extras are full) |
+| 450 up | Overflow |
 
 A few channels are off the dial (`hidden` in `lineup.json`): TLC, All Reality We
 TV, Busted, and the antenna's second copies of HSN2 and Shop LC. They have no

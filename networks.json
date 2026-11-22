@@ -4,7 +4,8 @@
     "antenna_market: the antenna's, its stations by virtual channel number. youtube_tv_market: where YouTube TV places the Roku, whose stations are YouTube TV's network rows (NBC, FOX...). If YouTube TV moves the Roku, change youtube_tv_market (Lansing until 2026-11-07, DC since; Lansing stays for viviserv2's antenna there).",
     "A market's name is how messages name its city, its label how blackout notes name the market. A station's label is how messages name it (its call sign unless given); aliases are other names a schedule gives its network.",
     "nfl_teams: the teams whose regional Sunday CBS and FOX games the market's stations carry. nhl_teams: the teams ESPN Unlimited blacks out when YouTube TV places the Roku there.",
-    "affiliates: other stations the antenna gets, by channel, and their network (WNUV is Baltimore's CW). simulcasts: a team's games on a national cable channel that the market's station also airs, channel -> call sign."
+    "affiliates: other stations the antenna gets, by channel, and their network (WNUV is Baltimore's CW). simulcasts: a team's games on a national cable channel that the market's station also airs, channel -> call sign.",
+    "call_signs: every station a box's antenna gets in the market, besides its network stations. A second node with no market set takes the market whose call signs its last scan heard (host_config.detect_market): mid-Michigan's list holds Lansing's and Flint-Saginaw's, which viviserv2's antenna gets together."
   ],
   "antenna_market": "dc",
   "youtube_tv_market": "dc",
@@ -23,6 +24,7 @@
         "Telemundo": {"call_sign": "WZDC", "antenna": "44.1"}
       },
       "affiliates": {"54.1": "CW"},
+      "call_signs": ["WETA", "WHUT", "WDCA", "WDVM", "WDCO", "WMPT", "WNUV"],
       "nfl_teams": ["WSH", "BAL"],
       "nhl_teams": ["WSH"],
       "simulcasts": {"WSH": {"NFL Network": "WTTG"}}
@@ -37,6 +39,7 @@
         "CBS": {"call_sign": "WLNS"},
         "CW": {"call_sign": "WLAJ-DT2", "aliases": ["The CW"]}
       },
+      "call_signs": ["WKAR", "WJRT", "WNEM", "WSMH", "WEYI", "WDCQ", "WBSF", "WAQP"],
       "nfl_teams": ["DET"],
       "nhl_teams": ["DET"]
     }

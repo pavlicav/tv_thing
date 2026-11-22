@@ -63,6 +63,78 @@ def roku_config_file(environ=os.environ):
     return Path(environ.get("TV_THING_ROKU_CONFIG", str(BASE_DIR / "roku.json")))
 
 
+def state_dir(environ=os.environ):
+    """server.py's STATE_DIR: this box's reception and its peer's plan."""
+    return Path(environ.get("TV_THING_STATE_DIR", str(BASE_DIR / "state")))
+
+
+def _read_json(path):
+    try:
+        return json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return None
+
+
+# -- which market a box's antenna is in (the market setting's auto) ----------------------------
+def call_sign_matches(name, call_sign):
+    """Whether a PSIP short name (``WLNS-TV``, ``WKAR HD``, ``WKARWLD``) is ``call_sign``'s
+    station. A call sign's own suffix is dropped (``WLAJ-DT2`` is WLAJ's); a three-letter one
+    (WRC) must end where the name's letters do, so WRC never takes ``WRCB``."""
+    name = str(name or "").strip().upper()
+    call = str(call_sign or "").strip().upper().split("-")[0]
+    if len(call) < 3 or not name.startswith(call):
+        return False
+    return len(call) >= 4 or len(name) == len(call) or not name[len(call)].isalpha()
+
+
+def detect_market(reception, home_tsids, markets):
+    """The market a second node's antenna is in, from its last scan.
+
+    ``reception`` is its reception.json (``tsids``: {rf: TSID}, ``names``: {rf: [PSIP names]});
+    ``home_tsids`` the TSIDs of the home market's plan; ``markets`` {market id: [call signs]}.
+    Returns None for the home market: never scanned, or the scan heard one of the home plan's
+    stations (a TSID is one station's, nationwide). Otherwise the market whose call signs the
+    most received RF channels carry, the first listed on a tie; "" when none does (a city no
+    market describes yet: the caller names it)."""
+    reception = reception if isinstance(reception, dict) else {}
+    try:
+        heard = {int(tsid) for tsid in (reception.get("tsids") or {}).values()}
+    except (AttributeError, TypeError, ValueError):
+        heard = set()
+    if not heard or heard & set(home_tsids or ()):
+        return None
+    names = reception.get("names") if isinstance(reception.get("names"), dict) else {}
+    best, best_count = "", 0
+    for market, calls in markets.items():
+        count = sum(1 for rf_names in names.values() if isinstance(rf_names, list)
+                    and any(call_sign_matches(name, call) for name in rf_names for call in calls))
+        if count > best_count:
+            best, best_count = market, count
+    return best
+
+
+def market_name(text):
+    """``text`` (a node's name) as a market's short name."""
+    name = re.sub(r"[^a-z0-9-]+", "-", str(text or "").lower()).strip("-")[:24].rstrip("-")
+    return name if _MARKET.fullmatch(name) else "away"
+
+
+def market_call_signs(path=BASE_DIR / "networks.json"):
+    """``{market id: [call signs]}`` from networks.json: each market's ``call_signs`` (every
+    station its antenna gets there) and its network stations' own."""
+    document = _read_json(path)
+    markets = document.get("markets") if isinstance(document, dict) else None
+    out = {}
+    for market, raw in (markets or {}).items():
+        if not isinstance(raw, dict):
+            continue
+        calls = [call for call in raw.get("call_signs") or () if isinstance(call, str)]
+        calls += [entry.get("call_sign") for entry in (raw.get("stations") or {}).values()
+                  if isinstance(entry, dict) and isinstance(entry.get("call_sign"), str)]
+        out[market] = calls
+    return out
+
+
 @dataclass(frozen=True)
 class Setting:
     id: str
@@ -130,7 +202,10 @@ SETTINGS = (
             "The city whose stations this box's antenna gets, as a short name (dc, lansing). The "
             "dial's antenna channels are the home market's (the primary's market) plus each "
             "other market's own: a box in another market keeps its own plan, from its own "
-            "scans, and its channels are numbered and played by it. Auto: dc."),
+            "scans, and its channels are numbered and played by it. Auto: dc on the primary; on "
+            "a second node, from its last scan: the primary's market while its antenna gets the "
+            "primary's stations, else the market whose call signs it heard (networks.json), else "
+            "the node's name. A rescan finds it again, at once."),
 )
 BY_ID = {setting.id: setting for setting in SETTINGS}
 
@@ -458,7 +533,27 @@ class Host:
         value, source = self._given("market")
         if value:
             return Resolved(str(value), source, "set")
-        return Resolved(DEFAULT_MARKET, source or "auto", "the home city")
+        if self.primary:
+            return Resolved(DEFAULT_MARKET, source or "auto", "the home city")
+        # A second node's antenna may be anywhere: its last scan says where (detect_market).
+        state = state_dir(self.environ)
+        primary = _read_json(state / "peer_plan.json")
+        primary = primary if isinstance(primary, dict) and primary.get("primary") else {}
+        home = primary.get("market") if isinstance(primary.get("market"), str) else DEFAULT_MARKET
+        rows = [row for row in primary.get("rows") or () if isinstance(row, dict)]
+        for plan in (BASE_DIR / "channels.json", BASE_DIR / "channels.default.json"):
+            loaded = _read_json(plan)
+            rows += [row for row in loaded if isinstance(row, dict)] if isinstance(loaded, list) else []
+        home_tsids = {row["tsid"] for row in rows if isinstance(row.get("tsid"), int)}
+        found = detect_market(_read_json(state / "reception.json"), home_tsids, market_call_signs())
+        if found is None:
+            return Resolved(home, source or "auto", "the home city: its antenna gets the primary's stations "
+                            "(or has not scanned)")
+        if found:
+            return Resolved(found, "auto", f"its last scan heard {found}'s stations, none of the home city's")
+        return Resolved(market_name(self.value("node")), "auto",
+                        "its last scan heard none of the home city's stations, nor a market networks.json "
+                        "lists: named after this node")
 
     def _resolve_location(self):
         value, source = self._given("location")

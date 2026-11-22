@@ -216,23 +216,41 @@ def test_a_second_nodes_rescan_keeps_the_shared_plan(monkeypatch):
     monkeypatch.setattr(server.HOST, "_cache", {**server.HOST._cache,
                                                 "role": server.host_config.Resolved("second", "auto", "")})
     monkeypatch.setattr(server, "save_channels", saved.append)
-    monkeypatch.setattr(server, "save_reception", lambda scanned, got: received.append((list(scanned), got)))
+    monkeypatch.setattr(server, "save_reception",
+                        lambda scanned, got, names=None: received.append((list(scanned), got, names)))
     _run_rescan(monkeypatch)
-    assert saved == [] and received == [([7, 8], {8: None})]
+    assert saved == [] and received == [([7, 8], {8: None}, {8: ["W8-HD"]})]
 
 
 def test_a_box_in_another_market_owns_its_plan(monkeypatch, tmp_path):
     saved = []
     monkeypatch.setattr(server.HOST, "_cache", {**server.HOST._cache,
-                                                "role": server.host_config.Resolved("second", "auto", "")})
+                                                "role": server.host_config.Resolved("second", "auto", ""),
+                                                "market": server.host_config.Resolved("lansing", "file", "set")})
     monkeypatch.setattr(server, "MARKET", "lansing")
     monkeypatch.setattr(server, "save_channels", saved.append)
-    monkeypatch.setattr(server, "save_reception", lambda scanned, got: None)
+    monkeypatch.setattr(server, "save_reception", lambda scanned, got, names=None: None)
     _run_rescan(monkeypatch)
     assert saved == [[{"id": "w8", "rf_channel": 8}]]
 
 
-def _run_rescan(monkeypatch):
+def test_a_second_node_with_no_market_set_moves_to_the_one_its_scan_heard(monkeypatch, tmp_path):
+    """viviserv2 driven to Michigan: its rescan hears none of DC's stations and Lansing's call
+    signs, so it is in Lansing from that scan on, and keeps the scan as its own plan."""
+    saved = []
+    monkeypatch.setattr(server.HOST, "_cache", {
+        key: value for key, value in server.HOST._cache.items() if key != "market"}
+        | {"role": server.host_config.Resolved("second", "auto", "")})
+    monkeypatch.setattr(server, "peer", None)
+    monkeypatch.setattr(server, "save_channels", saved.append)
+    output = _run_rescan(monkeypatch, name="WLNS-TV", tsid=1527)
+    assert server.MARKET == "lansing" and server.away()
+    assert saved == [[{"id": "w8", "rf_channel": 8}]]
+    assert '"market": "lansing"' in output
+    assert json.loads(server.RECEPTION_FILE.read_text())["names"] == {"8": ["WLNS-TV"]}
+
+
+def _run_rescan(monkeypatch, name="W8-HD", tsid=None):
     from io import BytesIO
     import feed_node
     monkeypatch.setattr(server, "scanning", False)
@@ -245,7 +263,8 @@ def _run_rescan(monkeypatch):
     monkeypatch.setattr(feed_node.os, "close", lambda fd: None)
     monkeypatch.setattr(server.atsc_scan, "scan_channel", lambda rf, **_: {
         "rf_channel": rf, "frequency_hz": rf * 1_000_000, "frequency_mhz": float(rf), "locked": rf == 8,
-        "snr_db": 20.0, "signal_percent": 50, "virtual_channels": [{"number": "8.1"}] if rf == 8 else []})
+        "snr_db": 20.0, "signal_percent": 50, "tsid": tsid if rf == 8 else None,
+        "virtual_channels": [{"number": "8.1", "name": name}] if rf == 8 else []})
     monkeypatch.setattr(server, "channels_from_scan", lambda found: [{"id": "w8", "rf_channel": 8}] if found else [])
     handler = server.TVHandler.__new__(server.TVHandler)
     handler.path = "/api/rescan/stream?start=7&end=8"

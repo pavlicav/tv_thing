@@ -2,6 +2,7 @@
 is the home market's channels then each other market's (server.antenna_dial); only a box in a
 station's market plays it (tuner_pool.in_market)."""
 import json
+from pathlib import Path
 
 import pytest
 
@@ -146,8 +147,8 @@ def test_away_the_dial_has_the_primarys_channels_and_this_boxs_own(lansing):
         ("digital", "4.1", "wrc_hd_4_1"), ("digital", "5.1", "wttg_5_1"),
         ("digital@lansing", "6.1", "lansing/wlns_6_1")]
     assert dial[0][2]["node"] == "dc-primary" and dial[0][2]["tv_number"] == 14
-    # Numbered here, in the other cities' section.
-    assert dial[2][2]["tv_number"] == 400 and "node" not in dial[2][2]
+    # Numbered here, in the Michigan block (lineup.json's digital@lansing/6.1).
+    assert dial[2][2]["tv_number"] == 26 and "node" not in dial[2][2]
 
 
 def test_away_this_boxs_tuners_play_only_its_own_markets_channels(lansing):
@@ -157,16 +158,18 @@ def test_away_this_boxs_tuners_play_only_its_own_markets_channels(lansing):
 
 
 def test_away_a_scan_saves_this_boxs_own_plan_not_the_tracked_one(lansing):
-    tracked = server.CHANNELS_FILE.read_text()
+    # The home plan file, this box's own (untracked: none in a fresh checkout), is left as it was.
+    home_plan = lambda: server.CHANNELS_FILE.read_text() if server.CHANNELS_FILE.exists() else None  # noqa: E731
+    tracked = home_plan()
     server.save_channels(LANSING + [{"id": "wilx_10_1", "number": "10.1"}])
     assert [row["id"] for row in json.loads(lansing.read_text())] == ["wlns_6_1", "wilx_10_1"]
-    assert server.CHANNELS_FILE.read_text() == tracked
+    assert home_plan() == tracked
 
 
 def test_the_plan_a_box_serves(lansing):
     plan = server.api_v1_plan()
     assert (plan["node"], plan["market"], plan["primary"]) == (server.FEED_CONFIG.node, "lansing", False)
-    assert [(row["key"], row["id"], row["tv_number"]) for row in plan["rows"]] == [("6.1", "wlns_6_1", 400)]
+    assert [(row["key"], row["id"], row["tv_number"]) for row in plan["rows"]] == [("6.1", "wlns_6_1", 26)]
     assert plan["revision"].startswith("lansing:")
 
 
@@ -178,7 +181,155 @@ def test_a_market_is_a_short_name():
             host_config.check("market", bad)
 
 
-def test_another_markets_new_channels_take_the_other_cities_section():
-    plan = lineup.parse_plan(json.loads(server.LINEUP_FILE.read_text()))
-    assert plan.new_section("digital@lansing").name == "Other cities' antennas"
+def test_another_markets_new_channels_take_their_own_section_then_the_other_cities():
+    plan = lineup.parse_plan(json.loads(Path(lineup.local_or_default(server.LINEUP_FILE)).read_text()))
+    assert plan.new_section("digital@lansing").name == "Michigan extras"
+    assert [s.name for s in plan.new_sections("digital@lansing")] == ["Michigan extras", "Other cities' antennas"]
+    assert plan.new_section("digital@toledo").name == "Other cities' antennas"
     assert plan.new_section("digital").name == "New on the antenna"
+    assert [s.name for s in plan.new_sections("digital")] == ["New on the antenna"]
+
+
+# -- a box that moves: the market from its own scan (host_config.detect_market) ----------------
+# viviserv2's first scan in mid-Michigan (2026-11-21): RF -> TSID and the PSIP names heard.
+MICHIGAN_RECEPTION = {
+    "rf_channels": [12, 14, 16, 30, 33, 36],
+    "tsids": {"12": 1499, "14": 1527, "16": 1503, "30": 1469, "33": 1495, "36": 1545},
+    "names": {"12": ["WJRT-HD", "WJRT-D2"], "14": ["WLAJ-DT", "WLAJ-DT", "WLNS-TV"],
+              "16": ["FOX", "NBC", "Comet", "Antenna"], "30": ["WNEM-D2", "WNEM-HD"],
+              "33": ["WKAR HD", "WKARWLD"], "36": ["WAQP HD", "SBN"]},
+}
+CALLS = host_config.market_call_signs()
+
+
+def test_a_call_sign_is_read_from_a_psip_name():
+    match = host_config.call_sign_matches
+    assert match("WLNS-TV", "WLNS") and match("WKAR HD", "WKAR") and match("WKARWLD", "WKAR")
+    assert match("WLAJ-DT", "WLAJ-DT2")             # the station, not its subchannel's suffix
+    assert match("WRC-HD", "WRC") and not match("WRCB", "WRC")
+    assert not match("FOX", "WSMH") and not match("", "WLNS")
+
+
+def test_a_scan_that_hears_the_home_markets_stations_is_home():
+    home = {row["tsid"] for row in DC}
+    assert host_config.detect_market(None, home, CALLS) is None                      # never scanned
+    assert host_config.detect_market({"tsids": {"36": 531}}, home | {531}, CALLS) is None
+
+
+def test_a_scan_that_hears_another_citys_call_signs_is_there():
+    assert host_config.detect_market(MICHIGAN_RECEPTION, {529, 531}, CALLS) == "lansing"
+    # A city networks.json does not know: the caller names it.
+    unknown = {"tsids": {"20": 9999}, "names": {"20": ["KXYZ-HD"]}}
+    assert host_config.detect_market(unknown, {529, 531}, CALLS) == ""
+    assert host_config.market_name("viviserv2") == "viviserv2"
+    assert host_config.market_name("Box 3!") == "box-3" and host_config.market_name("2") == "away"
+
+
+def _second_node(tmp_path, reception, primary_plan=None):
+    state = tmp_path / "state"
+    state.mkdir(parents=True)
+    if reception is not None:
+        (state / "reception.json").write_text(json.dumps(reception))
+    if primary_plan is not None:
+        (state / "peer_plan.json").write_text(json.dumps(primary_plan))
+    environ = {"TV_THING_STATE_DIR": str(state), "TV_THING_NODE_ROLE": "second"}
+    return host_config.Host(environ=environ, path=tmp_path / "host.json", hostname="viviserv2")
+
+
+def test_a_second_node_with_no_market_set_finds_it_from_its_scan(tmp_path):
+    primary = {"node": "viviserv", "market": "dc", "primary": True, "rows": served(DC, [14, 15])}
+    host = _second_node(tmp_path, MICHIGAN_RECEPTION, primary)
+    assert (host.value("market"), host.get("market").source) == ("lansing", "auto")
+
+
+def test_a_second_node_that_hears_the_primarys_stations_is_in_its_market(tmp_path):
+    primary = {"node": "viviserv", "market": "dc", "primary": True, "rows": served(DC, [14, 15])}
+    host = _second_node(tmp_path, {"rf_channels": [36], "tsids": {"36": 531}}, primary)
+    assert host.value("market") == "dc"
+    assert _second_node(tmp_path / "x", None).value("market") == host_config.DEFAULT_MARKET
+
+
+def test_a_second_node_in_a_city_no_market_lists_is_named_after_itself(tmp_path):
+    host = _second_node(tmp_path, {"rf_channels": [20], "tsids": {"20": 9999}, "names": {"20": ["KXYZ"]}})
+    assert host.value("market") == "viviserv2"
+
+
+def test_a_market_that_is_set_wins_over_the_scan(tmp_path):
+    host = _second_node(tmp_path, MICHIGAN_RECEPTION)
+    (tmp_path / "host.json").write_text(json.dumps({"market": "flint"}))
+    host = host_config.Host(environ=host.environ, path=tmp_path / "host.json", hostname="viviserv2")
+    assert (host.value("market"), host.get("market").source) == ("flint", "file")
+
+
+# -- the Michigan block: viviserv2 numbers its own antenna's channels (lineup.json) -------------
+def _michigan_rows():
+    """viviserv2's plan from that scan: (rf, tsid, numbers and names)."""
+    found = [
+        (12, 1499, [("12.1", "WJRT-HD")] + [(f"12.{n}", f"WJRT-D{n}") for n in range(2, 8)]),
+        (14, 1527, [("53.1", "WLAJ-DT"), ("53.2", "WLAJ-DT"), ("6.1", "WLNS-TV")]),
+        (16, 1503, [("66.1", "FOX"), ("66.2", "NBC"), ("66.3", "Comet"), ("46.3", "Antenna")]),
+        (30, 1469, [("5.1", "WNEM-HD")] + [(f"5.{n}", f"WNEM-D{n}") for n in range(2, 7)]),
+        (33, 1495, [("23.1", "WKAR HD"), ("23.2", "WKARWLD"), ("23.3", "WKARCRT"), ("23.4", "WKARKID"),
+                    ("23.5", "WKARMLC")]),
+        (36, 1545, [("49.1", "WAQP HD")] + [(f"49.{n}", f"WAQP-{n}") for n in range(2, 12)]),
+    ]
+    rows = [{"id": f"{name.lower().replace('-', '_').replace(' ', '_')}_{number.replace('.', '_')}",
+             "number": number, "name": name, "rf_channel": rf, "tsid": tsid, "service_id": index + 1}
+            for rf, tsid, services in found for index, (number, name) in enumerate(services)]
+    return sorted(rows, key=server.channel_sort_key)      # as a scan saves them (channels_from_scan)
+
+
+def test_the_michigan_stations_take_the_planned_numbers(lansing):
+    lansing.write_text(json.dumps(_michigan_rows()))
+    numbered = {row["number"]: (row["tv_number"], row["tv_name"], row["tv_section"])
+                for row in server.numbered_channels(server.load_channels())}
+    assert {number: numbered[number][0] for number in
+            ("5.1", "6.1", "12.1", "23.1", "66.2", "53.1", "53.2", "66.1", "49.1")} == {
+        "5.1": 25, "6.1": 26, "12.1": 28, "23.1": 30, "66.2": 31, "53.1": 34, "53.2": 35, "66.1": 36,
+        "49.1": 37}
+    assert numbered["66.2"][1:] == ("NBC 25", "Michigan") and numbered["66.1"][1] == "FOX 66"
+    # Every subchannel of that scan is in Michigan extras; none needed a number of its own.
+    extras = {number: tv for number, (tv, _, section) in numbered.items() if section == "Michigan extras"}
+    assert len(extras) == 27 and min(extras.values()) == 380 and max(extras.values()) == 406
+    assert server.channel_lineup._assigned() == {}
+
+
+def test_a_dx_find_takes_the_next_free_michigan_extra_then_the_other_cities(tmp_path):
+    document = {"sections": [
+        {"first": 25, "last": 26, "name": "Michigan"},
+        {"first": 380, "last": 381, "name": "Michigan extras", "new": ["digital@lansing"]},
+        {"first": 430, "last": 431, "name": "Other cities' antennas", "new": ["digital@*"]},
+        {"first": 450, "last": 999, "name": "More channels", "overflow": True}],
+        "channels": [{"number": 25, "source": "digital@lansing", "channel": "5.1"},
+                     {"number": 380, "source": "digital@lansing", "channel": "5.2"}]}
+    path = tmp_path / "lineup.json"
+    path.write_text(json.dumps(document))
+    numbers = lineup.Lineup(path, tmp_path / "state.json")
+    views = numbers.number("digital@lansing", [("5.1", "WNEM-HD"), ("5.2", "WNEM-D2"), ("4.1", "WDIV-HD"),
+                                               ("7.1", "WXYZ-HD"), ("2.1", "WJBK"), ("9.1", "CBET")])
+    assert [view["tv_number"] for view in views] == [25, 380, 381, 430, 431, 450]
+
+
+def test_away_the_always_on_channel_is_one_this_box_receives(lansing, monkeypatch, tmp_path):
+    rows = _michigan_rows()
+    lansing.write_text(json.dumps(rows))
+    playback = tmp_path / "playback_state.json"
+    monkeypatch.setattr(server, "PLAYBACK_STATE_FILE", playback)
+    # Saved before the move: DC's WORLD 26.4, which no tuner here receives.
+    playback.write_text(json.dumps({"channel_id": "world_26_4", "quality": "low"}))
+    server.RECEPTION_FILE.write_text(json.dumps(MICHIGAN_RECEPTION))
+    channel, quality = server.load_playback_state()
+    assert (channel["id"], channel["number"], quality) == ("lansing/wnem_hd_5_1", "5.1", "low")
+    # A tune here saves the dial's id; it comes back as the same channel.
+    playback.write_text(json.dumps({"channel_id": "lansing/wlns_tv_6_1", "quality": "medium"}))
+    assert server.load_playback_state()[0]["id"] == "lansing/wlns_tv_6_1"
+
+
+def test_the_always_on_channel_is_never_one_the_last_scan_lost(monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "load_channels", lambda: [dict(row) for row in DC])
+    monkeypatch.setattr(server, "PLAYBACK_STATE_FILE", tmp_path / "playback_state.json")
+    (tmp_path / "playback_state.json").write_text(json.dumps({"channel_id": "wrc_hd_4_1"}))
+    server.RECEPTION_FILE.write_text(json.dumps({"rf_channels": [36], "tsids": {"36": 531}}))
+    assert server.load_playback_state()[0]["id"] == "wttg_5_1"       # RF 34 no longer received
+    server.RECEPTION_FILE.write_text(json.dumps({"rf_channels": [12], "tsids": {"12": 1499}}))
+    assert server.load_playback_state() == (None, "medium")

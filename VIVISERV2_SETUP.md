@@ -54,6 +54,7 @@ Here that gives:
 | Peer's address | `100.68.34.34` | auto: a second node pools with its primary (section 4) |
 | Second digital tuner | adapter 1 (`digital-b`) | auto: the first DVB adapter besides the digital tuner's |
 | Location | (unset) | the Inputs page's Set location; read on every use, no restart |
+| Market | `lansing` (since 2026-11-21) | auto: its last scan heard none of DC's stations and Lansing's and Flint's call signs (`networks.json`); a rescan finds it again |
 
 So the tracked `feed.json` and `roku.json` are used as they are: nothing host-specific is in
 the checkout. The digital lane describes itself from sysfs ("ATSC digital television (LGDT3306A
@@ -139,8 +140,22 @@ LGDT3306A needs no firmware.
 Both tuners have their own antenna. A sweep of RF 2–36 on each (2026-10-31,
 `~/tv_thing-host/scan-a.txt` and `scan-b.txt`) locked RF 7, 9, 14, 15, 20, 21, 24, 31, 32,
 34, 35 and 36, at 20–31 dB SNR on both tuners. Those are the 70 services in the tracked
-`channels.json`, with the same virtual numbers and PIDs, so this box sees viviserv's market and
-the shipped `channels.json`, `lineup.json` and `networks.json` apply unchanged.
+`channels.json`, with the same virtual numbers and PIDs: this box saw viviserv's market while
+it was on viviserv's LAN.
+
+**In mid-Michigan since 2026-11-21.** Its first scan there (small antennas, not yet the big
+ones) locked RF 12 WJRT 12.1-12.7, RF 14 WLAJ 53.1-53.2 and WLNS 6.1, RF 16 WSMH FOX 66.1, NBC 25
+on 66.2, Comet 66.3 and Antenna 46.3, RF 30 WNEM 5.1-5.6, RF 33 WKAR 23.1-23.5 and RF 36 WAQP
+49.1-49.11, at 18-31 dB. With no market set, it had taken itself to be in DC, so that rescan
+saved only its reception and dropped the stations. The market setting's auto no longer assumes
+DC on a second node: its last scan decides (`host_config.detect_market`). A scan that hears one
+of the primary's stations (by TSID) is the primary's market; else the market whose call signs
+it heard (`networks.json`'s `call_signs`), here `lansing`; else the node's own name. A rescan
+decides again before its plan is saved, so the stations it finds are kept: away, this box's plan
+is `state/channels.json`, numbered here as `digital@lansing` (the Michigan block, 25-37, and
+Michigan extras, 380-429; DX finds take the next free extra, then the other cities' 430-449) and
+played only by its own tuners. The always-on channel is one this box's plan has and its last
+scan received.
 
 Rescans here have been uneven: the Rescan page's 16:15 scan missed RF 9, and the 17:34 one
 got RF 9 but missed RF 24 (WDCO 10.1). Neither changes the dial any more. The plan is the

@@ -13,7 +13,8 @@ are placed by rule:
 * **Anything new** -- a channel a rescan turns up, a YouTube TV row added to
   roku.json -- takes the first free number in the section whose ``new``
   names its source (``digital@*`` takes another market's antenna channels,
-  ``*`` any source no section names). The number is
+  and those of a market whose own section is full; ``*`` any source no
+  section names). The number is
   kept in ``lineup_state.json`` so it never moves; a fixed number in
   lineup.json takes precedence.
 * Whatever does not fit goes to the ``overflow`` section.
@@ -101,6 +102,19 @@ class Plan:
         if named is None and source_id.startswith(f"{ANTENNA}@"):
             named = next((s for s in self.sections if OTHER_ANTENNAS in s.new), None)
         return named or next((s for s in self.sections if ANY_SOURCE in s.new), None)
+
+    def new_sections(self, source_id):
+        """The sections a new channel of ``source_id`` is numbered in, in order: new_section,
+        then, for another market's antenna channels (``digital@lansing``) whose own section is
+        full, the other cities' one (``digital@*``): a market's DX finds and late subchannels
+        stay with the antennas before they reach the overflow."""
+        first = self.new_section(source_id)
+        sections = [first] if first else []
+        if source_id.startswith(f"{ANTENNA}@"):
+            others = next((s for s in self.sections if OTHER_ANTENNAS in s.new), None)
+            if others is not None and others not in sections:
+                sections.append(others)
+        return tuple(sections)
 
     def overflow_section(self):
         return next((s for s in self.sections if s.overflow), None)
@@ -328,8 +342,9 @@ class Lineup:
                     del assigned[key]  # lineup.json gave its number to another.
                     entry = None
                 if entry is None:
-                    section = plan.new_section(source_id)
-                    number = self._free(section, taken) if section else None
+                    number = next((free for free in (self._free(section, taken)
+                                                     for section in plan.new_sections(source_id))
+                                   if free is not None), None)
                     if number is None:
                         number = self._overflow(plan, taken)
                     entry = {"number": number, "name": name, "first_seen": int(self.clock())}

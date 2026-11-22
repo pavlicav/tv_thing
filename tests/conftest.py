@@ -36,6 +36,12 @@ def _private_lineup_state(tmp_path, monkeypatch):
             "generated_at": None, "last_error": None})
         # This node's reception (the tuner pool's), which a rescan writes.
         monkeypatch.setattr(server, "RECEPTION_FILE", tmp_path / "reception.json")
+        # ...and the market setting's auto, which reads it and the peer's plan from the state
+        # folder (host_config.detect_market): this test's, never the checkout's. A rescan
+        # resolves the market again (server.refresh_market); each test starts from the same one.
+        monkeypatch.setitem(server.HOST.environ, "TV_THING_STATE_DIR", str(tmp_path))
+        monkeypatch.setattr(server.HOST, "_cache", dict(server.HOST._cache))
+        monkeypatch.setattr(server, "MARKET", server.MARKET)
         # The feed's recorders and their journal, private to each test.
         import feed_node
         monkeypatch.setattr(server, "recorders", feed_node.Recorders(
