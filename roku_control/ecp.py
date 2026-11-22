@@ -34,6 +34,9 @@ class EcpClient:
         self._sleep = sleeper
         self.launch_timeout = launch_timeout
         self.poll_interval = poll_interval
+        # When a key was last sent (wall time), or None: YouTube TV asks "Are you still
+        # watching?" after about four hours without one.
+        self.last_keypress_at: float | None = None
 
     def _request(self, method: str, path: str) -> bytes:
         request = urllib.request.Request(
@@ -141,6 +144,7 @@ class EcpClient:
     def keypress(self, key: str) -> None:
         safe_key = urllib.parse.quote(key, safe="_")
         self._request("POST", f"keypress/{safe_key}")
+        self.last_keypress_at = time.time()
 
     def wait_for_active_app(
         self, app_id: str, *, timeout: float, interval: float

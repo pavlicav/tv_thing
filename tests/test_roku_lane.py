@@ -23,6 +23,7 @@ class FakeEcp:
         self.app = YOUTUBE_TV
         self.state = "play"
         self.slow = None
+        self.last_keypress_at = None
 
     def active_app(self):
         if self.slow:
@@ -34,6 +35,7 @@ class FakeEcp:
 
     def keypress(self, key):
         self.keys.append(key)
+        self.last_keypress_at = time.time()
 
     def launch(self, app_id):
         self.launches.append(app_id)
@@ -379,6 +381,54 @@ def test_remote_waits_for_a_navigation(lane):
     assert lane.controller.ecp.keys == []
     lane.controller.release.set()
     settle(lane)
+
+
+def test_nudge_presses_a_key_and_the_selection_stays_verified(lane):
+    tune(lane)
+    settle(lane)
+    verified = lane.generation()
+    result = lane.nudge("Down")
+    assert result["pressed"] is True and result["player"] == "play"
+    assert lane.controller.ecp.keys == ["Down"]
+    assert lane.selection_view()["manual"] is False and lane.generation() == verified, \
+        "a keep-awake key must not end a lease on the picture"
+    refused = lane.nudge("Select")
+    assert refused["pressed"] is False and refused["reason"] == "its player is play", \
+        "Select would pause a player that plays"
+    lane.controller.ecp.state = "pause"
+    assert lane.nudge("Down")["pressed"] is False
+    assert lane.nudge("Select")["pressed"] is True
+    assert lane.controller.ecp.keys == ["Down", "Select"]
+    with pytest.raises(ConfigError):
+        lane.nudge("Back")
+
+
+def test_nudge_presses_nothing_off_the_verified_app_or_selection(lane):
+    assert lane.nudge("Down")["reason"] == "nothing verified is on the Roku"
+    tune(lane)
+    settle(lane)
+    lane.controller.ecp.app = SimpleNamespace(id=None, name="")
+    assert lane.nudge("Down")["reason"] == "the Roku is in its home screen, not YouTube TV"
+    lane.controller.ecp.app = YOUTUBE_TV
+    lane.controller.release.clear()
+    tune(lane, channel_id="NBC")
+    assert lane.nudge("Down")["reason"] == "a navigation is running"
+    lane.controller.release.set()
+    settle(lane)
+    lane.keypress("Down")
+    assert lane.nudge("Down")["reason"] == "nothing verified is on the Roku"
+    assert lane.controller.ecp.keys == ["Down"], "only the remote's own key"
+
+
+def test_key_age_follows_the_last_key_or_navigation(lane):
+    assert lane.payload()["key_age_seconds"] is None
+    tune(lane)
+    settle(lane)
+    navigated = lane.payload()
+    assert navigated["last_key_at"] is not None and navigated["key_age_seconds"] < 5, \
+        "a navigation presses keys (a restart forgets the keys themselves)"
+    lane.controller.ecp.last_keypress_at = time.time() + 60
+    assert lane.payload()["last_key_at"] == lane.controller.ecp.last_keypress_at
 
 
 def test_manual_tune_cancels_a_navigation(lane):

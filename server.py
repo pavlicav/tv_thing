@@ -3134,6 +3134,17 @@ def roku_check(_body):
          "generation": roku.generation()}, 200))
 
 
+def roku_nudge(body):
+    """One keep-awake key on the verified selection, which stays verified (roku_lane.nudge),
+    after the roku lock allows it."""
+    refusal = roku_change_refusal(body, "nudge")
+    if refusal:
+        return refusal
+    return roku_call(lambda: (
+        {"api_version": API_VERSION, "ok": True, **roku.nudge(body.get("key")),
+         "generation": roku.generation()}, 200))
+
+
 def roku_sources_available():
     if roku is None:
         return False
@@ -6706,6 +6717,14 @@ class TVHandler(SimpleHTTPRequestHandler):
                         "note": ("is the verified selection still playing? "
                                  "Renews it without pressing a key"),
                     },
+                    "roku_nudge": {
+                        "method": "POST", "path": "/api/v1/roku/nudge",
+                        "body": {"key": "Down", "token": "..."},
+                        "keys": dict(roku_lane.NUDGE_KEYS),
+                        "note": ("keep-awake: one key on the verified selection, "
+                                 "which stays verified (Down while playing, Select "
+                                 "while paused)"),
+                    },
                     "roku_cancel": {
                         "method": "POST", "path": "/api/v1/roku/cancel",
                         "body": {"token": "..."},
@@ -7208,6 +7227,7 @@ class TVHandler(SimpleHTTPRequestHandler):
         roku_routes = {
             "/api/v1/roku/cancel": roku_cancel,
             "/api/v1/roku/check": roku_check,
+            "/api/v1/roku/nudge": roku_nudge,
             "/api/v1/roku/keypress": lambda body: roku_remote(body, "keypress"),
             "/api/v1/roku/text": lambda body: roku_remote(body, "text"),
             "/api/v1/roku/launch": lambda body: roku_remote(body, "launch"),

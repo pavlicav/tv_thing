@@ -328,6 +328,28 @@ def test_roku_remote_and_check_over_http(roku_api):
     assert code == 200 and {"id": "14", "name": "MLB"} in apps["apps"]
 
 
+def test_roku_nudge_keeps_the_selection_and_takes_the_lock(roku_api):
+    request, lane = roku_api
+    code, _ = request("/api/v1/tune", {"source": "youtube-tv", "channel_id": "ESPN"})
+    assert code == 202
+    verified = wait_for(request, lambda l: l["selection"] and l["selection"].get("channel_id") == "ESPN")
+    code, nudged = request("/api/v1/roku/nudge", {"key": "Down"})
+    assert code == 200 and nudged["pressed"] is True and nudged["player"] == "play"
+    assert nudged["generation"] == verified["stream"]["generation"], "the lease on the picture holds"
+    code, check = request("/api/v1/roku/check", {})
+    assert code == 200 and check["playing"] is True
+    code, status = request("/api/v1/status")
+    assert status["lanes"]["roku"]["roku"]["key_age_seconds"] < 5
+    code, bad = request("/api/v1/roku/nudge", {"key": "Home"})
+    assert code == 400
+    code, claim = request("/api/v1/tuner/lock", {"lane": "roku", "owner": "VizelVision master", "duration_seconds": 90})
+    code, refusal = request("/api/v1/roku/nudge", {"key": "Down"})
+    assert code == 423
+    code, nudged = request("/api/v1/roku/nudge", {"key": "Down", "token": claim["token"]})
+    assert code == 200 and nudged["pressed"] is True
+    assert lane.controller.ecp.keys == ["Down", "Down"]
+
+
 def test_roku_routes_answer_503_when_unconfigured(api, monkeypatch):
     request, _ = api
     monkeypatch.setattr(server, "roku", None)

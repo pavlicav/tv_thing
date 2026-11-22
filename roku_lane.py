@@ -84,6 +84,14 @@ REMOTE_KEYS = ("Home", "Back", "Up", "Down", "Left", "Right", "Select",
                "Play", "Rev", "Fwd", "InstantReplay", "Info", "Search",
                "Backspace", "Enter")
 TEXT_LIMIT = 64
+# The keep-awake (vizelVision's): one key on the verified selection, which stays verified
+# (no Manual Roku, no new generation), and only in the player state it is for. YouTube TV
+# asks "Are you still watching?" after about four hours without a key and, unanswered,
+# quits to the home screen (2026-11-15 13:26 and 17:28, FOX off air a minute each time).
+# Down while it plays brings up the player's info overlay, gone in seconds (no pause, seek
+# or exit); Select while it is paused answers the prompt.
+NUDGE_KEYS = {"Down": "play", "Select": "pause"}
+NUDGE_SETTLE_SECONDS = 1.5
 
 # The still-playing check (vizelVision's "the Roku still playing"): the app
 # it was verified in, its player playing, and a moving picture within
@@ -539,6 +547,48 @@ class RokuLane:
             self.ecp.keypress(key)
         return {"key": key, "selection": self.selection_view()}
 
+    def nudge(self, key):
+        """Press one key on the verified selection without moving it (NUDGE_KEYS): the
+        selection and the generation stay, so a lease on the picture holds. Refused, with
+        the reason, unless the Roku is in the app it was verified in with its player in the
+        key's state. {"pressed", "key", "reason", "player": its state after the key}."""
+        if key not in NUDGE_KEYS:
+            raise ConfigError("key must be one of " + ", ".join(NUDGE_KEYS))
+        with self._lock:
+            if self._running():
+                return {"pressed": False, "key": key, "reason": "a navigation is running"}
+        selection = self.selection
+        if not selection or selection.get("manual"):
+            return {"pressed": False, "key": key, "reason": "nothing verified is on the Roku"}
+        app = selection.get("app")
+        if not app:
+            return {"pressed": False, "key": key, "reason": "the app it was verified in is unknown"}
+        if not self.controller._lock.acquire(blocking=False):
+            raise ControlBusyError("The Roku is busy")
+        try:
+            active = self.ecp.active_app()
+            if active.id != app["id"]:
+                return {"pressed": False, "key": key,
+                        "reason": f"the Roku is in {active.name or 'its home screen'}, not {app['name']}"}
+            state = self.ecp.media_player().get("state")
+            if state != NUDGE_KEYS[key]:
+                return {"pressed": False, "key": key, "reason": f"its player is {state or 'stopped'}"}
+            self.ecp.keypress(key)
+            self._sleep(NUDGE_SETTLE_SECONDS)
+            after = self.ecp.media_player().get("state")
+        finally:
+            self.controller._lock.release()
+        return {"pressed": True, "key": key, "reason": None, "player": after}
+
+    def last_key_at(self):
+        """When TV Thing last pressed a key on the Roku (wall time), or None: the ECP
+        client's last key, else the last navigation (a restart forgets the keys)."""
+        pressed = getattr(self.ecp, "last_keypress_at", None)
+        navigation = self.record.state()["navigation"] or {}
+        moved = navigation.get("ended_at") or navigation.get("started_at")
+        known = [t for t in (pressed, moved) if type(t) in (int, float)]
+        return max(known) if known else None
+
     def text(self, text):
         if (not isinstance(text, str) or not text or len(text) > TEXT_LIMIT
                 or not text.isprintable()):
@@ -617,9 +667,11 @@ class RokuLane:
         return operation
 
     def payload(self):
+        last_key = self.last_key_at()
         return {"selection": self.selection_view(), "operation": self.operation_view(),
                 "generation": self.generation(), "player": self.player(),
-                "reuse_max_age_seconds": self.reuse_max_age}
+                "reuse_max_age_seconds": self.reuse_max_age, "last_key_at": last_key,
+                "key_age_seconds": None if last_key is None else round(max(0., self._wall() - last_key), 1)}
 
     # -- catalogs -------------------------------------------------------------
     def source_list(self, available):

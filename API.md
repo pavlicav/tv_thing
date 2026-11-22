@@ -457,6 +457,18 @@ refreshed in the background), `generation` and `reuse_max_age_seconds`.
   selection still plays: the same app, its player playing, and a moving
   picture within 4 s. A pass renews the verification on the current capture.
   It never presses a key and needs no lock.
+* **Keep-awake**: POST `api/v1/roku/nudge` `{"key", "token"}` presses one key
+  on the verified selection, which **stays verified**: no Manual Roku, no new
+  generation, so a lease on the picture holds. `Down` only while its player
+  plays (YouTube TV's info overlay, gone in seconds), `Select` only while it
+  is paused (answers "Are you still watching?"); anything else, another app,
+  or no verified selection answers 200 with `"pressed": false` and a
+  `reason`. Otherwise `{"pressed": true, "player": <state 1.5 s after>}`.
+  VizelVision's on-air watch uses it: YouTube TV asks after about four hours
+  without a key and, unanswered, quits to the home screen. The roku lane's
+  status (`lanes.roku.roku`) carries `last_key_at` (wall time) and
+  `key_age_seconds`: the last key TV Thing sent, else the last navigation
+  (a control restart forgets the keys themselves).
 * **Remote**: POST `api/v1/roku/keypress` `{"key"}` (`Home`, `Back`, `Up`,
   `Down`, `Left`, `Right`, `Select`, `Play`, `Rev`, `Fwd`, `InstantReplay`,
   `Info`, `Search`, `Backspace`, `Enter`), `api/v1/roku/text` `{"text"}`
