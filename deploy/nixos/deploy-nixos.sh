@@ -15,7 +15,9 @@ else
     read -r -p "Install this module and rebuild? [y/N] " answer
     [ "$answer" = y ] || { echo "Nothing changed."; exit 1; }
     T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
-    cp /etc/nixos/*.nix "$T"/ && cp "$SRC" "$T"/tv-thing.nix
+    # All of /etc/nixos, not only *.nix: a module may read a file beside it (eas-sdr.nix
+    # installs ./openwebrx-settings.json), and the evaluation fails without it.
+    cp -a /etc/nixos/. "$T"/ && cp "$SRC" "$T"/tv-thing.nix
     echo "Evaluating the system with it..."
     nix-instantiate "<nixpkgs/nixos>" -A system -I nixos-config="$T/configuration.nix" > /dev/null
     sudo cp -p "$DST" "$DST.before-$(date +%Y%m%d-%H%M%S)"
