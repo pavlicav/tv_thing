@@ -191,13 +191,14 @@ def test_the_newest_segments_are_left_out_until_they_are_in_memory():
     held = relay.get('video1_stream.m3u8?session=s')[2].decode()
     assert held.rstrip().endswith('ab_video1_seg18.mp4?session=s') or held.rstrip().endswith('ab_video1_seg17.mp4?session=s')
     assert 'seg19' not in held
-    assert held.startswith('#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:10\n')   # the sequence is untouched
+    assert held.startswith('#EXTM3U\n#EXT-X-START:TIME-OFFSET=-10.0\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:10\n')
     relay.segments['ab_video1_seg18.mp4'].result(timeout=5)
     held = relay.get('video1_stream.m3u8?session=s')[2].decode()
     assert held.rstrip().endswith('ab_video1_seg18.mp4?session=s')
     gate.set()
     settle(relay)
-    assert relay.get('video1_stream.m3u8?session=s')[2] == MEDIA          # all in memory: whole
+    assert relay.get('video1_stream.m3u8?session=s')[2] == MEDIA.replace(   # all in memory: whole
+        b'#EXTM3U\n', b'#EXTM3U\n#EXT-X-START:TIME-OFFSET=-10.0\n', 1)
 
 
 def test_at_most_two_segments_are_held_back():
@@ -206,3 +207,17 @@ def test_at_most_two_segments_are_held_back():
     held = relay._held(MEDIA).decode()   # nothing in memory: only the newest two go
     assert held.rstrip().endswith('ab_video1_seg17.mp4?session=s')
     assert held.count('#EXTINF') == 8
+
+
+def test_a_start_of_its_own_and_multivariant_playlists_are_left_alone():
+    relay = vizelvision_relay.Relay('http://primary/v1/master/media/', Station())
+    own = b'#EXTM3U\n#EXT-X-START:TIME-OFFSET=-4.0\n#EXTINF:1.0,\nseg1.mp4\n'
+    assert relay._started(own) is own
+    multivariant = b'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=9329480\nvideo1_stream.m3u8?session=s\n'
+
+    def station(request, timeout):
+        response = BytesIO(multivariant)
+        response.status, response.headers = 200, {}
+        return response
+    relay = vizelvision_relay.Relay('http://primary/v1/master/media/', station)
+    assert relay.get('index.m3u8')[2] == multivariant

@@ -9,6 +9,9 @@ requests are answered from memory as soon as those fetches land. A player that k
 the live edge (a Roku does) would still ask for each segment the moment it is listed, and
 wait out its whole transfer, so a media playlist is passed on without its newest segments
 until they are in memory: the player plays a second or so further behind, never waiting.
+It also says where to start (#EXT-X-START): ExoPlayer, on TV Thing's Android TV app, keeps
+only three segments (3 s) behind the newest by default, so any longer hiccup clipped the
+picture; 10 s back, it keeps 10 s of buffer.
 """
 from __future__ import annotations
 
@@ -31,6 +34,7 @@ class Relay:
     AHEAD = 3            # segments fetched after the one a player asks for
     NEWEST = 2           # a media playlist's newest segments, fetched as soon as it lists them
     HOLD = 2             # of those, how many a playlist may leave out while they are fetched
+    START = 10           # seconds behind the newest segment a player should play (#EXT-X-START)
     KEEP = 48            # segments held: ~48 MB at 8 Mbps, and past the primary's 30 s window
     WAIT = 30            # seconds a request waits on a fetch already under way
     MAX_BYTES = 16 * 1024 * 1024
@@ -49,7 +53,7 @@ class Relay:
         if range_header or not SEGMENT.fullmatch(uri):   # playlists and byte ranges go straight through
             result = self.fetch(uri, range_header)
             if uri.split("?", 1)[0].endswith(".m3u8") and result[0] == 200 and self._listed(uri.split("?", 1)[0], result[2]):
-                result = (result[0], result[1], self._held(result[2]))
+                result = (result[0], result[1], self._started(self._held(result[2])))
             return result
         future = self._start(uri)
         self._ahead(uri)
@@ -79,6 +83,13 @@ class Relay:
         for uri in ([init.group(1)] if init and SEGMENT.fullmatch(init.group(1)) else []) + uris[-self.NEWEST:]:
             self._start(uri)
         return True
+
+    def _started(self, playlist):
+        """``playlist`` with #EXT-X-START after its first line, unless it names its own start."""
+        if b"#EXT-X-START:" in playlist or not playlist.startswith(b"#EXTM3U"):
+            return playlist
+        head, _, rest = playlist.partition(b"\n")
+        return head + b"\n#EXT-X-START:TIME-OFFSET=-%d.0\n" % self.START + rest
 
     def _held(self, playlist):
         """``playlist`` without its newest segments (HOLD at most) that are not in memory yet."""
