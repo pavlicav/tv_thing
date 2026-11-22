@@ -116,7 +116,7 @@ def test_a_media_playlist_starts_its_init_and_newest_segments():
     station = Station()
     relay = vizelvision_relay.Relay('http://primary/v1/master/media/', station)
     status, _, body = relay.get('video1_stream.m3u8?session=s')
-    assert (status, body) == (200, MEDIA)
+    assert status == 200
     settle(relay)
     assert sorted(station.names()) == sorted(['video1_stream.m3u8', 'ab_video1_init.mp4', 'ab_video1_seg18.mp4',
                                               'ab_video1_seg19.mp4'])
@@ -177,3 +177,32 @@ def test_the_handler_answers_a_segment_from_the_relay(monkeypatch):
     h = handler('/stream/vizelvision/ab_video1_seg77.mp4?session=s')
     h.do_GET()
     assert (h.sent['status'], h.wfile.getvalue(), h.sent['Content-Type']) == (200, b'ab_video1_seg77.mp4', 'video/mp4')
+
+
+def test_the_newest_segments_are_left_out_until_they_are_in_memory():
+    gate = threading.Event()
+    station = Station()
+
+    def slow(request, timeout):
+        if 'seg19' in request.full_url:
+            gate.wait(5)                     # the newest segment is still on its way
+        return station(request, timeout)
+    relay = vizelvision_relay.Relay('http://primary/v1/master/media/', slow)
+    held = relay.get('video1_stream.m3u8?session=s')[2].decode()
+    assert held.rstrip().endswith('ab_video1_seg18.mp4?session=s') or held.rstrip().endswith('ab_video1_seg17.mp4?session=s')
+    assert 'seg19' not in held
+    assert held.startswith('#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:10\n')   # the sequence is untouched
+    relay.segments['ab_video1_seg18.mp4'].result(timeout=5)
+    held = relay.get('video1_stream.m3u8?session=s')[2].decode()
+    assert held.rstrip().endswith('ab_video1_seg18.mp4?session=s')
+    gate.set()
+    settle(relay)
+    assert relay.get('video1_stream.m3u8?session=s')[2] == MEDIA          # all in memory: whole
+
+
+def test_at_most_two_segments_are_held_back():
+    relay = vizelvision_relay.Relay('http://primary/v1/master/media/', lambda request, timeout: pytest.fail('fetched'))
+    relay._listed = lambda name, playlist: True
+    held = relay._held(MEDIA).decode()   # nothing in memory: only the newest two go
+    assert held.rstrip().endswith('ab_video1_seg17.mp4?session=s')
+    assert held.count('#EXTINF') == 8

@@ -5,7 +5,10 @@ only when its player asked, on a new connection each time (VizelVision's server 
 HTTP/1.0): a 1 s, 1 MB segment spent ~0.8 s in TCP slow start, so the station arrived barely
 at real time and stuttered. Now a media playlist starts fetches of the newest segments it
 lists, a segment request starts the next few after it, several at once, and the player's
-requests are answered from memory as soon as those fetches land.
+requests are answered from memory as soon as those fetches land. A player that keeps to
+the live edge (a Roku does) would still ask for each segment the moment it is listed, and
+wait out its whole transfer, so a media playlist is passed on without its newest segments
+until they are in memory: the player plays a second or so further behind, never waiting.
 """
 from __future__ import annotations
 
@@ -27,6 +30,7 @@ class TooLarge(Exception):
 class Relay:
     AHEAD = 3            # segments fetched after the one a player asks for
     NEWEST = 2           # a media playlist's newest segments, fetched as soon as it lists them
+    HOLD = 2             # of those, how many a playlist may leave out while they are fetched
     KEEP = 48            # segments held: ~48 MB at 8 Mbps, and past the primary's 30 s window
     WAIT = 30            # seconds a request waits on a fetch already under way
     MAX_BYTES = 16 * 1024 * 1024
@@ -44,8 +48,8 @@ class Relay:
         query, as the playlist lists it."""
         if range_header or not SEGMENT.fullmatch(uri):   # playlists and byte ranges go straight through
             result = self.fetch(uri, range_header)
-            if uri.split("?", 1)[0].endswith(".m3u8") and result[0] == 200:
-                self._listed(uri.split("?", 1)[0], result[2])
+            if uri.split("?", 1)[0].endswith(".m3u8") and result[0] == 200 and self._listed(uri.split("?", 1)[0], result[2]):
+                result = (result[0], result[1], self._held(result[2]))
             return result
         future = self._start(uri)
         self._ahead(uri)
@@ -63,16 +67,34 @@ class Relay:
                     content)
 
     def _listed(self, name, playlist):
-        """A media playlist arrived: remember its segments, and fetch its init and newest ones."""
+        """A media playlist arrived: remember its segments, and fetch its init and newest ones.
+        Whether it was a media playlist."""
         text = playlist.decode("utf-8", "replace")
-        if "#EXTINF" not in text:
-            return   # a multivariant playlist names playlists, not segments
+        if "#EXTINF" not in text or "#EXT-X-ENDLIST" in text or "#EXT-X-PART" in text:
+            return False   # a multivariant playlist names playlists; a finished or low-latency one is left as is
         uris = [line.strip() for line in text.splitlines() if SEGMENT.fullmatch(line.strip())]
         init = re.search(r'#EXT-X-MAP:URI="([^"]+)"', text)
         with self.lock:
             self.playlists[name] = uris
         for uri in ([init.group(1)] if init and SEGMENT.fullmatch(init.group(1)) else []) + uris[-self.NEWEST:]:
             self._start(uri)
+        return True
+
+    def _held(self, playlist):
+        """``playlist`` without its newest segments (HOLD at most) that are not in memory yet."""
+        lines = playlist.split(b"\n")
+        listed = [i for i, line in enumerate(lines) if SEGMENT.fullmatch(line.strip().decode("utf-8", "replace"))]
+        keep = len(listed)
+        with self.lock:
+            while keep > 1 and len(listed) - keep < self.HOLD:
+                name = lines[listed[keep - 1]].strip().decode().split("?", 1)[0]
+                future = self.segments.get(name)
+                if future is not None and future.done() and not future.exception():
+                    break
+                keep -= 1
+        if keep == len(listed):
+            return playlist
+        return b"\n".join(lines[:listed[keep - 1] + 1]) + b"\n"
 
     def _ahead(self, uri):
         """Fetch the segments that follow ``uri`` in whichever playlist lists it."""
