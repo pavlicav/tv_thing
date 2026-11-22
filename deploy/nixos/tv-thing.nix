@@ -32,6 +32,20 @@ let
     Restart = "always";
     TimeoutStopSec = 5;
   };
+
+  # The feed and control each take tuner B (host_config's tuner_b, auto: a DVB adapter besides the
+  # digital tuner's) from the adapters there when they start. On 2026-11-21 the WinTV-dualHD came
+  # up 74 s after boot, the feed at 14 s: the feed had no digital-b, and control, restarted later,
+  # had. Until 120 s after boot the feed waits for the dualHD's second adapter, and control (after
+  # the feed) with it; a start after that (a crash restart, a deliberate one) never waits. A tuner
+  # that comes later still is safe, read as unknown by control: restart the feed to take it in.
+  waitForTuners = pkgs.writeShellScript "tv-thing-wait-for-tuners" ''
+    while [ ! -e /dev/dvb/adapter1/frontend0 ]; do
+      read -r up _ < /proc/uptime
+      [ "''${up%.*}" -lt 120 ] || exit 0
+      sleep 1
+    done
+  '';
 in
 {
   # /dev/dvb/adapter*/* are root:video 0660.
@@ -64,6 +78,8 @@ in
       TV_THING_CONTROL_URL = "http://127.0.0.1:8087";
     };
     serviceConfig = service // {
+      ExecStartPre = "${waitForTuners}";
+      TimeoutStartSec = 180;   # the wait above, at most 120 s, counts toward the start
       ExecStart = "${python}/bin/python3 ${tv}/feed_server.py";
       RestartSec = 5;
       CPUQuota = "400%";      # viviserv: 800% of 28 threads. Here: 4 of 6 faster cores

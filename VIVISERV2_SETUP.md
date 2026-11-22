@@ -301,7 +301,7 @@ front door on 127.0.0.1.
   take it from the adapters there when they start, so a feed that started before the dualHD came
   up has none while a control started after it does: control then reads `digital-b` as unknown
   (never chosen; its journal says "the feed has no digital-b") until `tv-thing-feed` is restarted,
-  when nothing is recording.
+  when nothing is recording. At boot the feed waits up to 120 s for adapter 1 (`tv-thing.nix`).
 
 ```bash
 curl -s http://127.0.0.1:8080/api/v1/tuners | python3 -m json.tool      # the pool, as this box sees it
