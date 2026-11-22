@@ -20,12 +20,18 @@ function LineupBuild(channels as Object, sources as Object, feeds as Object, dat
     for each channel in channels
         number = LineupText(channel.number)
         channelId = LineupText(channel.id)
-        entry = LineupEntry(LineupDigitalId(channelId), "digital", LineupText(channel.name), number, "Antenna " + number + " · RF " + LineupText(channel.rf_channel), "ATSC")
+        ' Another market's channel plays relayed from the box there (Lansing's on viviserv).
+        relayed = LineupIsTrue(channel.relayed)
+        detail = "Antenna " + number + " · RF " + LineupText(channel.rf_channel)
+        if relayed then detail = LineupText(channel.market_name) + " · " + detail
+        entry = LineupEntry(LineupDigitalId(channelId), "digital", LineupText(channel.name), number, detail, "ATSC")
         entry.sourceId = "digital"
         entry.channelId = channelId
         entry.label = "Antenna " + number
+        if relayed then entry.label = LineupText(channel.market_name) + " " + number
         LineupNumbered(entry, channel)
-        LineupListing(entry, guide, number, nowSeconds)
+        ' This box's guide is its own antenna's: the number may be another station there.
+        if not relayed then LineupListing(entry, guide, number, nowSeconds)
         rest.Push(entry)
     end for
     for each source in sources

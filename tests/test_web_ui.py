@@ -748,3 +748,17 @@ def test_watch_plays_a_slide_channel_in_a_frame_and_stops_it_on_leaving():
     assert "fetch(" not in tune     # no tune, no lock: the page plays on its own
     render = section(INDEX, "function render()", "function matches")
     assert 'els.slideStage.removeAttribute("src")' in render
+
+
+def test_another_markets_channel_names_its_city_and_takes_no_listing_by_number():
+    """Each box's guide is its own antenna's: Lansing's 66.1 (FOX 66) relayed to DC must not
+    show DC's 66.1 (ION)."""
+    # Only antennaListing looks an antenna channel up by its number.
+    assert "listingFor(entry.channel.number" not in INDEX and INDEX.count("listingFor(channel.number") == 1
+    assert "channel && !channel.relayed ? listingFor(channel.number, now)" in INDEX
+    assert "ch && !ch.relayed && listingHtml(ch.number, now)" in INDEX
+    assert "channel.market_name" in INDEX
+
+
+def test_the_vcr_lists_only_the_antenna_channels_this_box_records():
+    assert ".filter(item => !item.relayed)" in section(VCR, "async function sourceItems", "async function loadChannels")

@@ -20,7 +20,10 @@ class FakeServer:
         if path == "/api/v1/status":
             return {"lanes": self.lanes}
         if path == "/api/v1/sources/digital":
-            return {"items": [{"id": "a", "number": "7.1", "name": "A", "frequency": 1, "rf_channel": 7},
+            # Another market's, relayed from the box there: never this box's tuner's to check.
+            return {"items": [{"id": "lansing/z", "number": "6.1", "name": "Z", "frequency": 2, "rf_channel": 2,
+                               "relayed": True},
+                              {"id": "a", "number": "7.1", "name": "A", "frequency": 1, "rf_channel": 7},
                               {"id": "b", "number": "7.2", "name": "B", "frequency": 1, "rf_channel": 7}]}
         if path == "/api/v1/tuner/lock":
             lane = payload["lane"]
@@ -68,6 +71,16 @@ class GateLockTests(unittest.TestCase):
         self.assertEqual(server.locked, {"digital": "token-digital", "analog": "token-analog"})
         self.assertEqual(tokens, ["token-digital"])
         self.assertEqual(sorted(server.released), [("analog", "token-analog"), ("digital", "token-digital")])
+
+    def test_the_gate_tunes_this_boxs_own_channels_not_another_markets_relayed(self):
+        tuned = []
+
+        def tune(url, channel, args, seen, samples, failures, token=None):
+            tuned.append(channel["id"])
+            raise RuntimeError("stop after the first round")
+
+        self.run_gate(FakeServer(self.LANES), tune)
+        self.assertEqual(tuned, ["a"])
 
     def test_a_lane_someone_holds_fails_the_gate_without_tuning_and_releases_the_rest(self):
         server = FakeServer(self.LANES, held={"analog": "Web remote"})
