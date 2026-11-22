@@ -1796,6 +1796,76 @@ def test_the_always_on_keeper_leaves_a_lane_it_cannot_see_alone(monkeypatch):
         assert tuned == expected, f"unknown={unknown}"
 
 
+NO_SIGNAL = "Could not retrieve signal for WLLADTV (RF 22): the antenna got no lock in 3 s"
+
+
+def test_no_signal_patience_counts_each_failure_once_and_only_for_lack_of_signal():
+    now = [0.0]
+    patience = server.NoSignalPatience(retries=2, backoff=(60, 600), clock=lambda: now[0])
+    busy = {"revision": 1, "error": "WLLADTV (RF 22): Device or resource busy"}
+    assert not patience.holds("wlla", busy)
+    assert not patience.holds("wlla", {**busy, "revision": 2}), "only lack of signal counts"
+    no_signal = lambda revision: {"revision": revision, "error": NO_SIGNAL}
+    assert not patience.holds("wlla", no_signal(3))
+    assert patience.holds("wlla", no_signal(4)), "the second in a row: a minute off"
+    assert patience.holds("wlla", no_signal(4)), "the same failure, read again"
+    now[0] = 61
+    assert not patience.holds("wlla", no_signal(4)), "...never counts twice"
+    assert patience.holds("wlla", no_signal(5))
+    assert patience.resume_at == 61 + 600
+    now[0] = 700
+    assert patience.holds("wlla", no_signal(6)) and patience.resume_at == 700 + 600, "the longest wait"
+    assert not patience.holds("wkar", no_signal(7)), "another saved channel starts over"
+
+
+def test_the_always_on_keeper_stops_hammering_a_channel_with_no_signal(monkeypatch):
+    """2026-11-22, viviserv2: a viewer's tune made WLLA 64.1 the saved channel, a DX station
+    from Kalamazoo that had faded. The keeper retuned it every 5 s for ten hours ("the
+    antenna got no lock in 3 s" 6,496 times), and the tuner read buffering throughout. Now
+    it tries twice more, then less and less often; a station that plays again starts over."""
+    import threading
+
+    now = [1000.0]
+    patience = server.NoSignalPatience
+    monkeypatch.setattr(server, "NoSignalPatience", lambda: patience(retries=3, clock=lambda: now[0]))
+    dead = {"alive": False, "ready": False, "unknown": False, "selection": None,
+            "revision": 1, "error": NO_SIGNAL}
+    tuned_at, wakes, stopping = [], [0], threading.Event()
+
+    class Feed:
+        def lane(self, lane):
+            wakes[0] += 1
+            wake = wakes[0]
+            server.always_on_wakeup.set()
+            if wake == 18:
+                stopping.set()                       # this pass, then the worker returns
+                dead["revision"] += 1                # it fades again after playing
+            now[0] += {11: 61, 15: 121}.get(wake, 0)
+            if wake == 17:                           # it came back, and plays
+                return {**dead, "alive": True, "ready": True, "error": None}
+            return dict(dead)
+
+        def tune_digital(self, channel, quality, taps=()):
+            tuned_at.append(wakes[0])
+            dead["revision"] += 3                    # started, ran 3 s, died for lack of signal
+            return True, None, False
+
+    monkeypatch.setattr(server, "feed_client", Feed())
+    monkeypatch.setattr(server, "shutting_down", stopping)
+    monkeypatch.setattr(server, "ALWAYS_ON", True)
+    monkeypatch.setattr(server, "scanning", False)
+    monkeypatch.setattr(server, "guide_refreshing", False)
+    monkeypatch.setattr(server, "load_playback_state",
+                        lambda: ({"id": "lansing/wlladtv_64_1"}, "medium"))
+    monkeypatch.setattr(server, "recording_tap_ports", lambda channel: [])
+    server.always_on_wakeup.set()
+    server.always_on_worker()
+    # Wakes 1-2 retune, the third failure in a row holds it off a minute (wakes 3-10); the
+    # retry at 11 fails, two minutes off; the retry at 15 fails, five; it plays at 17 and
+    # fails again at 18, which is a first failure again.
+    assert tuned_at == [1, 2, 11, 15, 18]
+
+
 def test_coverage_is_reported_against_the_clock_not_the_refresh(monkeypatch):
     """A stored guide overstates its coverage by exactly its own age."""
     now = 1_800_000_000

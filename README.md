@@ -50,7 +50,7 @@ grabbers, webcams, composite/S-video dongles -- is deliberately **not**
 supported: tuner discovery keeps only nodes that expose a V4L2 *tuner* input,
 which excludes capture cards by construction rather than by name matching.
 
-Every retune replaces both the tiny tuner-side source and FFmpeg. This gives each broadcaster a fresh timestamp domain; carrying one CFR encoder across unrelated MPEG clocks can create a catastrophic duplicate-frame backlog. Generation-specific segment names let the browser reload the new feed without stale cache entries. Playback is always-on: the server remembers the most recent channel and quality, resumes them at boot or after a scan, and restarts failed media processes. The public stop endpoint is intentionally a no-op.
+Every retune replaces both the tiny tuner-side source and FFmpeg. This gives each broadcaster a fresh timestamp domain; carrying one CFR encoder across unrelated MPEG clocks can create a catastrophic duplicate-frame backlog. Generation-specific segment names let the browser reload the new feed without stale cache entries. Playback is always-on: the server remembers the most recent channel and quality, resumes them at boot or after a scan, and restarts failed media processes. A channel that gets no signal (a DX station that has faded) is retried twice, then after 1, 2, 5 and every 10 minutes, the tuner reading `failed` with the reason in between, until it plays or another channel is tuned. The public stop endpoint is intentionally a no-op.
 
 ---
 

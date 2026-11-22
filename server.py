@@ -2715,13 +2715,61 @@ def start_analog(channel, quality="medium"):
     return ok, error, tuner
 
 
+# The keeper's patience with a channel the antenna cannot lock. A viewer's tune of a station
+# that had faded (a DX catch: viviserv2's WLLA 64.1, from Kalamazoo, heard once at a rescan)
+# made it the saved channel, and the keeper retuned it every 5 s for ten hours (2026-11-22,
+# 00:26 to 10:19): "the antenna got no lock in 3 s" 6,496 times, the tuner reading buffering
+# all along. After NO_SIGNAL_RETRIES such failures in a row it waits instead, longer each time
+# up to NO_SIGNAL_BACKOFF's last, and meanwhile the lane reads failed with the reason ("Could
+# not retrieve signal for WLLADTV (RF 22): ..."), free for the next tune. A station that comes
+# back plays at the next try; a tune of another channel, or the lane playing, starts it over.
+NO_SIGNAL_RETRIES = int(os.environ.get("TV_THING_NO_SIGNAL_RETRIES", "3"))
+NO_SIGNAL_BACKOFF = (60, 120, 300, 600)
+NO_SIGNAL_PREFIX = "Could not retrieve signal"   # no lock, or a lock with no data (dvb_source.py)
+
+
+class NoSignalPatience:
+    """How long the always-on keeper leaves a channel alone that got no signal (above)."""
+
+    def __init__(self, retries=None, backoff=NO_SIGNAL_BACKOFF, clock=time.monotonic):
+        self.retries = NO_SIGNAL_RETRIES if retries is None else retries
+        self.backoff = backoff
+        self.clock = clock
+        self.forget()
+
+    def forget(self):
+        """Start over: the lane played, or another channel is the saved one."""
+        self.channel_id, self.failures, self.counted, self.resume_at = None, 0, None, None
+
+    def holds(self, channel_id, lane):
+        """Whether the keeper leaves the dead ``lane`` alone now rather than retune the saved
+        ``channel_id``. Each failure for lack of signal counts once: the lane's revision and
+        error name it, and they stay put while it lies dead."""
+        if channel_id != self.channel_id:
+            self.forget()
+            self.channel_id = channel_id
+        error = lane.get("error") or ""
+        failure = (lane.get("revision"), error)
+        if error.startswith(NO_SIGNAL_PREFIX) and failure != self.counted:
+            self.counted = failure
+            self.failures += 1
+            if self.failures >= self.retries:
+                wait = self.backoff[min(self.failures - self.retries, len(self.backoff) - 1)]
+                self.resume_at = self.clock() + wait
+                print(f"Always-on: {error} ({self.failures} times in a row): "
+                      f"the next try in {wait} s", flush=True)
+        return self.resume_at is not None and self.clock() < self.resume_at
+
+
 def always_on_worker():
     """Keep the saved digital channel running across failures.
 
     Only the digital lane is kept alive. Analog is an explicit, user-driven
     selection and is never auto-restarted; because it uses a different
-    front-end it also never blocks the digital lane.
+    front-end it also never blocks the digital lane. A channel that gets no
+    signal is retried less and less often (NoSignalPatience).
     """
+    patience = NoSignalPatience()
     while True:
         always_on_wakeup.wait(timeout=5)
         always_on_wakeup.clear()
@@ -2735,6 +2783,8 @@ def always_on_worker():
         try:
             with lock:
                 digital = feed_client.lane(LANE_DIGITAL)
+                if digital.get("alive") and digital.get("ready"):
+                    patience.forget()
                 # An unknown lane is one the feed could not vouch for just now,
                 # not a dead one: control waking from a freeze reads unknown
                 # while another thread refetches, and retuning on that
@@ -2747,7 +2797,7 @@ def always_on_worker():
                     continue
 
                 channel, quality = load_playback_state()
-                if channel is None:
+                if channel is None or patience.holds(channel["id"], digital):
                     continue
                 ok, error, _ = feed_client.tune_digital(
                     channel, quality, taps=recording_tap_ports(channel))

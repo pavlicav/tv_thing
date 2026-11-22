@@ -155,7 +155,10 @@ decides again before its plan is saved, so the stations it finds are kept: away,
 is `state/channels.json`, numbered here as `digital@lansing` (the Michigan block, 25-37, and
 Michigan extras, 380-429; DX finds take the next free extra, then the other cities' 430-449) and
 played only by its own tuners. The always-on channel is one this box's plan has and its last
-scan received.
+scan received. One that has faded since is not retuned every 5 s for good: after three
+failures in a row for lack of signal the keeper tries after 1, 2, 5, then every 10 minutes, and
+tuner A reads `failed`, "Could not retrieve signal for ...", in between (WLLA 64.1 retuned for
+ten hours, 2026-11-22).
 
 Rescans here have been uneven: the Rescan page's 16:15 scan missed RF 9, and the 17:34 one
 got RF 9 but missed RF 24 (WDCO 10.1). Neither changes the dial any more. The plan is the
