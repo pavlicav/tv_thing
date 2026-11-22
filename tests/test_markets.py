@@ -134,6 +134,43 @@ def test_another_markets_channel_is_relayed_from_its_owner(home, monkeypatch):
     assert home.sent[0]["channel_id"] == "lansing/wlns_6_1"
 
 
+def test_the_digital_catalog_lists_this_boxs_own_then_the_other_markets_relayed(home):
+    catalog = server.api_v1_digital_source()
+    assert [(item["id"], item.get("relayed", False), item["market"]) for item in catalog["items"]] == [
+        ("wrc_hd_4_1", False, "dc"), ("wttg_5_1", False, "dc"), ("lansing/wlns_6_1", True, "lansing")]
+    wlns = catalog["items"][2]
+    assert (wlns["node"], wlns["market_name"], wlns["tv_number"]) == ("viviserv2", "Lansing", 400)
+    assert catalog["source"]["count"] == 3
+
+
+def test_away_the_catalog_keeps_this_boxs_own_ids_and_adds_the_primarys_relayed(lansing):
+    items = server.api_v1_digital_source()["items"]
+    # Its own as its plan has them (its recorder and guide know them so), then DC's.
+    assert [(item["id"], item.get("relayed", False)) for item in items] == [
+        ("wlns_6_1", False), ("wrc_hd_4_1", True), ("wttg_5_1", True)]
+    assert (items[1]["market_name"], items[1]["node"], items[1]["tv_number"]) == ("Washington", "dc-primary", 14)
+
+
+def test_away_with_no_box_in_the_home_market_its_channels_are_not_listed(lansing, monkeypatch):
+    """The tracked plan stands in on the dial, but no tuner could play it."""
+    monkeypatch.setattr(server, "peer", None)
+    assert [item["id"] for item in server.api_v1_digital_source()["items"]] == ["wlns_6_1"]
+
+
+def test_away_the_home_markets_channel_is_relayed_from_the_primary(lansing, monkeypatch):
+    here = {"id": "viviserv2:digital", "node": "viviserv2", "lane": "digital", "kind": "digital", "local": True,
+            "market": "lansing", "available": True, "reachable": True, "rf_channels": [36],
+            "tsids": {"36": 1234}, "stream": {"active": False}}
+    there = dict(here, id="dc-primary:digital", node="dc-primary", local=False, market="dc", rf_channels=None)
+    server.peer._tuners = [there]
+    monkeypatch.setattr(server, "local_tuners", lambda: [here])
+    monkeypatch.setattr(server, "RELAY_CONFIRM_POLL_SECONDS", 0)
+    # WTTG is on RF 36 here too, but this box's 36 is WLNS.
+    payload, status = server.api_v1_digital_tune({"channel_id": "wttg_5_1"}, "low")
+    assert status == 200 and payload["relayed"] and payload["tuner"] == "dc-primary:digital"
+    assert payload["stream"]["playlist_path"] == "/stream/peer/digital.m3u8"
+
+
 def test_a_box_learns_the_home_market_from_the_primarys_plan(lansing, monkeypatch):
     assert server.home_market() == "dc" and server.away()
     assert server.own_plan_file() == lansing

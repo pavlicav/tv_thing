@@ -45,6 +45,9 @@ FIXTURE = {
         {"id": "wzdc_44_1", "number": "44.1", "name": "WZDC", "rf_channel": 34, "tv_number": 44},
         {"id": "wxyz_99_1", "number": "99.1", "name": "Bonus 10", "rf_channel": 30},
         {"id": "wxyz_99_2", "number": "99.2", "name": "Bonus 9", "rf_channel": 30},
+        # Another market's, relayed from the box there: its 7.1 is not this box's 7.1 (WJLA).
+        {"id": "lansing/wlaj_7_1", "number": "7.1", "name": "WLAJ", "rf_channel": 14, "tv_number": 407,
+         "market": "lansing", "market_name": "Lansing", "node": "viviserv2", "relayed": True},
     ],
     "sources": [
         {"id": "youtube-tv", "name": "YouTube TV", "lane": "roku", "dated": False},
@@ -214,6 +217,9 @@ def test_tuned_channels_carry_their_listings(tmp_path):
     assert wjla["detail"] == "Jeopardy!"
     # A programme already over is dropped.
     assert [e["title"] for e in wjla["events"]] == ["Jeopardy!"] and wjla["events"][0]["captions"] is True
+    wlaj = entries["digital:lansing/wlaj_7_1"]
+    assert wlaj["events"] == [] and wlaj["detail"] == "Lansing · Antenna 7.1 · RF 14"
+    assert wlaj["label"] == "Lansing 7.1" and wlaj["channelId"] == "lansing/wlaj_7_1"
     nbc = entries["roku:youtube-tv:NBC"]
     assert nbc["detail"] == "Dateline" and nbc["events"][0]["live"] is True and nbc["label"] == "YouTube TV"
     game = entries["roku:mlb:2026-10-25:776"]

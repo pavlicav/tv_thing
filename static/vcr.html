@@ -865,8 +865,10 @@ async function sourceItems(source, day) {
   try {
     const query = source.dated ? `?date=${day}` : "";
     const data = await api(source.items_path.replace(/^\//, "") + query);
-    catalogs.set(key, { at: Date.now(), items: data.items || [] });
-    return data.items || [];
+    // This box's tuners record; another market's antenna channels play here only relayed.
+    const items = (data.items || []).filter(item => !item.relayed);
+    catalogs.set(key, { at: Date.now(), items });
+    return items;
   } catch (_) {
     return cached ? cached.items : null;    // null: it could not be listed
   }

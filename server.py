@@ -57,6 +57,7 @@ from roku_control.errors import (BaseballScheduleError, ChannelNotFoundError,
                                  ConfigError, ControlBusyError, EcpError,
                                  RokuStreamError)
 from roku_control.days import today as games_day
+from roku_control.networks import NETWORKS
 from roku_control.sports import estimated_end
 
 BASE_DIR = Path(__file__).parent
@@ -5769,8 +5770,26 @@ def _api_v1_status_payload():
     }
 
 
+def relayed_channels(own_ids=()):
+    """The dial's channels that only the other box's tuners get (another market's), each with
+    ``relayed`` and its market's ``market_name``: a tune plays them over the relay
+    (api_v1_digital_tune). Not those of a market no box answers for (no owner), nor any with an
+    id in ``own_ids``."""
+    rows = []
+    for _, _, row in antenna_dial():
+        if row.get("market") == MARKET or not row.get("node") or row["id"] in own_ids:
+            continue
+        market = NETWORKS.markets.get(row["market"])
+        rows.append(dict(row, relayed=True, market_name=market.name if market else row["market"]))
+    return rows
+
+
 def api_v1_digital_source():
-    channels = numbered_channels(load_channels())
+    """Every antenna channel on the dial: this box's own, as its plan has them (ids and all:
+    its recorder and its guide know them so), then the other market's, relayed from the box
+    that owns them (relayed_channels). Since 2026-11-22; before, this box's own alone."""
+    own = [dict(channel, market=MARKET) for channel in numbered_channels(load_channels())]
+    channels = own + relayed_channels({channel["id"] for channel in own})
     return {
         "api_version": API_VERSION,
         "source": {

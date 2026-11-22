@@ -850,6 +850,18 @@
       return { now: null, next: entry.next && entry.next.start > now ? entry.next : null };
     }
 
+    // An antenna channel's airing, from its number's guide row: this box's own antenna's.
+    // Another market's channel, relayed from the box there, has none here, since its
+    // number may be a different station's in this market (66.1 is ION in DC, FOX 66 in Lansing).
+    function antennaListing(channel, now) {
+      return channel && !channel.relayed ? listingFor(channel.number, now) : { now: null, next: null };
+    }
+
+    // "Lansing · RF 28" for another market's channel; "RF 28" for this box's own.
+    function antennaWhere(channel) {
+      return (channel.relayed ? `${channel.market_name || channel.market} · ` : "") + `RF ${channel.rf_channel}`;
+    }
+
     function progressOf(event, now) {
       return Math.max(0, Math.min(100, ((now - event.start) / event.duration) * 100));
     }
@@ -895,8 +907,8 @@
       if (state.playing === "tv") {
         const ch = state.channels.find(c => c.id === state.currentChannelId);
         num.textContent = ch ? (Number.isInteger(ch.tv_number) ? String(ch.tv_number) : ch.number) : "– –";
-        num.title = ch ? `Antenna ${ch.number} · RF ${ch.rf_channel}` : "";
-        body.innerHTML = (ch && listingHtml(ch.number, now))
+        num.title = ch ? `Antenna ${ch.number} · ${antennaWhere(ch)}` : "";
+        body.innerHTML = (ch && !ch.relayed && listingHtml(ch.number, now))
           || '<div class="bn-none">No listing for this channel</div>';
       } else if (state.playing === "vizelvision") {
         num.textContent = state.houseNumber !== null ? String(state.houseNumber) : "VV";
@@ -1477,8 +1489,8 @@
           current = state.playing === "tv" && state.currentChannelId === entry.channel.id;
           // The antenna's own number rides in the tag, as the Antenna tab lists it.
           if (!numbered) { key = entry.channel.number; tag = "ATSC"; }
-          const on = listingFor(entry.channel.number, Date.now() / 1000).now;
-          sub = on ? on.title || "No title" : `Antenna · RF ${entry.channel.rf_channel}`;
+          const on = antennaListing(entry.channel, Date.now() / 1000).now;
+          sub = on ? on.title || "No title" : `Antenna · ${antennaWhere(entry.channel)}`;
           if (on) progress = `<span class="item-bar"><i style="width:${progressOf(on, Date.now() / 1000).toFixed(0)}%"></i></span>`;
           button.addEventListener("click", () => tuneTv(entry.channel.id));
         } else if (entry.kind === "roku") {
@@ -1536,7 +1548,7 @@
     // scan: primaries first, then each station's subchannels, with the RF.
     function renderAntennaList() {
       const items = state.channels.filter(channel => matches(
-        `${channel.number} ${channel.name} rf ${channel.rf_channel} ch ${channel.tv_number ?? ""}`));
+        `${channel.number} ${channel.name} rf ${channel.rf_channel} ch ${channel.tv_number ?? ""} ${channel.market_name || ""}`));
       els.panelCount.textContent = String(items.length);
       const now = Date.now() / 1000;
       for (const channel of items) {
@@ -1545,8 +1557,9 @@
         button.dataset.channelKey = `antenna:${channel.id}`;
         button.setAttribute("aria-current",
                             String(state.playing === "tv" && state.currentChannelId === channel.id));
-        const on = listingFor(channel.number, now).now;
+        const on = antennaListing(channel, now).now;
         const sub = [Number.isInteger(channel.tv_number) ? `Ch ${channel.tv_number}` : "",
+                     channel.relayed ? channel.market_name || channel.market : "",
                      on ? on.title || "No title" : ""].filter(Boolean).join(" · ");
         const progress = on
           ? `<span class="item-bar"><i style="width:${progressOf(on, now).toFixed(0)}%"></i></span>` : "";
@@ -1569,8 +1582,9 @@
     // when the lineup has not numbered it.
     function digitalLabel(channel) {
       const known = state.channels.find(c => c.id === channel.id) || channel;
+      const antenna = known.relayed ? `${known.market_name || known.market} antenna` : "antenna";
       return Number.isInteger(known.tv_number)
-        ? `Channel ${known.tv_number} · antenna ${known.number}` : `Channel ${known.number}`;
+        ? `Channel ${known.tv_number} · ${antenna} ${known.number}` : `Channel ${known.number}`;
     }
 
     function tuneVizelVision(number) {

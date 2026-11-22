@@ -40,7 +40,8 @@
     for (const channel of channels) {
       items.push(numbered({ id: `digital:${channel.id}`, kind: 'digital', name: channel.name,
         sourceName: 'ATSC', tag: channel.number, channel,
-        search: `${channel.number} ${channel.name} ATSC digital antenna RF ${channel.rf_channel}` }, channel));
+        // Another market's, relayed from the box there, is found by its city too.
+        search: `${channel.number} ${channel.name} ATSC digital antenna RF ${channel.rf_channel} ${channel.market_name || ''}` }, channel));
     }
     for (const source of sources) {
       for (const item of feeds[source.id] || []) {

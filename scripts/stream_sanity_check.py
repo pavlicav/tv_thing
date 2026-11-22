@@ -798,7 +798,9 @@ def main(argv=None):
                 channel_payload = http_json(
                     args.url, "/api/v1/sources/digital"
                 )
-                channels = preferred_channels(channel_payload.get("items", []))
+                # This box's own: another market's play only relayed, from the box there.
+                channels = preferred_channels([item for item in channel_payload.get("items", [])
+                                               if not item.get("relayed")])
             else:
                 channels = preferred_channels(
                     http_json(args.url, "/api/channels")
