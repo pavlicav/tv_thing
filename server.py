@@ -41,6 +41,7 @@ import feed_api
 import feed_node
 import host_config
 import internet_streams
+import vizelvision_relay
 import lineup
 import av_skew
 import ota_epg
@@ -102,7 +103,9 @@ VIZELVISION_MEDIA_URL = os.environ.get(
     # A second node plays the primary's VizelVision, when it knows the primary's address.
     HOST.primary_url(6970, "/v1/master/media/") or "http://127.0.0.1:6970/v1/master/media/"
 ).rstrip("/") + "/"
-VIZELVISION_MAX_MEDIA_BYTES = 16 * 1024 * 1024
+# urlopen is looked up at each fetch, so that tests can stand in for the station.
+VIZELVISION_RELAY = vizelvision_relay.Relay(
+    VIZELVISION_MEDIA_URL, opener=lambda request, timeout: urlopen(request, timeout=timeout))
 
 # ---------------------------------------------------------------------------
 # Guide
@@ -7659,27 +7662,18 @@ class TVHandler(SimpleHTTPRequestHandler):
 
         Relative playlist references stay in this same-origin namespace, both
         directly on :8080 and under /tv/. Only flat HLS assets are accepted.
+        Segments are fetched ahead of the player (vizelvision_relay.py).
         """
         filename = parsed.path.removeprefix("/stream/vizelvision/")
         if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:m3u8|mp4|m4s|ts)", filename):
             self.send_json({"error": "Invalid station media path"}, status=400)
             return
-        url = VIZELVISION_MEDIA_URL + filename
-        if parsed.query:
-            url += "?" + parsed.query
-        headers = {"Accept-Encoding": "identity"}
-        if self.headers.get("Range"):
-            headers["Range"] = self.headers["Range"]
+        uri = filename + ("?" + parsed.query if parsed.query else "")
         try:
-            with urlopen(Request(url, headers=headers), timeout=5) as response:
-                content = response.read(VIZELVISION_MAX_MEDIA_BYTES + 1)
-                if len(content) > VIZELVISION_MAX_MEDIA_BYTES:
-                    self.send_json({"error": "Station media too large"}, status=502)
-                    return
-                status = response.status
-                forwarded = {name: response.headers[name] for name in (
-                    "Content-Type", "Content-Range", "Accept-Ranges"
-                ) if response.headers.get(name)}
+            status, forwarded, content = VIZELVISION_RELAY.get(uri, self.headers.get("Range"))
+        except vizelvision_relay.TooLarge:
+            self.send_json({"error": "Station media too large"}, status=502)
+            return
         except HTTPError as error:
             self.send_json({"error": "VizelVision stream unavailable"}, status=error.code)
             return
