@@ -14,9 +14,10 @@ door (``:8080``), the way any client does:
   ``plan_interval``. The last one read is kept in ``plan_store``, so the peer's channels
   stay on the dial while it is down (their tuners then read unknown).
 
-Streams are not relayed here: the front door proxies ``/stream/peer/`` to the peer's
-``/stream/`` (deploy/apache/tv-thing-routes.conf), so a viewer only ever talks to its own
-node. ``stream_path`` rewrites a peer's playlist path into that local one.
+Streams are not relayed here: the front door sends ``/stream/peer/`` to web-basic, which
+relays the peer's ``/stream/`` with its segments fetched ahead (web_basic.send_peer,
+hls_relay.py), so a viewer only ever talks to its own node. ``stream_path`` rewrites a peer's
+playlist path into that local one.
 """
 from __future__ import annotations
 

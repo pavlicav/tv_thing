@@ -281,8 +281,10 @@ front door on 127.0.0.1.
   locked one); a free tuner of this box's, an idle one before a running one; a free tuner of the
   other box's. "Free" means known, unlocked and not scanning. A **lock** is what moves a tune:
   locking a tuner sends the next tune to another one.
-- **The other box's stream** plays here at `/stream/peer/...`: Apache proxies it to the other
-  box's `/stream/`. A viewer only ever talks to the box it opened.
+- **The other box's stream** plays here at `/stream/peer/...`: Apache sends it to web-basic,
+  which relays the other box's `/stream/` with its segments fetched ahead (`hls_relay.py`),
+  so the ~100 ms between the boxes never holds up a player. A viewer only ever talks to the
+  box it opened.
 - **A box that stops answering** for 6 s reads every tuner `unknown`, never free.
 - **Locks** on the other box's tuner (`lane: "viviserv:digital"`) are forwarded to that box,
   which issues and checks the token.
@@ -320,7 +322,7 @@ curl -s http://127.0.0.1:8080/api/v1/status | python3 -m json.tool | less
 ```
 
 - **Restarting:** `sudo systemctl restart tv-thing` drops nothing (use the restart drill).
-  `tv-thing-web-basic` drops only its own web streams. `tv-thing-feed` drops every stream and
+  `tv-thing-web-basic` drops only its own web streams and the other box's streams playing here. `tv-thing-feed` drops every stream and
   ends every recording: do it deliberately.
 - **Code** (a pull, section 5): reaches each service at its next restart, crash restarts
   included, as on viviserv.

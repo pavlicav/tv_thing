@@ -210,7 +210,10 @@ Two nodes (viviserv and viviserv2) run the same channel plan and pool their digi
 tuners (`tuner_pool.py`, `peers.py`). Each node's `peer_host` setting (Config) names the
 other's front door. Each node keeps its own tuners and locks; neither commands the other's
 feed. A peer's stream reaches a viewer through the viewer's own node, at `/stream/peer/`
-(the front door proxies it to the peer's `/stream/`).
+(the front door sends it to web-basic, which relays the peer's `/stream/` with its segments
+fetched ahead, `hls_relay.py`; every stream alike, tuner, internet or slide channel). A
+media playlist there leaves out its newest segments (two at most) until they have arrived,
+and starts the player at most half its length back (`#EXT-X-START`).
 
 `GET /api/v1/tuners` (`?local=1`: this node's own only, what a peer reads) is
 `{node, peer: {url, node, reachable, error} | null, tuners, summary: {total, reachable,
