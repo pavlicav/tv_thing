@@ -5,6 +5,7 @@ bounds, does not grow its memory, and stops when nobody watches.
     python3 scripts/web_stream_check.py sports-guide
     python3 scripts/web_stream_check.py cairo-radio --minutes 10
     python3 scripts/web_stream_check.py internet/pentulive --base http://127.0.0.1:8085
+    python3 scripts/web_stream_check.py peer/digital.m3u8
 
 It watches one stream as a viewer would -- its playlist every two seconds, each new
 segment once -- for ``--minutes``, sampling the web-basic service's process tree
@@ -21,7 +22,8 @@ when:
   does not come back to within --max-rss-left-mib of where it began.
 
 A relay (internet/<id>) has no processes of its own, so its CPU and memory are the
-service's. Read-only: it asks for the stream as any viewer does and touches nothing
+service's; so has the peer's stream through this box's relay (peer/<path>: a playlist's own
+path, such as peer/digital.m3u8 for the other box's tuner, or peer/internet/<id>). Read-only: it asks for the stream as any viewer does and touches nothing
 else; it stops by itself after --minutes.
 """
 from __future__ import annotations
@@ -57,7 +59,7 @@ def get(url, timeout=10):
 def media_playlist(base, name):
     """``(url of the media playlist, its text)``, following a relay's first variant; None
     when there is none yet."""
-    url = f"{base.rstrip('/')}/stream/{name}/index.m3u8"
+    url = f"{base.rstrip('/')}/stream/{name}" + ("" if name.endswith(".m3u8") else "/index.m3u8")
     status, body = get(url)
     if status != 200:
         return None, None
@@ -91,7 +93,7 @@ def main_pid():
 
 def check(args):
     failures, samples = [], []
-    slide = not args.name.startswith("internet/")
+    slide = not args.name.startswith(("internet/", "peer/"))
     pid = args.pid or main_pid()
     if pid <= 0:
         return [f"{UNIT} is not running (no MainPID); pass --pid"], {}
@@ -195,7 +197,8 @@ def check(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("name", help="sports-guide, cairo-radio, or internet/<id> for a relay")
+    parser.add_argument("name", help="sports-guide, cairo-radio, internet/<id> for a relay, or peer/<path> "
+                                     "for the peer's stream (peer/digital.m3u8)")
     parser.add_argument("--base", default="http://127.0.0.1:8080", help="where to ask for the stream")
     parser.add_argument("--status", default="http://127.0.0.1:8085/web/v1/status", help="web-basic's status")
     parser.add_argument("--pid", type=int, help=f"web-basic's process (default: {UNIT}'s MainPID)")

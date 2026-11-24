@@ -6,6 +6,10 @@ and Cairo Radio (channel 197) -- and relays the simple web streams
 (internet_streams.json's streams with ``"service": "web-basic"``, such as
 pen2live). Each runs only while someone watches.
 
+It also relays the peer node's streams (``/stream/peer/``: the other box's
+``/stream/``, whatever plays there), their segments fetched ahead (hls_relay.py),
+so the ~100 ms between the boxes never holds up a player.
+
 They run here rather than in the feed, so a web stream that misbehaves spends
 this service's CPU and memory (tv-thing-web-basic.service's limits), never the
 tuners'. They are AGENTS.md's web streams stack: a change is checked by
@@ -31,10 +35,11 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
+import hls_relay
 import host_config
 import internet_streams
 import slide_stream
@@ -146,6 +151,21 @@ CAIRO_RADIO_INFO = os.environ.get("TV_THING_CAIRO_RADIO_INFO", _HOST.primary_url
                                   or "http://127.0.0.1/radio")
 # A title card that changes with the song: one frame a second is all it needs.
 CAIRO_FPS = 1
+
+# -- the peer node's streams (/stream/peer/) ---------------------------------------------
+# The peer's front door, as control's tuner pool reaches it (host_config's peer_host); None: no peer.
+PEER_STREAMS_URL = _HOST.peer_url("/stream/")
+# Its streams are relayed while anyone watches, every one of them through one relay: a
+# tuner's 0.6 s segments are ~200 KB at medium (~600 KB at high), so 160 held is ~100 MB at
+# most, inside the service's MemoryMax. A fetch from Michigan takes 0.25-0.9 s, and up to
+# 2.4 s, so a playlist's newest 5 (3 s of a tuner's) are fetched at once and left out until
+# they arrive; two (VizelVision's 1 s segments' number) left a tenth of a tuner's segments to
+# keep the player waiting (2026-11-23). A tuner's playlist lists 12 s; a player starts at
+# most half of it back.
+PEER_WORKERS = 6
+PEER_KEEP = 160
+PEER_NEWEST = 5
+PEER_START_WITHIN = 0.5
 
 
 def build_cairo_radio_command(generation, directory, audio_url=CAIRO_RADIO_AUDIO):
@@ -301,6 +321,52 @@ def send_relay(handler, relays, parsed, allowed=None):
             handler.close_connection = True
 
 
+def send_peer(handler, relay, parsed):
+    """One of the peer node's stream files: ``/stream/peer/<path>`` is the peer's
+    ``/stream/<path>``, through ``relay`` (hls_relay.py). Never ``/stream/peer/peer/``: two
+    nodes would hand that request back and forth."""
+    path = parsed.path.removeprefix("/stream/peer/")
+    if relay is None:
+        send_json(handler, {"error": "This node has no peer"}, 404)
+        return
+    if path.startswith("peer/") or not hls_relay.RELATIVE.fullmatch(path) or len(parsed.query) > 1024:
+        send_json(handler, {"error": "Invalid peer stream path"}, 404)
+        return
+    try:
+        status, forwarded, content = relay.get(path + (f"?{parsed.query}" if parsed.query else ""),
+                                               handler.headers.get("Range"))
+    except HTTPError as error:
+        error.close()
+        send_json(handler, {"error": f"The peer answered {error.code}"}, error.code)
+        return
+    except hls_relay.TooLarge:
+        send_json(handler, {"error": "The peer's file is too large"}, 502)
+        return
+    except (URLError, OSError, TimeoutError):
+        send_json(handler, {"error": "The peer did not answer"}, 502)
+        return
+    handler.send_response(status)
+    for name, value in forwarded.items():
+        handler.send_header(name, value)
+    handler.send_header("Content-Length", str(len(content)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.end_headers()
+    try:
+        handler.wfile.write(content)
+    except (BrokenPipeError, ConnectionResetError, OSError):
+        handler.close_connection = True
+
+
+def peer_relay(base=PEER_STREAMS_URL):
+    """The relay of the peer's streams, or None without a peer."""
+    if not base:
+        return None
+    return hls_relay.Relay(base, opener=lambda request, timeout: urlopen(request, timeout=timeout),
+                           workers=PEER_WORKERS, keep=PEER_KEEP, newest=PEER_NEWEST, by_name=False,
+                           start_within=PEER_START_WITHIN)
+
+
 def loopback(address):
     return bool(re.fullmatch(r"127\.\d+\.\d+\.\d+|::1|::ffff:127\.\d+\.\d+\.\d+", address or ""))
 
@@ -309,8 +375,10 @@ class WebBasic:
     """The service's streams: the slide channels' video and its relays."""
 
     def __init__(self, directory=STREAMS_DIR, control_url=CONTROL_URL, streams_file=INTERNET_STREAMS_FILE,
-                 idle_seconds=IDLE_SECONDS):
+                 idle_seconds=IDLE_SECONDS, peer=PEER_STREAMS_URL):
         self.slides = slide_streams(directory, control_url, idle_seconds)
+        # The peer's streams, played here (peer_relay).
+        self.peer = peer_relay(peer)
         # Its relays find a stream's URL as the feed's do: a fixed one from the file, any
         # other through control (internal_resolve).
         self.relays = internet_streams.InternetStreams(
@@ -328,7 +396,7 @@ class WebBasic:
 
     def status(self):
         return {"service": SERVICE, "slides": {name: stream.status() for name, stream in self.slides.items()},
-                "relays": self.relays_here()}
+                "relays": self.relays_here(), "peer": self.peer.status() if self.peer else None}
 
     def supervise(self, stopping):
         """Stop video nobody watches; restart video that died or stalled."""
@@ -396,8 +464,12 @@ def handler_for(service):
             if path.startswith("/stream/internet/"):
                 send_relay(self, service.relays, parsed, allowed=lambda stream_id: stream_id in service.relays_here())
                 return
+            if path.startswith("/stream/peer/"):
+                send_peer(self, service.peer, parsed)
+                return
             send_json(self, {"error": "This is TV Thing's web-basic service: the slide channels' "
-                                      "video and the simple web relays", "code": "web_basic_only"}, 404)
+                                      "video, the simple web relays and the peer's streams",
+                             "code": "web_basic_only"}, 404)
 
     return Handler
 
@@ -414,7 +486,8 @@ def main():
     httpd = ThreadingHTTPServer(("127.0.0.1", PORT), handler_for(service))
     httpd.daemon_threads = True
     print(f"TV Thing web-basic on http://127.0.0.1:{PORT}: slides {', '.join(service.slides)}; "
-          f"relays {', '.join(service.relays_here()) or 'none'}; control at {CONTROL_URL}", flush=True)
+          f"relays {', '.join(service.relays_here()) or 'none'}; peer {PEER_STREAMS_URL or 'none'}; "
+          f"control at {CONTROL_URL}", flush=True)
     try:
         httpd.serve_forever()
     except (KeyboardInterrupt, SystemExit):

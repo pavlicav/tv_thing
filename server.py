@@ -41,7 +41,7 @@ import feed_api
 import feed_node
 import host_config
 import internet_streams
-import vizelvision_relay
+import hls_relay
 import lineup
 import av_skew
 import ota_epg
@@ -104,9 +104,12 @@ VIZELVISION_MEDIA_URL = os.environ.get(
     # A second node plays the primary's VizelVision, when it knows the primary's address.
     HOST.primary_url(6970, "/v1/master/media/") or "http://127.0.0.1:6970/v1/master/media/"
 ).rstrip("/") + "/"
-# urlopen is looked up at each fetch, so that tests can stand in for the station.
-VIZELVISION_RELAY = vizelvision_relay.Relay(
-    VIZELVISION_MEDIA_URL, opener=lambda request, timeout: urlopen(request, timeout=timeout))
+# urlopen is looked up at each fetch, so that tests can stand in for the station. A player
+# starts at most half the playlist back: told 10 s back in a 10 s window (VizelVision's, while
+# it counted its window from MediaMTX's 3 s target duration, 2026-11-23), viviserv2's Roku sat
+# at the oldest segment and lost the picture at the first hiccup.
+VIZELVISION_RELAY = hls_relay.Relay(
+    VIZELVISION_MEDIA_URL, opener=lambda request, timeout: urlopen(request, timeout=timeout), start_within=0.5)
 
 # ---------------------------------------------------------------------------
 # Guide
@@ -7693,7 +7696,7 @@ class TVHandler(SimpleHTTPRequestHandler):
 
         Relative playlist references stay in this same-origin namespace, both
         directly on :8080 and under /tv/. Only flat HLS assets are accepted.
-        Segments are fetched ahead of the player (vizelvision_relay.py).
+        Segments are fetched ahead of the player (hls_relay.py).
         """
         filename = parsed.path.removeprefix("/stream/vizelvision/")
         if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:m3u8|mp4|m4s|ts)", filename):
@@ -7702,7 +7705,7 @@ class TVHandler(SimpleHTTPRequestHandler):
         uri = filename + ("?" + parsed.query if parsed.query else "")
         try:
             status, forwarded, content = VIZELVISION_RELAY.get(uri, self.headers.get("Range"))
-        except vizelvision_relay.TooLarge:
+        except hls_relay.TooLarge:
             self.send_json({"error": "Station media too large"}, status=502)
             return
         except HTTPError as error:

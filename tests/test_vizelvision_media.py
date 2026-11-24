@@ -68,12 +68,12 @@ def test_oversized_station_response_is_not_forwarded(monkeypatch):
     assert h.sent['status'] == 502
 
 
-# --- Segments fetched ahead (vizelvision_relay.py) --------------------------------------
+# --- Segments fetched ahead (hls_relay.py) --------------------------------------
 
 import threading
 from urllib.error import HTTPError
 
-import vizelvision_relay
+import hls_relay
 
 MEDIA = ('#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:10\n#EXT-X-MAP:URI="ab_video1_init.mp4?session=s"\n'
          + ''.join(f'#EXTINF:1.0,\nab_video1_seg{n}.mp4?session=s\n' for n in range(10, 20))).encode()
@@ -114,7 +114,7 @@ def settle(relay):
 
 def test_a_media_playlist_starts_its_init_and_newest_segments():
     station = Station()
-    relay = vizelvision_relay.Relay('http://primary/v1/master/media/', station)
+    relay = hls_relay.Relay('http://primary/v1/master/media/', station)
     status, _, body = relay.get('video1_stream.m3u8?session=s')
     assert status == 200
     settle(relay)
@@ -127,7 +127,7 @@ def test_a_media_playlist_starts_its_init_and_newest_segments():
 
 def test_a_segment_request_starts_the_next_ones():
     station = Station()
-    relay = vizelvision_relay.Relay('http://primary/v1/master/media/', station)
+    relay = hls_relay.Relay('http://primary/v1/master/media/', station)
     relay.get('video1_stream.m3u8?session=s')
     assert relay.get('ab_video1_seg12.mp4?session=s')[2] == b'ab_video1_seg12.mp4'
     settle(relay)
@@ -141,7 +141,7 @@ def test_a_segment_request_starts_the_next_ones():
 
 def test_one_fetch_serves_every_session_and_keeps_the_query_upstream():
     station = Station()
-    relay = vizelvision_relay.Relay('http://primary/v1/master/media/', station)
+    relay = hls_relay.Relay('http://primary/v1/master/media/', station)
     relay.get('ab_video1_seg30.mp4?session=a&quality=low')
     relay.get('ab_video1_seg30.mp4?session=b&quality=low')
     assert station.asked == ['http://primary/v1/master/media/ab_video1_seg30.mp4?session=a&quality=low']
@@ -149,7 +149,7 @@ def test_one_fetch_serves_every_session_and_keeps_the_query_upstream():
 
 def test_a_failed_fetch_is_tried_again_and_its_error_passes_through():
     station = Station(failing={'ab_video1_seg40.mp4'})
-    relay = vizelvision_relay.Relay('http://primary/v1/master/media/', station)
+    relay = hls_relay.Relay('http://primary/v1/master/media/', station)
     with pytest.raises(HTTPError):
         relay.get('ab_video1_seg40.mp4')
     settle(relay)
@@ -159,7 +159,7 @@ def test_a_failed_fetch_is_tried_again_and_its_error_passes_through():
 
 def test_byte_ranges_go_straight_through_and_memory_is_bounded():
     station = Station()
-    relay = vizelvision_relay.Relay('http://primary/v1/master/media/', station)
+    relay = hls_relay.Relay('http://primary/v1/master/media/', station)
     relay.KEEP = 5
     relay.get('ab_video1_seg50.mp4', 'bytes=0-3')
     relay.get('ab_video1_seg50.mp4', 'bytes=0-3')
@@ -172,7 +172,7 @@ def test_byte_ranges_go_straight_through_and_memory_is_bounded():
 def test_the_handler_answers_a_segment_from_the_relay(monkeypatch):
     station = Station()
     monkeypatch.setattr(server, 'urlopen', station)
-    monkeypatch.setattr(server, 'VIZELVISION_RELAY', vizelvision_relay.Relay(
+    monkeypatch.setattr(server, 'VIZELVISION_RELAY', hls_relay.Relay(
         server.VIZELVISION_MEDIA_URL, opener=lambda request, timeout: server.urlopen(request, timeout=timeout)))
     h = handler('/stream/vizelvision/ab_video1_seg77.mp4?session=s')
     h.do_GET()
@@ -187,7 +187,7 @@ def test_the_newest_segments_are_left_out_until_they_are_in_memory():
         if 'seg19' in request.full_url:
             gate.wait(5)                     # the newest segment is still on its way
         return station(request, timeout)
-    relay = vizelvision_relay.Relay('http://primary/v1/master/media/', slow)
+    relay = hls_relay.Relay('http://primary/v1/master/media/', slow)
     held = relay.get('video1_stream.m3u8?session=s')[2].decode()
     assert held.rstrip().endswith('ab_video1_seg18.mp4?session=s') or held.rstrip().endswith('ab_video1_seg17.mp4?session=s')
     assert 'seg19' not in held
@@ -202,7 +202,7 @@ def test_the_newest_segments_are_left_out_until_they_are_in_memory():
 
 
 def test_at_most_two_segments_are_held_back():
-    relay = vizelvision_relay.Relay('http://primary/v1/master/media/', lambda request, timeout: pytest.fail('fetched'))
+    relay = hls_relay.Relay('http://primary/v1/master/media/', lambda request, timeout: pytest.fail('fetched'))
     relay._listed = lambda name, playlist: True
     held = relay._held(MEDIA).decode()   # nothing in memory: only the newest two go
     assert held.rstrip().endswith('ab_video1_seg17.mp4?session=s')
@@ -210,7 +210,7 @@ def test_at_most_two_segments_are_held_back():
 
 
 def test_a_start_of_its_own_and_multivariant_playlists_are_left_alone():
-    relay = vizelvision_relay.Relay('http://primary/v1/master/media/', Station())
+    relay = hls_relay.Relay('http://primary/v1/master/media/', Station())
     own = b'#EXTM3U\n#EXT-X-START:TIME-OFFSET=-4.0\n#EXTINF:1.0,\nseg1.mp4\n'
     assert relay._started(own) is own
     multivariant = b'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=9329480\nvideo1_stream.m3u8?session=s\n'
@@ -219,5 +219,14 @@ def test_a_start_of_its_own_and_multivariant_playlists_are_left_alone():
         response = BytesIO(multivariant)
         response.status, response.headers = 200, {}
         return response
-    relay = vizelvision_relay.Relay('http://primary/v1/master/media/', station)
+    relay = hls_relay.Relay('http://primary/v1/master/media/', station)
     assert relay.get('index.m3u8')[2] == multivariant
+
+
+def test_a_player_starts_at_most_half_the_playlist_back():
+    """A 10 s window and a 10 s start would leave the player at the oldest segment."""
+    relay = hls_relay.Relay('http://primary/v1/master/media/', Station(), start_within=0.5)
+    assert relay._started(MEDIA).startswith(b'#EXTM3U\n#EXT-X-START:TIME-OFFSET=-5.0\n')
+    thirty = MEDIA + b''.join(b'#EXTINF:1.0,\nab_video1_seg%d.mp4\n' % n for n in range(20, 40))
+    assert relay._started(thirty).startswith(b'#EXTM3U\n#EXT-X-START:TIME-OFFSET=-10.0\n')
+    assert server.VIZELVISION_RELAY.start_within == 0.5

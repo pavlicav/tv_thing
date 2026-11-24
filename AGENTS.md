@@ -16,7 +16,8 @@ Production is three services, all run from this checkout (`INVARIANTS.md`,
   `127.0.0.1:8087`): the API and UI, locks, tune resolution, Roku navigation,
   guides, the VCR's rules and finalizing. Restarting it drops no stream.
 - `tv-thing-web-basic` (`web_basic.py`, `127.0.0.1:8085`): the web streams
-  stack (below). Restarting it drops only its own streams.
+  stack (below). Restarting it drops only its own streams, and the peer's
+  streams playing here through its relay.
 
 A change merged into this checkout reaches each service at its next restart,
 crash restarts included: merging is deploying, to whichever service runs the
@@ -55,6 +56,9 @@ the tuners' share:
   stop;
 - the relays of `internet_streams.json`'s `"service": "web-basic"` streams
   (pen2live), and `internet_streams.py`'s relay;
+- the peer node's streams at `/stream/peer/` (`web_basic.send_peer`), relayed
+  with their segments fetched ahead (`hls_relay.py`, which control's VizelVision
+  relay shares);
 - `web_basic.py` itself, `deploy/systemd/tv-thing-web-basic.service`, and its
   line in Apache's routes.
 
