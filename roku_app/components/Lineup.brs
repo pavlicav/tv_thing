@@ -30,8 +30,12 @@ function LineupBuild(channels as Object, sources as Object, feeds as Object, dat
         entry.label = "Antenna " + number
         if relayed then entry.label = LineupText(channel.market_name) + " " + number
         LineupNumbered(entry, channel)
-        ' This box's guide is its own antenna's: the number may be another station there.
-        if not relayed then LineupListing(entry, guide, number, nowSeconds)
+        ' This box's own antenna's guide row is its number's; another market's has the guide of
+        ' the box there, at its key in the lineup (listings: digital@lansing/6.1), since the
+        ' number may be another station here.
+        guideKey = number
+        if relayed then guideKey = LineupText(channel.listings)
+        if guideKey <> "" then LineupListing(entry, guide, guideKey, nowSeconds)
         rest.Push(entry)
     end for
     for each source in sources

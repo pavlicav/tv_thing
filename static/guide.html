@@ -657,8 +657,10 @@ function shownNumber(channel) {
     ? String(channel.tv_number) : channel.number || 'YTTV';
 }
 
-// "· antenna 7.1" where the lineup number differs from the antenna's.
+// "· antenna 7.1" where the lineup number differs from the antenna's; "· Lansing 6.1" for
+// another market's channel, relayed from the box there (its number may be one here too).
 function antennaNote(channel, before, after) {
+  if (channel.relayed) return `${before}${channel.market_name || channel.market} ${channel.number}${after}`;
   return channel.kind === 'digital' && shownNumber(channel) !== channel.number
     ? `${before}${channel.number}${after}` : '';
 }
@@ -974,8 +976,9 @@ function select(channel, event, { keepTime = true, scroll = true } = {}) {
       : 'No description — this station sends titles only.');
   $('d-watch').hidden = isGames(channel) && Boolean(gameRefusal(event));
   $('d-watch').textContent = `Watch ${shownNumber(channel)}`;
-  // An airing of a channel a tuner takes, with a time to set the timer by.
-  const recordable = !event.unlisted && end > now && (isRoku(channel) || channel.kind === 'digital');
+  // An airing of a channel a tuner here takes, with a time to set the timer by (not another
+  // market's: the VCR records this box's own tuners).
+  const recordable = !event.unlisted && end > now && (isRoku(channel) || (channel.kind === 'digital' && !channel.relayed));
   $('d-record').hidden = !recordable;
   $('btn-record-key').disabled = !recordable;
   $('d-record').disabled = false;
@@ -1026,8 +1029,9 @@ async function watch(channel, event) {
     return;
   }
   // The Roku takes a minute or two to find a YouTube TV channel, and may be
-  // locked; the Watch page shows that progress and asks about the lock.
-  if (isRoku(channel) || isInternet(channel) || isStation(channel) || isSlides(channel)) {
+  // locked; the Watch page shows that progress and asks about the lock. Another
+  // market's antenna channel plays relayed from the box there, as the Watch page tunes it.
+  if (isRoku(channel) || isInternet(channel) || isStation(channel) || isSlides(channel) || channel.relayed) {
     location.href = `./#watch=${encodeURIComponent(keyOf(channel))}`;
     return;
   }

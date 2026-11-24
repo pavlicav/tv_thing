@@ -13,6 +13,10 @@ door (``:8080``), the way any client does:
   is read by the same poller whenever its ``plan_revision`` changes, and at least every
   ``plan_interval``. The last one read is kept in ``plan_store``, so the peer's channels
   stay on the dial while it is down (their tuners then read unknown).
+* **Its guide** (``GET /api/v1/guide?local=1``: its own antenna's listings, about a megabyte)
+  is read by a second thread every ``guide_interval``, so that a slow read never holds up the
+  tuners'. The last one read stands while the peer is down; its airings are timestamped, so it
+  stays true until they end. It is kept in memory only: a restart reads it again at once.
 
 Streams are not relayed here: the front door proxies ``/stream/peer/`` to the peer's
 ``/stream/`` (deploy/apache/tv-thing-routes.conf), so a viewer only ever talks to its own
@@ -44,6 +48,21 @@ def stream_path(path):
     return RELAY_PREFIX + path.split("/stream/", 1)[-1].lstrip("/")
 
 
+def listed_rows(channels):
+    """A peer's ``/api/v1/guide`` rows that are its antenna's (keyed by antenna number, not
+    ``youtube-tv/NBC`` or ``digital@dc/4.1``), with only the airings that have a start and a
+    duration: what a guide built on them can rely on."""
+    rows = {}
+    for key, row in channels.items():
+        if "/" in str(key) or not isinstance(row, dict) or not isinstance(row.get("events"), list):
+            continue
+        events = [event for event in row["events"] if isinstance(event, dict)
+                  and all(isinstance(event.get(field), (int, float)) and not isinstance(event.get(field), bool)
+                          for field in ("start", "duration"))]
+        rows[str(key)] = {**row, "events": events}
+    return rows
+
+
 class PeerClient:
     """The peer's tuners, as last read, and its tune and lock calls.
 
@@ -52,8 +71,8 @@ class PeerClient:
     """
 
     def __init__(self, base_url, *, timeout=1.5, command_timeout=25.0, interval=2.0,
-                 max_age=6.0, plan_interval=60.0, plan_store=None, clock=time.monotonic,
-                 opener=urlopen):
+                 max_age=6.0, plan_interval=60.0, plan_store=None, guide_interval=600.0,
+                 guide_retry=30.0, guide_timeout=20.0, clock=time.monotonic, opener=urlopen):
         self.base_url = base_url.rstrip("/")
         self.timeout, self.command_timeout = timeout, command_timeout
         self.interval, self.max_age, self.clock, self.opener = interval, max_age, clock, opener
@@ -61,6 +80,8 @@ class PeerClient:
         self._lock = threading.Lock()
         self._read, self._at, self.last_error = None, None, None
         self._plan, self._plan_at = self._load_plan(), None
+        self.guide_interval, self.guide_retry, self.guide_timeout = guide_interval, guide_retry, guide_timeout
+        self._guide = None
         self._wakeup = threading.Event()
         self._stopping = threading.Event()
 
@@ -144,6 +165,24 @@ class PeerClient:
         with self._lock:
             return copy.deepcopy(self._plan)
 
+    def refresh_guide(self):
+        """Read the peer's own antenna's guide once, and keep it. Returns whether it answered."""
+        try:
+            status, payload = self._request("GET", "/api/v1/guide?local=1", timeout=self.guide_timeout)
+        except PeerUnavailable:
+            return False
+        if status != 200 or not isinstance(payload.get("channels"), dict):
+            return False
+        with self._lock:
+            self._guide = listed_rows(payload["channels"])
+        return True
+
+    def guide(self):
+        """The peer's antenna's guide rows as last read, by its antenna number (``{"6.1": row}``),
+        each with its airings (``events``); {} before one is read. Shared, not copied: read only."""
+        with self._lock:
+            return self._guide or {}
+
     def run(self):
         """The poller: read the peer every ``interval`` seconds until ``stop()``."""
         while not self._stopping.is_set():
@@ -151,8 +190,15 @@ class PeerClient:
             self._wakeup.wait(self.interval)
             self._wakeup.clear()
 
+    def run_guide(self):
+        """Read the peer's guide every ``guide_interval`` seconds, or ``guide_retry`` after a
+        read it did not answer, until ``stop()``."""
+        while not self._stopping.is_set():
+            self._stopping.wait(self.guide_interval if self.refresh_guide() else self.guide_retry)
+
     def start(self):
         threading.Thread(target=self.run, name="peer-poller", daemon=True).start()
+        threading.Thread(target=self.run_guide, name="peer-guide", daemon=True).start()
         return self
 
     def stop(self):

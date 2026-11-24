@@ -20,6 +20,7 @@ class FakePeer:
             {"id": "viviserv:digital", "node": "viviserv", "lane": "digital", "local": False},
         ]
         self.posted, self.status, self.plan, self.plans_read = [], 200, None, 0
+        self.guide, self.guides_read = None, []
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -40,6 +41,9 @@ class FakePeer:
                 if self.path == "/api/v1/plan":
                     fake.plans_read += 1
                     return self.answer(200, fake.plan) if fake.plan else self.answer(404, {})
+                if self.path.startswith("/api/v1/guide"):
+                    fake.guides_read.append(self.path)
+                    return self.answer(200, fake.guide) if fake.guide else self.answer(404, {})
                 assert self.path == "/api/v1/tuners?local=1"
                 self.answer(200, {"node": "viviserv2", "tuners": fake.tuners,
                                   "plan_revision": (fake.plan or {}).get("revision")})
@@ -155,3 +159,28 @@ def test_the_peers_plan_is_read_kept_and_read_again_when_it_changes(fake, tmp_pa
 def test_a_peer_from_before_plans_has_none(fake):
     client = peers.PeerClient(fake.url)
     assert client.refresh() and client.plan() is None
+
+
+def test_the_peers_own_antenna_guide_is_read_and_kept_while_it_is_down(fake):
+    fake.guide = {"available": True, "channels": {
+        "6.1": {"number": "6.1", "name": "WLNS", "key": "6.1", "kind": "digital", "events": [
+            {"start": 1000, "duration": 1800, "title": "News"},
+            {"start": "soon", "duration": 1800, "title": "Not a time"}, "junk"]},
+        # Not its antenna's: its YouTube TV, and the asking box's own channels relayed back.
+        "youtube-tv/NBC": {"events": [{"start": 1000, "duration": 60}]},
+        "digital@dc/4.1": {"events": [{"start": 1000, "duration": 60}]},
+        "7.1": "junk"}}
+    client = peers.PeerClient(fake.url)
+    assert client.guide() == {}
+    assert client.refresh_guide()
+    assert fake.guides_read == ["/api/v1/guide?local=1"]
+    assert list(client.guide()) == ["6.1"]
+    assert [event["title"] for event in client.guide()["6.1"]["events"]] == ["News"]
+    fake.status = 503
+    assert not client.refresh_guide()
+    assert list(client.guide()) == ["6.1"]
+
+
+def test_a_peer_from_before_guides_were_shared_has_none(fake):
+    client = peers.PeerClient(fake.url)
+    assert not client.refresh_guide() and client.guide() == {}

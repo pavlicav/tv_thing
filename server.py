@@ -5081,6 +5081,12 @@ def antenna_guide():
     return ota_epg.combine(epg.load_guide(), ota_epg.load_guide() if OTA_GUIDE_ENABLED else None)
 
 
+def peer_guide():
+    """The peer's own antenna's guide rows by antenna number, as last read
+    (peers.PeerClient.guide); {} without a peer or before it answers."""
+    return peer.guide() if peer is not None else {}
+
+
 def run_ota_guide_refresh(reason="manual"):
     """Read the antenna's listings for this market from the web and store them.
 
@@ -5460,7 +5466,7 @@ def yttv_guide_summary(guide, now):
     }
 
 
-def guide_payload(number=None, window_hours=None, now=None):
+def guide_payload(number=None, window_hours=None, now=None, local=False):
     """The stored guide, with events that have already finished dropped.
 
     Past events are dead weight in a grid that starts at the current hour,
@@ -5472,13 +5478,16 @@ def guide_payload(number=None, window_hours=None, now=None):
     (see sports_guide_channels), and the internet streams that publish
     listings, keyed ``internet/ID`` (see internet_guide_channels).
     ``available`` and the counts beside it describe the broadcast guide;
-    ``youtube_tv`` and ``sports`` the others.
+    ``youtube_tv`` and ``sports`` the others. Another market's antenna channels follow this
+    box's own, keyed by their lineup id (``digital@lansing/6.1``), from the guide of the box
+    there (channels.AntennaChannels.guide_relayed). ``local``: this box's own antenna's rows
+    only, what its peer reads.
     """
     now = int(time.time()) if now is None else now
     # Keep the hour already in progress so the grid has a left edge. One row asked
     # for (the Watch page asks per channel): no schedule but its own is read.
     window = channels.GuideWindow(now, now - 3600, now + window_hours * 3600 if window_hours else None,
-                                  number)
+                                  number, local)
     rows, summary = CHANNELS.guide(window)
     return {**summary, "channels": rows}
 
@@ -5506,8 +5515,8 @@ def name_antenna_games(channels):
 def guide_now_payload(now=None):
     """What is on right now, and what is next, per channel.
 
-    Antenna channels by number, YouTube TV's as ``youtube-tv/NAME``, internet
-    streams with listings as ``internet/ID``.
+    Antenna channels by number (another market's by lineup id, ``digital@lansing/6.1``),
+    YouTube TV's as ``youtube-tv/NAME``, internet streams with listings as ``internet/ID``.
     """
     entries, summary = CHANNELS.guide_now(int(time.time()) if now is None else now)
     return {**summary, "channels": entries}
@@ -5775,15 +5784,17 @@ def _api_v1_status_payload():
 
 def relayed_channels(own_ids=()):
     """The dial's channels that only the other box's tuners get (another market's), each with
-    ``relayed`` and its market's ``market_name``: a tune plays them over the relay
+    ``relayed``, its market's ``market_name`` and ``listings``, its row's key in the guide
+    (``digital@lansing/6.1``, from the box there): a tune plays them over the relay
     (api_v1_digital_tune). Not those of a market no box answers for (no owner), nor any with an
     id in ``own_ids``."""
     rows = []
-    for _, _, row in antenna_dial():
+    for source, key, row in antenna_dial():
         if row.get("market") == MARKET or not row.get("node") or row["id"] in own_ids:
             continue
         market = NETWORKS.markets.get(row["market"])
-        rows.append(dict(row, relayed=True, market_name=market.name if market else row["market"]))
+        rows.append(dict(row, relayed=True, market_name=market.name if market else row["market"],
+                         listings=f"{source}/{key}"))
     return rows
 
 
@@ -7095,6 +7106,7 @@ class TVHandler(SimpleHTTPRequestHandler):
                 hours = None
             self.send_json(guide_payload(
                 number=query.get("channel", [None])[0], window_hours=hours,
+                local=query.get("local", ["0"])[0] not in ("", "0", "false"),
             ))
             return
 

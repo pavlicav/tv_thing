@@ -82,11 +82,13 @@ class Found:
 @dataclass(frozen=True)
 class GuideWindow:
     """The part of the guide asked for: ``floor`` to ``ceiling`` (None: all of it),
-    and one row's key, ``number``, or every row."""
+    and one row's key, ``number``, or every row. ``local``: this box's own antenna's rows
+    only, what its peer reads (``GET /api/v1/guide?local=1``)."""
     now: int
     floor: int
     ceiling: int | None = None
     number: str | None = None
+    local: bool = False
 
     def current(self, events):
         return [event for event in events
@@ -168,15 +170,19 @@ class AntennaChannels(Adapter):
             home = source == lineup.ANTENNA
             network, market = (NETWORKS.antenna_channel(channel.get("number")) or (None, None)) \
                 if home else (None, channel.get("market"))
+            # Its guide row: this box's own antenna's by number; one relayed from the box in its
+            # market by its id (guide_relayed); none when no box there answers.
+            own = channel.get("market") == host.MARKET
+            listings = channel.get("number") if own else f"{source}/{key}" if channel.get("node") else None
             found_channels.append(Channel(
                 id=f"{source}/{key}", source_id="digital", channel_id=channel["id"],
                 number=channel.get("tv_number"), name=channel.get("tv_name") or channel.get("name"),
                 section=channel.get("tv_section"), kind=self.kind, lane=lane,
                 node=channel.get("node") or host.FEED_CONFIG.node,
                 network=network, market=market, tune={"source": "digital", "channel_id": channel["id"]},
-                # Another market's plays through the relay, and has no guide here yet.
+                # Another market's plays through the relay.
                 stream=f"/stream/{host.LANE_PLAYLIST[lane]}" if home else None,
-                listings=channel.get("number") if home else None,
+                listings=listings,
                 detail={"source_name": channel.get("name"), "antenna_number": channel.get("number"),
                         "rf_channel": channel.get("rf_channel"),
                         **({} if home else {"antenna_market": channel.get("market")})},
@@ -186,17 +192,44 @@ class AntennaChannels(Adapter):
                    "rf_channel": channel.get("rf_channel")}))
         return found_channels
 
+    def guide_relayed(self, window):
+        """Another market's channels' rows, from the guide of the box there (its own antenna's,
+        read by peers.PeerClient), keyed by their id in the lineup (``digital@lansing/6.1``;
+        on a box away from home, ``digital/4.1`` for the home market's), each with its
+        ``id`` (``lansing/wlns_6_1``), ``market``, ``market_name``, ``relayed`` and this
+        lineup's numbering.
+        This box's own guide cannot list them: a number may be another station here."""
+        if window.local:
+            return {}
+        listed = self.host.peer_guide()
+        if not listed:
+            return {}
+        rows = {}
+        for source, key, channel in self.host.antenna_dial():
+            row = listed.get(channel.get("number")) if channel.get("node") else None
+            if row is None or not window.wants(f"{source}/{key}"):
+                continue
+            rows[f"{source}/{key}"] = {
+                **row, **{field: channel.get(field) for field in ("tv_number", "tv_name", "tv_section")},
+                "id": channel["id"], "key": f"{source}/{key}", "kind": "digital",
+                "market": channel.get("market"), "market_name": getattr(
+                    NETWORKS.markets.get(channel.get("market")), "name", channel.get("market")),
+                "relayed": True, "events": window.current(row["events"])}
+        return rows
+
     def guide(self, window):
-        """The broadcast guide's rows, keyed by antenna number, its games named from ESPN;
-        and the summary of the stored guide, which the page's top line describes."""
+        """The broadcast guide's rows, keyed by antenna number, its games named from ESPN,
+        then the other market's (guide_relayed); and the summary of the stored guide, which
+        the page's top line describes."""
         host = self.host
+        relayed = self.guide_relayed(window)
         # The broadcast's own guide, each channel continued from the web where it ends.
         guide = host.antenna_guide()
         refresh_times = [f"{h:02d}:{m:02d}" for h, m in host.EPG_REFRESH_TIMES]
         web = host.ota_guide_summary(host.ota_epg.load_guide() if host.OTA_GUIDE_ENABLED else None, window.now)
         if not guide:
-            return {}, {"available": False, "refresh_times": refresh_times, "web": web,
-                        "refreshing": host.guide_refreshing, "last_error": host.guide_status["last_error"]}
+            return relayed, {"available": False, "refresh_times": refresh_times, "web": web,
+                             "refreshing": host.guide_refreshing, "last_error": host.guide_status["last_error"]}
         numbers = {}
         for channel in host.numbered_channels(host.load_channels()):
             if "tv_number" in channel:
@@ -208,7 +241,7 @@ class AntennaChannels(Adapter):
                 rows[key] = {**channel, **numbers.get(key, {}), "key": key, "kind": "digital",
                              "events": window.current(channel["events"])}
         now = window.now
-        return host.name_antenna_games(rows), {
+        return host.name_antenna_games(rows) | relayed, {
             "available": True,
             "generated_at": guide.get("generated_at"),
             "age_seconds": now - guide.get("generated_at", now),
@@ -244,6 +277,8 @@ class AntennaChannels(Adapter):
         for number, channel in host.name_antenna_games(airings).items():
             named = iter(channel["events"])
             entries[number] = {slot: event and next(named) for slot, event in entries[number].items()}
+        # The other market's, named by the box there.
+        entries |= now_and_next(self.guide_relayed(GuideWindow(now, now)), now)
         return entries, {"available": bool(guide), "generated_at": (guide or {}).get("generated_at")}
 
     def tune(self, source_id, body, quality):
@@ -475,6 +510,8 @@ class Registry:
     def guide(self, window):
         rows, summary = {}, {}
         for adapter in self.adapters:
+            if window.local and adapter.kind != AntennaChannels.kind:
+                continue
             part, fields = adapter.guide(window)
             rows.update(part)
             summary.update(fields)

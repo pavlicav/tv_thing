@@ -660,7 +660,7 @@ def test_the_guide_puts_the_station_on_through_the_watch_page_and_never_records_
     assert "const isStation = (channel) => channel.kind === 'vizelvision';" in GUIDE
     watch = section(GUIDE, "async function watch(", "async function record(")
     assert "isRoku(channel) || isInternet(channel) || isStation(channel)" in watch
-    assert "!event.unlisted && end > now && (isRoku(channel) || channel.kind === 'digital')" in GUIDE
+    assert "!event.unlisted && end > now && (isRoku(channel) || (channel.kind === 'digital' && !channel.relayed))" in GUIDE
     # Only an antenna channel has an antenna number to note.
     assert "return channel.kind === 'digital' && shownNumber(channel) !== channel.number" in GUIDE
     linked = section(INDEX, "function linkedRokuTarget()", "Promise.all(loaders)")
@@ -750,14 +750,26 @@ def test_watch_plays_a_slide_channel_in_a_frame_and_stops_it_on_leaving():
     assert 'els.slideStage.removeAttribute("src")' in render
 
 
-def test_another_markets_channel_names_its_city_and_takes_no_listing_by_number():
-    """Each box's guide is its own antenna's: Lansing's 66.1 (FOX 66) relayed to DC must not
-    show DC's 66.1 (ION)."""
-    # Only antennaListing looks an antenna channel up by its number.
-    assert "listingFor(entry.channel.number" not in INDEX and INDEX.count("listingFor(channel.number") == 1
-    assert "channel && !channel.relayed ? listingFor(channel.number, now)" in INDEX
-    assert "ch && !ch.relayed && listingHtml(ch.number, now)" in INDEX
+def test_another_markets_channel_names_its_city_and_takes_its_listing_from_the_box_there():
+    """Each box's own guide is its own antenna's, by number; another market's channel has the
+    guide of the box there, at its key in the lineup: Lansing's 66.1 (FOX 66) relayed to DC
+    must not show DC's 66.1 (ION)."""
+    # Only antennaKey chooses an antenna channel's guide row.
+    assert "listingFor(entry.channel.number" not in INDEX and "listingFor(channel.number" not in INDEX
+    assert "(channel.relayed ? channel.listings : channel.number)" in INDEX
+    assert INDEX.count("antennaKey(ch)") == 2 and "listingHtml(ch.number" not in INDEX
     assert "channel.market_name" in INDEX
+
+
+def test_the_guide_watches_another_markets_channel_through_the_watch_page_and_never_records_it():
+    watch = section(GUIDE, "async function watch(", "async function record(")
+    assert "|| channel.relayed) {" in watch and "#watch=${encodeURIComponent(keyOf(channel))}" in watch
+    assert "channel.kind === 'digital' && !channel.relayed" in GUIDE
+    assert "channel.market_name || channel.market} ${channel.number}" in section(GUIDE, "function antennaNote", "function channelSortKey")
+    # The Watch page tunes it by its guide key, through the pool.
+    linked = section(INDEX, "function linkedRokuTarget()", "Promise.all(loaders)")
+    assert "c.relayed && c.listings === value" in linked
+    assert "if (linked && linked.antenna) tuneTv(linked.antenna.id);" in INDEX
 
 
 def test_the_vcr_lists_only_the_antenna_channels_this_box_records():
