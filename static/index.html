@@ -850,11 +850,17 @@
       return { now: null, next: entry.next && entry.next.start > now ? entry.next : null };
     }
 
-    // An antenna channel's airing, from its number's guide row: this box's own antenna's.
-    // Another market's channel, relayed from the box there, has none here, since its
-    // number may be a different station's in this market (66.1 is ION in DC, FOX 66 in Lansing).
+    // An antenna channel's guide row: this box's own antenna's, by number. Another market's
+    // channel, relayed from the box there, has that box's, at its key in the lineup (listings:
+    // digital@lansing/6.1), since its number may be a different station's in this market
+    // (66.1 is ION in DC, FOX 66 in Lansing).
+    function antennaKey(channel) {
+      return channel ? (channel.relayed ? channel.listings : channel.number) || null : null;
+    }
+
     function antennaListing(channel, now) {
-      return channel && !channel.relayed ? listingFor(channel.number, now) : { now: null, next: null };
+      const key = antennaKey(channel);
+      return key ? listingFor(key, now) : { now: null, next: null };
     }
 
     // "Lansing · RF 28" for another market's channel; "RF 28" for this box's own.
@@ -908,7 +914,7 @@
         const ch = state.channels.find(c => c.id === state.currentChannelId);
         num.textContent = ch ? (Number.isInteger(ch.tv_number) ? String(ch.tv_number) : ch.number) : "– –";
         num.title = ch ? `Antenna ${ch.number} · ${antennaWhere(ch)}` : "";
-        body.innerHTML = (ch && !ch.relayed && listingHtml(ch.number, now))
+        body.innerHTML = (antennaKey(ch) && listingHtml(antennaKey(ch), now))
           || '<div class="bn-none">No listing for this channel</div>';
       } else if (state.playing === "vizelvision") {
         num.textContent = state.houseNumber !== null ? String(state.houseNumber) : "VV";
@@ -2817,7 +2823,8 @@
     // game (#watch=mlb%2F823254) is one of today's, as the games are listed.
     // An internet stream (#watch=internet%2Fcabride) and the station
     // (#watch=vizelvision%2F0) play their relays; a slide channel
-    // (#watch=vizelvision%2Fsports-guide) its page.
+    // (#watch=vizelvision%2Fsports-guide) its page; another market's antenna channel
+    // (#watch=digital%40lansing%2F6.1, its guide key) is relayed from the box there.
     // The link is used once: a reload must not send the Roku off again.
     function linkedRokuTarget() {
       const match = /^#watch=(.+)$/.exec(location.hash);
@@ -2827,6 +2834,8 @@
       try { value = decodeURIComponent(match[1]); } catch (_) { return null; }
       const slash = value.indexOf("/");
       if (slash <= 0) return null;
+      const relayed = state.channels.find(c => c.relayed && c.listings === value);
+      if (relayed) return { antenna: relayed };
       if (value.slice(0, slash) === "internet") {
         const entry = tunableChannels().find(e => e.kind === "internet" && e.id === `internet:${value.slice(slash + 1)}`);
         return entry ? { internet: entry } : null;
@@ -2850,7 +2859,8 @@
       render();
       loadGuideNow();
       const linked = /^#watch=/.test(location.hash) ? await rokuItems.then(linkedRokuTarget) : null;
-      if (linked && linked.internet) tuneInternet(linked.internet);
+      if (linked && linked.antenna) tuneTv(linked.antenna.id);
+      else if (linked && linked.internet) tuneInternet(linked.internet);
       else if (linked && linked.station) tuneVizelVision(linked.station.number);
       else if (linked && linked.slide) tuneSlides(linked.slide);
       else if (linked) tuneRoku(linked.source, linked.item);

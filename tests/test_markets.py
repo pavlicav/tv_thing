@@ -23,9 +23,13 @@ class Peer:
     def __init__(self, plan, tuners=()):
         self._plan, self._tuners, self.sent = plan, list(tuners), []
         self.reachable, self.last_error = True, None
+        self.listed = {}
 
     def plan(self):
         return self._plan
+
+    def guide(self):
+        return self.listed
 
     def node(self):
         return self._plan["node"]
@@ -106,7 +110,8 @@ def test_the_lineup_lists_the_other_markets_channels(home):
     by_id = {channel.id: channel for channel in server.CHANNELS.channels()}
     wlns = by_id["digital@lansing/6.1"]
     assert (wlns.channel_id, wlns.number, wlns.market, wlns.node, wlns.stream, wlns.listings) == (
-        "lansing/wlns_6_1", 400, "lansing", "viviserv2", None, None)
+        "lansing/wlns_6_1", 400, "lansing", "viviserv2", None, "digital@lansing/6.1")
+    assert by_id["digital/4.1"].listings == "4.1"       # this box's own antenna's guide
     assert wlns.detail["antenna_market"] == "lansing"
 
 
@@ -140,6 +145,7 @@ def test_the_digital_catalog_lists_this_boxs_own_then_the_other_markets_relayed(
         ("wrc_hd_4_1", False, "dc"), ("wttg_5_1", False, "dc"), ("lansing/wlns_6_1", True, "lansing")]
     wlns = catalog["items"][2]
     assert (wlns["node"], wlns["market_name"], wlns["tv_number"]) == ("viviserv2", "Lansing", 400)
+    assert wlns["listings"] == "digital@lansing/6.1" and "listings" not in catalog["items"][0]
     assert catalog["source"]["count"] == 3
 
 
@@ -169,6 +175,84 @@ def test_away_the_home_markets_channel_is_relayed_from_the_primary(lansing, monk
     payload, status = server.api_v1_digital_tune({"channel_id": "wttg_5_1"}, "low")
     assert status == 200 and payload["relayed"] and payload["tuner"] == "dc-primary:digital"
     assert payload["stream"]["playlist_path"] == "/stream/peer/digital.m3u8"
+
+
+NOW = 1_800_000_000
+
+
+def airing(title, start=NOW - 600, duration=1800):
+    return {"start": start, "duration": duration, "title": title}
+
+
+def guide_rows(rows):
+    """A box's own antenna guide (epg.json's shape), keyed by antenna number."""
+    return {"channels": {number: {"number": number, "name": name, "id": channel_id, "events": events}
+                         for number, (name, channel_id, events) in rows.items()}, "generated_at": NOW}
+
+
+@pytest.fixture
+def guides(monkeypatch):
+    """viviserv's own guide, and the Lansing box's as its peer read it: both have a 5.1."""
+    monkeypatch.setattr(server, "antenna_guide", lambda: guide_rows({
+        "4.1": ("WRC-HD", "wrc_hd_4_1", [airing("Sunday Night Football")]),
+        "5.1": ("WTTG", "wttg_5_1", [airing("Animal Control")])}))
+    monkeypatch.setattr(server, "name_antenna_games", lambda rows: rows)
+    monkeypatch.setattr(server, "OTA_GUIDE_ENABLED", False)
+
+
+def test_the_other_markets_channels_are_listed_from_the_guide_of_the_box_there(home, guides):
+    home.listed = guide_rows({"6.1": ("WLNS-TV", "wlns_6_1", [airing("Marshals"), airing("News", NOW + 1200)]),
+                              "5.1": ("WSYM", "wsym_5_1", [airing("Not Washington's")])})["channels"]
+    rows = server.guide_payload(now=NOW)["channels"]
+    assert [key for key in rows if rows[key]["kind"] == "digital"] == ["4.1", "5.1", "digital@lansing/6.1"]
+    wlns = rows["digital@lansing/6.1"]
+    assert (wlns["id"], wlns["market"], wlns["relayed"], wlns["tv_number"], wlns["key"]) == (
+        "lansing/wlns_6_1", "lansing", True, 400, "digital@lansing/6.1")
+    assert [event["title"] for event in wlns["events"]] == ["Marshals", "News"]
+    # This box's own 5.1 stays Washington's: Lansing's 5.1 is not on the dial (WTTG is one station).
+    assert rows["5.1"]["events"][0]["title"] == "Animal Control"
+    now = server.guide_now_payload(now=NOW)["channels"]
+    assert now["digital@lansing/6.1"]["now"]["title"] == "Marshals"
+    assert now["digital@lansing/6.1"]["next"]["title"] == "News"
+    assert now["4.1"]["now"]["title"] == "Sunday Night Football"
+    one = server.guide_payload(number="digital@lansing/6.1", now=NOW)["channels"]
+    assert list(one) == ["digital@lansing/6.1"]
+
+
+def test_a_peer_reads_this_boxs_own_antenna_guide_only(home, guides):
+    home.listed = guide_rows({"6.1": ("WLNS-TV", "wlns_6_1", [airing("Marshals")])})["channels"]
+    payload = server.guide_payload(now=NOW, local=True)
+    assert list(payload["channels"]) == ["4.1", "5.1"] and payload["available"]
+
+
+def test_with_no_guide_of_its_own_the_other_markets_is_still_listed(home, guides, monkeypatch):
+    monkeypatch.setattr(server, "antenna_guide", lambda: None)
+    home.listed = guide_rows({"6.1": ("WLNS-TV", "wlns_6_1", [airing("Marshals")])})["channels"]
+    payload = server.guide_payload(now=NOW)
+    assert "digital@lansing/6.1" in payload["channels"] and not payload["available"]
+
+
+def test_away_the_home_markets_channels_are_listed_from_the_primarys_guide(lansing, guides, monkeypatch):
+    """viviserv2: its own guide is Lansing's, by number; DC's comes from the primary's."""
+    monkeypatch.setattr(server, "antenna_guide", lambda: guide_rows({
+        "6.1": ("WLNS-TV", "wlns_6_1", [airing("Marshals")]),
+        "4.1": ("WLNS-LD", "wlns_ld_4_1", [airing("Lansing's 4.1")])}))
+    server.peer.listed = guide_rows({"4.1": ("WRC-HD", "wrc_hd_4_1", [airing("Sunday Night Football")]),
+                                     "5.1": ("WTTG", "wttg_5_1", [airing("Animal Control")])})["channels"]
+    by_id = {channel.id: channel for channel in server.CHANNELS.channels()}
+    assert (by_id["digital/4.1"].listings, by_id["digital@lansing/6.1"].listings) == ("digital/4.1", "6.1")
+    rows = server.guide_payload(now=NOW)["channels"]
+    assert rows["digital/4.1"]["events"][0]["title"] == "Sunday Night Football"
+    assert rows["digital/4.1"]["id"] == "wrc_hd_4_1" and rows["digital/4.1"]["tv_number"] == 14
+    assert rows["4.1"]["events"][0]["title"] == "Lansing's 4.1"
+    items = {item["id"]: item for item in server.api_v1_digital_source()["items"]}
+    assert items["wrc_hd_4_1"]["listings"] == "digital/4.1"
+
+
+def test_away_with_no_box_in_the_home_market_its_channels_have_no_listings(lansing, monkeypatch):
+    monkeypatch.setattr(server, "peer", None)
+    assert {channel.id: channel.listings for channel in server.CHANNELS.channels()
+            if channel.kind == "digital"}["digital/4.1"] is None
 
 
 def test_a_box_learns_the_home_market_from_the_primarys_plan(lansing, monkeypatch):

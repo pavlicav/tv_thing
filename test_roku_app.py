@@ -47,7 +47,8 @@ FIXTURE = {
         {"id": "wxyz_99_2", "number": "99.2", "name": "Bonus 9", "rf_channel": 30},
         # Another market's, relayed from the box there: its 7.1 is not this box's 7.1 (WJLA).
         {"id": "lansing/wlaj_7_1", "number": "7.1", "name": "WLAJ", "rf_channel": 14, "tv_number": 407,
-         "market": "lansing", "market_name": "Lansing", "node": "viviserv2", "relayed": True},
+         "market": "lansing", "market_name": "Lansing", "node": "viviserv2", "relayed": True,
+         "listings": "digital@lansing/7.1"},
     ],
     "sources": [
         {"id": "youtube-tv", "name": "YouTube TV", "lane": "roku", "dated": False},
@@ -64,6 +65,8 @@ FIXTURE = {
     "guide": {
         "7.1": {"events": [{"start": NOW - 600, "duration": 3600, "title": "Jeopardy!", "captions": True},
                            {"start": NOW - 4200, "duration": 3600, "title": "Already over"}]},
+        # Lansing's 7.1, from the guide of the box there.
+        "digital@lansing/7.1": {"events": [{"start": NOW - 300, "duration": 1800, "title": "News 7 at 6"}]},
         "youtube-tv/NBC": {"events": [{"start": NOW - 1800, "duration": 3600, "title": "Dateline",
                                        "description": "A mystery.", "live": True}]},
         "internet/cabride": {"events": [
@@ -217,8 +220,9 @@ def test_tuned_channels_carry_their_listings(tmp_path):
     assert wjla["detail"] == "Jeopardy!"
     # A programme already over is dropped.
     assert [e["title"] for e in wjla["events"]] == ["Jeopardy!"] and wjla["events"][0]["captions"] is True
+    # Another market's 7.1 has the guide of the box there, not this box's 7.1 (Jeopardy!).
     wlaj = entries["digital:lansing/wlaj_7_1"]
-    assert wlaj["events"] == [] and wlaj["detail"] == "Lansing · Antenna 7.1 · RF 14"
+    assert [e["title"] for e in wlaj["events"]] == ["News 7 at 6"] and wlaj["detail"] == "News 7 at 6"
     assert wlaj["label"] == "Lansing 7.1" and wlaj["channelId"] == "lansing/wlaj_7_1"
     nbc = entries["roku:youtube-tv:NBC"]
     assert nbc["detail"] == "Dateline" and nbc["events"][0]["live"] is True and nbc["label"] == "YouTube TV"

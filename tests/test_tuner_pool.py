@@ -295,6 +295,9 @@ class FakePeer:
     def plan(self):
         return None             # a peer from before plans
 
+    def guide(self):
+        return {}               # nor guides
+
     def tuners(self):
         return self._tuners
 
