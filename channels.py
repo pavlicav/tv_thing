@@ -82,8 +82,8 @@ class Found:
 @dataclass(frozen=True)
 class GuideWindow:
     """The part of the guide asked for: ``floor`` to ``ceiling`` (None: all of it),
-    and one row's key, ``number``, or every row. ``local``: this box's own antenna's rows
-    only, what its peer reads (``GET /api/v1/guide?local=1``)."""
+    and one row's key, ``number``, or every row. ``local``: this box's own antenna's and
+    internet streams' rows only, what its peer reads (``GET /api/v1/guide?local=1``)."""
     now: int
     floor: int
     ceiling: int | None = None
@@ -395,31 +395,32 @@ class InternetChannels(Adapter):
         return {"lineup": {"internet": self.host.internet_views()}}
 
     def channels(self, day, found):
+        """This box's own streams and its peer's (server.internet_views); a relayed one's
+        node is the peer's, whose relay makes it."""
         host = self.host
-        try:
-            streams = host.web_streams.streams()
-        except internet_streams.StreamConfigError:
-            streams = {}
         found_channels = []
         for view in host.internet_views():
-            channel_id, stream = view["channel_id"], streams.get(view["channel_id"])
+            channel_id = view["channel_id"]
+            node = (host.peer.node() if view.get("relayed") and host.peer is not None else None) \
+                or host.FEED_CONFIG.node
             found_channels.append(Channel(
                 id=f"{internet_streams.SOURCE}/{channel_id}", source_id=internet_streams.SOURCE,
                 channel_id=channel_id, number=view.get("tv_number"), name=view.get("tv_name") or view["name"],
-                section=view.get("tv_section"), kind=self.kind, node=host.FEED_CONFIG.node,
+                section=view.get("tv_section"), kind=self.kind, node=node,
                 stream=view["stream_path"],
-                listings=f"{internet_streams.SOURCE}/{channel_id}" if stream and stream.guide else None,
+                listings=f"{internet_streams.SOURCE}/{channel_id}" if view.get("listed") else None,
                 detail={"source_name": view["name"], "note": view.get("note")},
                 row=dict(view, kind="internet", source_id=internet_streams.SOURCE)))
         return found_channels
 
     def guide(self, window):
         """The streams that publish listings, keyed ``internet/ID``; a stream whose listings
-        say nothing in the window (or did not answer) has no row."""
+        say nothing in the window (or did not answer) has no row. Asked for this box's own
+        (``window.local``, what its peer reads), not those it relays from the peer."""
         if not window.may_want(f"{internet_streams.SOURCE}/"):
             return {}, {}
         rows = {}
-        for key, channel in self.host.internet_guide_channels().items():
+        for key, channel in self.host.internet_guide_channels(local=window.local).items():
             events = window.current(channel["events"])
             if window.wants(key) and events:
                 rows[key] = {**channel, "events": events}
@@ -510,7 +511,8 @@ class Registry:
     def guide(self, window):
         rows, summary = {}, {}
         for adapter in self.adapters:
-            if window.local and adapter.kind != AntennaChannels.kind:
+            # This box's own, for its peer: its antenna's, and its internet streams'.
+            if window.local and adapter.kind not in (AntennaChannels.kind, InternetChannels.kind):
                 continue
             part, fields = adapter.guide(window)
             rows.update(part)

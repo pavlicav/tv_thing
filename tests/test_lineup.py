@@ -150,6 +150,25 @@ def test_lineup_json_has_the_last_word(make, tmp_path):
     assert set(state) == {"digital/2.1"}
 
 
+def test_a_channel_shared_with_the_peer_takes_the_peers_number_while_it_is_free_here(make, tmp_path):
+    numbering = make()
+    shared = lambda number: numbering.number("internet", [("birds8", "Birds on 8")],  # noqa: E731
+                                             preferred={"birds8": number})
+    assert numbers(shared(8)) == [8]
+    state = json.loads((tmp_path / "lineup_state.json").read_text())["assigned"]
+    assert state["internet/birds8"] == {"number": 8, "name": "Birds on 8", "first_seen": 1_800_000_000}
+    # The peer moves it: it follows, and 8 is free again.
+    assert numbers(shared(9)) == [9]
+    assert numbers(numbering.number("internet", [("owls", "Owls")], preferred={"owls": 8})) == [8]
+    # A number another channel has here (lineup.json's 4, the owls' 8) leaves it where it is.
+    assert numbers(shared(4)) == [9] and numbers(shared(8)) == [9]
+    # One new here whose number is taken is numbered as any other new channel.
+    assert numbers(numbering.number("internet", [("hawks", "Hawks")], preferred={"hawks": 15})) == [90]
+    # lineup.json here has the last word.
+    make(plan_document([{"number": 7, "source": "internet", "channel": "birds8"}]))
+    assert numbers(shared(9)) == [7]
+
+
 def test_antenna_keys_survive_a_rescan_and_tell_twins_apart():
     channels = [{"number": "4.1", "id": "wrc_hd_4_1", "rf_channel": 34},
                 {"number": "4.1", "id": "far_4_1", "rf_channel": 10},

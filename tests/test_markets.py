@@ -31,6 +31,12 @@ class Peer:
     def guide(self):
         return self.listed
 
+    def streams(self):
+        return {}
+
+    def stream_guide(self):
+        return {}
+
     def node(self):
         return self._plan["node"]
 

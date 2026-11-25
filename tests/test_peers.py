@@ -184,3 +184,41 @@ def test_the_peers_own_antenna_guide_is_read_and_kept_while_it_is_down(fake):
 def test_a_peer_from_before_guides_were_shared_has_none(fake):
     client = peers.PeerClient(fake.url)
     assert not client.refresh_guide() and client.guide() == {}
+
+
+def test_the_streams_the_peer_relays_itself_come_with_its_plan(fake):
+    fake.plan = {**PLAN, "internet": [
+        {"id": "birds8", "name": "Birds on 8", "note": "Birds", "tv_number": 8, "tv_name": "Birds on 8",
+         "tv_section": "Our channels", "guide": True},
+        {"id": "pentulive", "name": "Pentulive", "tv_number": None},
+        # Not usable: no id that names a path, a second birds8, no name, not an object.
+        {"id": "../feed", "name": "Out"}, {"id": "birds8", "name": "Twice"}, {"id": "noname"}, "junk",
+        {"id": "odd", "name": "Odd", "tv_number": True, "guide": "yes", "note": 5}]}
+    client = peers.PeerClient(fake.url)
+    assert client.streams() == {}
+    assert client.refresh()
+    streams = client.streams()
+    assert list(streams) == ["birds8", "pentulive", "odd"]
+    assert streams["birds8"] == {"id": "birds8", "name": "Birds on 8", "note": "Birds", "tv_number": 8,
+                                 "tv_name": "Birds on 8", "tv_section": "Our channels", "guide": True}
+    assert streams["odd"] == {"id": "odd", "name": "Odd", "note": None, "tv_number": None, "tv_name": None,
+                              "tv_section": None, "guide": False}
+    # A peer from before streams were shared publishes none.
+    fake.plan = {**PLAN, "revision": "lansing:2"}
+    client.refresh()
+    assert client.streams() == {}
+
+
+def test_the_peers_own_streams_listings_come_with_its_guide(fake):
+    fake.guide = {"available": True, "channels": {
+        "6.1": {"events": []},
+        "internet/birds8": {"key": "internet/birds8", "events": [
+            {"start": 1000, "duration": 600, "title": "Birds on 8"}, {"start": None, "title": "Untimed"}]},
+        "internet/../x": {"events": []}, "internet/": {"events": []}, "internet/odd": "junk",
+        "youtube-tv/NBC": {"events": []}}}
+    client = peers.PeerClient(fake.url)
+    assert client.stream_guide() == {}
+    assert client.refresh_guide()
+    assert list(client.stream_guide()) == ["internet/birds8"]
+    assert [event["title"] for event in client.stream_guide()["internet/birds8"]["events"]] == ["Birds on 8"]
+    assert list(client.guide()) == ["6.1"]

@@ -1412,20 +1412,26 @@ def load_channels():
 
 
 def plan_revision():
-    """Changes whenever this box's plan does: the peer then reads it again."""
-    try:
-        stat = plan_file().stat()
-        return f"{MARKET}:{stat.st_mtime_ns}:{stat.st_size}"
-    except OSError:
-        return f"{MARKET}:none"
+    """Changes whenever this box's plan does (its antenna's channels, its internet streams or
+    its lineup's numbers for them): the peer then reads it again."""
+    parts = []
+    for path in (plan_file(), INTERNET_STREAMS_FILE, Path(lineup.local_or_default(LINEUP_FILE))):
+        try:
+            stat = path.stat()
+            parts.append(f"{stat.st_mtime_ns}:{stat.st_size}")
+        except OSError:
+            parts.append("none")
+    return ":".join([MARKET, *parts])
 
 
 def api_v1_plan():
     """``GET /api/v1/plan``: this box's own antenna's channels as its dial numbers them, with
-    their lineup keys, its market and whether it is the primary (whose market is home)."""
+    their lineup keys, its market and whether it is the primary (whose market is home); and
+    the internet streams it relays itself (published_streams), which its peer lists too."""
     return {"api_version": API_VERSION, "node": FEED_CONFIG.node, "market": MARKET,
             "primary": HOST.primary, "revision": plan_revision(),
-            "rows": [dict(row, key=key) for key, row in numbered_on_dial(load_channels())]}
+            "rows": [dict(row, key=key) for key, row in numbered_on_dial(load_channels())],
+            "internet": published_streams()}
 
 
 def antenna_dial():
@@ -1552,20 +1558,64 @@ def numbered_channels(channels, source=None):
     return [channel for _, channel in numbered_on_dial(channels, source)]
 
 
+def peer_streams():
+    """The internet streams the peer relays itself, as its plan lists them, ``{id: entry}``
+    (peers.published_streams); {} without a peer or before it has answered."""
+    return peer.streams() if peer is not None else {}
+
+
 def internet_views():
-    """The internet streams with their TV Thing numbers and the playlist
-    each plays from; [] when internet_streams.json is unusable."""
+    """The internet streams on the dial, with their TV Thing numbers and the playlist each
+    plays from: this box's own (internet_streams.json), then each one its peer relays itself
+    (peer_streams) that this box does not list, so a stream added on either box reaches the
+    other's dial by itself.
+
+    A stream played from the peer's relay through /stream/peer/ (the peer's, and one on the
+    primary's loopback: played_from_primary) is ``relayed``, and takes the peer's name and the
+    number the peer gives it, unless lineup.json here numbers it or another channel here has
+    that number. ``listed``: whether the guide has its airings (internet_guide_channels).
+    When internet_streams.json is unusable, only the peer's."""
     try:
-        streams = [stream for stream in web_streams.streams().values()
-                   if not channel_lineup.hides(internet_streams.SOURCE, stream.id)]
+        own = list(web_streams.streams().values())
     except internet_streams.StreamConfigError as error:
         print(f"[Internet] {error}", flush=True)
-        return []
-    views = channel_lineup.number(internet_streams.SOURCE,
-                                  [(stream.id, stream.name) for stream in streams])
-    return [dict(view or {}, channel_id=stream.id, name=stream.name, note=stream.note,
-                 stream_path=internet_stream_path(stream))
-            for stream, view in zip(streams, views)]
+        own = []
+    published = peer_streams()
+    entries = []
+    for stream in own:
+        relayed = played_from_primary(stream)
+        theirs = published.get(stream.id) if relayed else None
+        entries.append(dict(channel_id=stream.id, name=theirs["name"] if theirs else stream.name,
+                            note=theirs["note"] if theirs else stream.note,
+                            stream_path=internet_stream_path(stream), relayed=relayed,
+                            listed=bool(theirs and theirs["guide"]) if relayed else bool(stream.guide),
+                            _theirs=theirs))
+    listed_here = {stream.id for stream in own}
+    for stream_id, theirs in published.items():
+        if stream_id not in listed_here:
+            entries.append(dict(channel_id=stream_id, name=theirs["name"], note=theirs["note"],
+                                stream_path=peers.stream_path(f"/stream/internet/{stream_id}/index.m3u8"),
+                                relayed=True, listed=theirs["guide"], _theirs=theirs))
+    entries = [entry for entry in entries if not channel_lineup.hides(internet_streams.SOURCE, entry["channel_id"])]
+    views = channel_lineup.number(
+        internet_streams.SOURCE,
+        [(entry["channel_id"], (entry["_theirs"] or {}).get("tv_name") or entry["name"]) for entry in entries],
+        preferred={entry["channel_id"]: entry["_theirs"]["tv_number"] for entry in entries
+                   if entry["_theirs"] and entry["_theirs"]["tv_number"] is not None})
+    return [dict(view or {}, **{key: value for key, value in entry.items() if key != "_theirs"})
+            for entry, view in zip(entries, views)]
+
+
+def published_streams():
+    """The internet streams this box relays itself, as its plan gives them to its peer
+    (api_v1_plan's ``internet``): each one's id, name, note, numbers here and whether the
+    guide lists it (``guide``; its rows go to the peer with this box's own antenna's, in
+    ``GET /api/v1/guide?local=1``). Never one it plays from its peer: two boxes never hand a
+    stream back and forth."""
+    return [{"id": view["channel_id"], "name": view["name"], "note": view.get("note"),
+             **{field: view.get(field) for field in ("tv_number", "tv_name", "tv_section")},
+             "guide": view["listed"]}
+            for view in internet_views() if not view["relayed"]]
 
 
 def played_from_primary(stream):
@@ -1588,24 +1638,25 @@ def internet_stream_path(stream):
     return peers.stream_path(path) if played_from_primary(stream) else path
 
 
-def internet_guide_channels():
+def internet_guide_channels(local=False):
     """The internet streams that publish listings (``guide`` in internet_streams.json) as
-    guide rows keyed ``internet/<id>``. A listing that does not answer leaves its row empty,
-    and one on the primary's loopback (played_from_primary) has no row on a second node."""
-    try:
-        streams = web_streams.streams()
-    except internet_streams.StreamConfigError:
-        return {}
+    guide rows keyed ``internet/<id>``: this box's own from their listings, a relayed one's
+    from the guide of the peer that relays it (peers.PeerClient.stream_guide). A listing that
+    does not answer leaves its row empty; a stream on the primary's loopback (played_from_primary)
+    whose primary does not publish it has no row on a second node. ``local``: this box's own
+    only, what its peer reads."""
+    theirs = peer.stream_guide() if peer is not None else {}
     channels = {}
     for view in internet_views():
-        stream = streams.get(view["channel_id"])
-        if stream is None or not stream.guide or played_from_primary(stream):
+        if not view["listed"] or (local and view["relayed"]):
             continue
-        key = f"internet/{stream.id}"
+        stream_id = view["channel_id"]
+        key = f"internet/{stream_id}"
+        events = ((theirs.get(key) or {}).get("events") or []) if view["relayed"] else web_streams.listings(stream_id)
         channels[key] = {"key": key, "kind": "internet", "source_id": internet_streams.SOURCE,
-                         "channel_id": stream.id, "name": stream.name, "note": stream.note,
+                         "channel_id": stream_id, "name": view["name"], "note": view.get("note"),
                          **{field: view.get(field) for field in ("tv_number", "tv_name", "tv_section")},
-                         "stream_path": view["stream_path"], "events": web_streams.listings(stream.id)}
+                         "stream_path": view["stream_path"], "events": events}
     return channels
 
 
@@ -5483,8 +5534,8 @@ def guide_payload(number=None, window_hours=None, now=None, local=False):
     ``available`` and the counts beside it describe the broadcast guide;
     ``youtube_tv`` and ``sports`` the others. Another market's antenna channels follow this
     box's own, keyed by their lineup id (``digital@lansing/6.1``), from the guide of the box
-    there (channels.AntennaChannels.guide_relayed). ``local``: this box's own antenna's rows
-    only, what its peer reads.
+    there (channels.AntennaChannels.guide_relayed). ``local``: this box's own antenna's and
+    internet streams' rows only, what its peer reads.
     """
     now = int(time.time()) if now is None else now
     # Keep the hour already in progress so the grid has a left edge. One row asked
@@ -6032,9 +6083,12 @@ def web_inputs():
                          resolver=stream.resolver if stream else None,
                          listings=bool(stream and stream.guide),
                          made_by=f"a relay in {stream.service}" if stream else None, status=None)
-            if stream and played_from_primary(stream):
-                entry.update(service="peer", upstream=urlparse(PEER_URL).netloc, listings=False,
-                             made_by="the primary's relay, through /stream/peer/")
+            if channel.row.get("relayed"):
+                # The peer's relay of it (its own stream, or one on the primary's loopback).
+                entry.update(service="peer", upstream=urlparse(PEER_URL).netloc if PEER_URL else None,
+                             origin=origin or "internal", listings=bool(channel.row.get("listed")),
+                             made_by=f"{'the primary' if not HOST.primary else 'the peer'}'s relay, "
+                                     "through /stream/peer/")
         out.append(entry)
     return out
 

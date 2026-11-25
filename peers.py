@@ -13,10 +13,14 @@ door (``:8080``), the way any client does:
   is read by the same poller whenever its ``plan_revision`` changes, and at least every
   ``plan_interval``. The last one read is kept in ``plan_store``, so the peer's channels
   stay on the dial while it is down (their tuners then read unknown).
-* **Its guide** (``GET /api/v1/guide?local=1``: its own antenna's listings, about a megabyte)
-  is read by a second thread every ``guide_interval``, so that a slow read never holds up the
-  tuners'. The last one read stands while the peer is down; its airings are timestamped, so it
-  stays true until they end. It is kept in memory only: a restart reads it again at once.
+* **Its streams** (the plan's ``internet``): the internet streams the peer relays itself, with
+  its numbers for them. This node lists those it does not carry, played from the peer's relay
+  (server.internet_views), so a stream added on either box reaches the other's dial by itself.
+* **Its guide** (``GET /api/v1/guide?local=1``: its own antenna's listings, about a megabyte,
+  and its own streams' rows, ``internet/<id>``) is read by a second thread every
+  ``guide_interval``, so that a slow read never holds up the tuners'. The last one read stands
+  while the peer is down; its airings are timestamped, so it stays true until they end. It is
+  kept in memory only: a restart reads it again at once.
 
 Streams are not relayed here: the front door sends ``/stream/peer/`` to web-basic, which
 relays the peer's ``/stream/`` with its segments fetched ahead (web_basic.send_peer,
@@ -27,6 +31,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import socket
 import threading
 import time
@@ -36,6 +41,8 @@ from urllib.request import Request, urlopen
 
 # The front door's route to the peer's /stream/.
 RELAY_PREFIX = "/stream/peer/"
+# An internet stream's id (internet_streams.parse_streams): it names a path below the relay.
+STREAM_ID = re.compile(r"[a-z0-9][a-z0-9-]*")
 
 
 class PeerUnavailable(OSError):
@@ -49,19 +56,54 @@ def stream_path(path):
     return RELAY_PREFIX + path.split("/stream/", 1)[-1].lstrip("/")
 
 
+def _timed(events):
+    """The airings that have a start and a duration: what a guide built on them can rely on."""
+    return [event for event in events if isinstance(event, dict)
+            and all(isinstance(event.get(field), (int, float)) and not isinstance(event.get(field), bool)
+                    for field in ("start", "duration"))]
+
+
 def listed_rows(channels):
     """A peer's ``/api/v1/guide`` rows that are its antenna's (keyed by antenna number, not
-    ``youtube-tv/NBC`` or ``digital@dc/4.1``), with only the airings that have a start and a
-    duration: what a guide built on them can rely on."""
+    ``youtube-tv/NBC`` or ``digital@dc/4.1``), with only their timed airings."""
+    return {str(key): {**row, "events": _timed(row["events"])} for key, row in channels.items()
+            if "/" not in str(key) and isinstance(row, dict) and isinstance(row.get("events"), list)}
+
+
+def listed_streams(channels):
+    """A peer's ``/api/v1/guide`` rows for its own internet streams (``internet/<id>``), with
+    only their timed airings."""
     rows = {}
     for key, row in channels.items():
-        if "/" in str(key) or not isinstance(row, dict) or not isinstance(row.get("events"), list):
-            continue
-        events = [event for event in row["events"] if isinstance(event, dict)
-                  and all(isinstance(event.get(field), (int, float)) and not isinstance(event.get(field), bool)
-                          for field in ("start", "duration"))]
-        rows[str(key)] = {**row, "events": events}
+        source, _, stream_id = str(key).partition("/")
+        if (source == "internet" and STREAM_ID.fullmatch(stream_id) and isinstance(row, dict)
+                and isinstance(row.get("events"), list)):
+            rows[str(key)] = {**row, "events": _timed(row["events"])}
     return rows
+
+
+def published_streams(plan):
+    """The internet streams a peer's plan says it relays itself (``GET /api/v1/plan``'s
+    ``internet``), ``{id: entry}`` in its order, each with its ``name``, and as the peer gives
+    them its ``note``, ``tv_number``, ``tv_name``, ``tv_section`` and ``guide`` (whether it
+    lists its airings). One without a usable id or name is left out."""
+    streams = {}
+    for entry in (plan or {}).get("internet") or []:
+        if not isinstance(entry, dict):
+            continue
+        stream_id, name = entry.get("id"), entry.get("name")
+        if (not isinstance(stream_id, str) or not STREAM_ID.fullmatch(stream_id) or stream_id in streams
+                or not isinstance(name, str) or not name):
+            continue
+        number = entry.get("tv_number")
+        streams[stream_id] = {
+            "id": stream_id, "name": name,
+            "note": entry["note"] if isinstance(entry.get("note"), str) else None,
+            "tv_number": number if isinstance(number, int) and not isinstance(number, bool) and number >= 0 else None,
+            "tv_name": entry["tv_name"] if isinstance(entry.get("tv_name"), str) and entry["tv_name"] else None,
+            "tv_section": entry["tv_section"] if isinstance(entry.get("tv_section"), str) else None,
+            "guide": entry.get("guide") is True}
+    return streams
 
 
 class PeerClient:
@@ -82,7 +124,7 @@ class PeerClient:
         self._read, self._at, self.last_error = None, None, None
         self._plan, self._plan_at = self._load_plan(), None
         self.guide_interval, self.guide_retry, self.guide_timeout = guide_interval, guide_retry, guide_timeout
-        self._guide = None
+        self._guide, self._stream_guide = None, None
         self._wakeup = threading.Event()
         self._stopping = threading.Event()
 
@@ -176,6 +218,7 @@ class PeerClient:
             return False
         with self._lock:
             self._guide = listed_rows(payload["channels"])
+            self._stream_guide = listed_streams(payload["channels"])
         return True
 
     def guide(self):
@@ -183,6 +226,18 @@ class PeerClient:
         each with its airings (``events``); {} before one is read. Shared, not copied: read only."""
         with self._lock:
             return self._guide or {}
+
+    def stream_guide(self):
+        """The peer's own internet streams' guide rows as last read, by their key
+        (``{"internet/birds8": row}``); {} before one is read. Shared, not copied: read only."""
+        with self._lock:
+            return self._stream_guide or {}
+
+    def streams(self):
+        """The internet streams the peer relays itself, as its plan (kept across restarts)
+        lists them: published_streams."""
+        with self._lock:
+            return published_streams(self._plan)
 
     def run(self):
         """The poller: read the peer every ``interval`` seconds until ``stop()``."""
