@@ -298,6 +298,12 @@ class FakePeer:
     def guide(self):
         return {}               # nor guides
 
+    def streams(self):
+        return {}               # nor streams
+
+    def stream_guide(self):
+        return {}
+
     def tuners(self):
         return self._tuners
 

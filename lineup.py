@@ -16,7 +16,9 @@ are placed by rule:
   and those of a market whose own section is full; ``*`` any source no
   section names). The number is
   kept in ``lineup_state.json`` so it never moves; a fixed number in
-  lineup.json takes precedence.
+  lineup.json takes precedence. A channel shared with the peer (an internet
+  stream the other box relays) takes the number that box gives it instead,
+  while no other channel here has it.
 * Whatever does not fit goes to the ``overflow`` section.
 * A channel in ``hidden`` is off the dial: it gets no number, overflow
   included, and is left out of every list of channels. It still tunes by its
@@ -308,12 +310,16 @@ class Lineup:
             number = max(taken | {section.last}) + 1
         return number
 
-    def number(self, source_id, entries):
+    def number(self, source_id, entries, preferred=None):
         """Numbers for one source's channels: ``entries`` is ``[(id, name)]``.
 
         Returns one view per entry, in order; ``None`` for all of them when
         lineup.json is unusable, and for a hidden one. A channel lineup.json
-        does not list is given a number here, and keeps it.
+        does not list is given a number here, and keeps it. ``preferred``,
+        ``{id: number}``: the number another box gives a channel this one shares
+        (an internet stream its peer relays). Such a channel lineup.json does not
+        list takes that number while no other channel here has it, and follows
+        it when it changes; otherwise it is numbered as any other.
         """
         try:
             plan = self.plan()
@@ -341,6 +347,17 @@ class Lineup:
                 if entry and entry["number"] in fixed_numbers:
                     del assigned[key]  # lineup.json gave its number to another.
                     entry = None
+                wanted = (preferred or {}).get(channel_id)
+                if (isinstance(wanted, int) and not isinstance(wanted, bool) and wanted >= 0
+                        and wanted not in taken):
+                    # Free here (taken holds its own number only when it already has this one).
+                    if entry:
+                        taken.discard(entry["number"])
+                    entry = {"number": wanted, "name": name,
+                             "first_seen": entry.get("first_seen", int(self.clock())) if entry else int(self.clock())}
+                    assigned[key] = entry
+                    taken.add(wanted)
+                    changed = True
                 if entry is None:
                     number = next((free for free in (self._free(section, taken)
                                                      for section in plan.new_sections(source_id))

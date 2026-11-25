@@ -380,9 +380,14 @@ viviserv; that branch is kept locally (`git branch -v`) and no longer used.
   on NixOS) fixed.
 - **Sports Guide listings.** The channel renders, but its games come from the Roku lane's
   schedules, so it lists none here.
-- **Trains (`cabride`).** It relays `127.0.0.1:8791`, a service on viviserv that does not
-  answer off that box, so it plays from viviserv's relay through `/stream/peer/`
-  (`server.played_from_primary`). It works only while viviserv is up, and has no listings here.
+- **viviserv's internet streams** (Trains, CFL+, Ads 5, Birds on 8). Each relays a service on
+  viviserv's loopback that does not answer off that box, so it plays from viviserv's relay
+  through `/stream/peer/` (`server.played_from_primary`), and works only while viviserv is up.
+  Each box's plan (`GET /api/v1/plan`, `"internet"`) lists the streams it relays itself, and
+  the other box lists the ones it lacks (`server.internet_views`), so a stream added to
+  viviserv's `internet_streams.json` is on this dial within seconds, before any pull here. It
+  keeps viviserv's number unless this box's lineup numbers it or already uses that number, and
+  its listings come with viviserv's guide (`GET /api/v1/guide?local=1`, read every ten minutes).
 - **Cairo Radio and VizelVision media** come from viviserv (`primary_host`), so they work only
   while viviserv is up. The feed relays VizelVision, so a new `primary_host` reaches it at the
   feed's next restart.
