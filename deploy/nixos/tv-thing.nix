@@ -51,6 +51,13 @@ in
   # /dev/dvb/adapter*/* are root:video 0660.
   users.users.vivian.extraGroups = [ "video" ];
 
+  # BBR, not CUBIC, for what this box sends: above all Lansing's channels to viviserv on the
+  # relay. On 2026-11-24 this house's line lost 16-21% of its packets past the router, and
+  # CUBIC halves its rate at each loss, so a relayed segment crawled; BBR paces by the speed
+  # and delay it measures. viviserv sends with BBR too (its /etc/sysctl.d/90-tcp-bbr.conf).
+  boot.kernelModules = [ "tcp_bbr" ];
+  boot.kernel.sysctl."net.ipv4.tcp_congestion_control" = "bbr";
+
   # The UHD 630's VA-API driver (iHD), for the feed's h264_vaapi encoder: libva finds it under
   # /run/opengl-driver. The gate passed on it, both tuners at once (VIVISERV2_SETUP.md, section 3).
   # Its packagers trip at 90 C on the CPU package's sensor, the iGPU being on the CPU's die.
