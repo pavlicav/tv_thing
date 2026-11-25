@@ -58,6 +58,7 @@
     {"number": 3, "source": "internet", "channel": "cflplus", "name": "CFL+", "note": "CFL+ games, played only while watched (hazel's cflplus.service; 2026 playoffs only, through 2026-11-15)"},
     {"number": 5, "source": "internet", "channel": "ads5", "name": "Ads 5", "note": "Nothing but ads, played only while watched (vizelVision's vizelvision-ads5.service, page at /ads5/)"},
     {"number": 6, "source": "vizelvision", "channel": "sports-guide", "note": "today's games by sport, as slides"},
+    {"number": 8, "source": "internet", "channel": "birds8", "name": "Birds on 8", "note": "The Local Bird Forecast on the 8s, drawn only while watched (hazel's birds8.service)"},
     {"number": 10, "source": "digital", "channel": "22.4", "note": "NHK World-Japan (MPT subchannel)"},
     {"number": 11, "source": "digital", "channel": "26.1", "note": "WETA PBS"},
     {"number": 12, "source": "digital", "channel": "32.1", "note": "WHUT Howard University PBS"},

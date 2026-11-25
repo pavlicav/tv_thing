@@ -275,14 +275,15 @@ def test_the_card_reads_like_a_cable_lineup():
     section = lambda number: plan.section_of(number).name   # noqa: E731
     # 0-9: our own channels. The station, then the web streams, the Sports Guide on 6;
     # CFL+ on 3 (the 2026 playoffs), Ads 5 on 5 (VizelVision's channel of nothing but ads),
-    # 4 and 7-9 held for more.
+    # Birds on 8 (the Local Bird Forecast on the 8s), 4, 7 and 9 held for more.
     assert [number for number, _ in plan.house] == [0, 70]
     assert plan.slides == ((6, "VizelVision Sports Guide", "sports-guide"), (197, "Cairo Radio", "cairo-radio"))
     assert plan.fixed["internet/cabride"] == (1, "Trains")
     assert plan.fixed["internet/pentulive"] == (2, "pen2live")
     assert plan.fixed["internet/cflplus"] == (3, "CFL+")
     assert plan.fixed["internet/ads5"] == (5, "Ads 5")
-    assert not any(n in by_number for n in (4, 7, 8, 9))
+    assert plan.fixed["internet/birds8"] == (8, "Birds on 8")
+    assert not any(n in by_number for n in (4, 7, 9))
     assert {section(n) for n in range(0, 10)} == {"Our channels"}
     # 10-24: Washington and Baltimore, NHK first; each network's last digit is its channel
     # on the air, and a station's second channel comes right after it.
