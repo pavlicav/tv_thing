@@ -460,3 +460,40 @@ def test_the_always_on_channel_is_never_one_the_last_scan_lost(monkeypatch, tmp_
     assert server.load_playback_state()[0]["id"] == "wttg_5_1"       # RF 34 no longer received
     server.RECEPTION_FILE.write_text(json.dumps({"rf_channels": [12], "tsids": {"12": 1499}}))
     assert server.load_playback_state() == (None, "medium")
+
+
+def test_away_with_no_roku_lane_the_sports_guide_lists_the_games_on_the_dial(lansing, monkeypatch):
+    # viviserv2: no Roku lane, and a 5.1 of its own (WNEM, a CBS station) beside DC's WTTG.
+    lansing.write_text(json.dumps(LANSING + [{"id": "wnem_hd_5_1", "number": "5.1", "name": "WNEM-HD",
+                                              "rf_channel": 30, "tsid": 4321, "service_id": 1}]))
+    monkeypatch.setattr(server, "roku", None)
+    monkeypatch.setattr(server, "internet_guide_channels", lambda local=False: {})
+    asked = []
+
+    def nfl(game_id, start, away, home, *networks):
+        return {"league": "nfl", "game_id": game_id, "start_time": start, "state": "pre", "finished": False,
+                "away": {"short": away[0], "abbreviation": away[1]},
+                "home": {"short": home[0], "abbreviation": home[1]},
+                "broadcasts": [{"name": name, "market": "national"} for name in networks]}
+    boards = {"nfl": [
+        nfl(1, "2027-01-17T18:00Z", ("Commanders", "WSH"), ("Eagles", "PHI"), "FOX"),
+        nfl(2, "2027-01-17T18:00Z", ("Colts", "IND"), ("Vikings", "MIN"), "FOX"),
+        nfl(3, "2027-01-18T01:20Z", ("Chiefs", "KC"), ("Seahawks", "SEA"), "NBC"),
+        nfl(4, "2027-01-17T18:00Z", ("Bills", "BUF"), ("Jets", "NYJ"), "ESPN")],
+        "nhl": [{"league": "nhl", "game_id": 9, "start_time": "2027-01-17T18:00Z", "state": "pre",
+                 "away": {"short": "Flyers"}, "home": {"short": "Kings"},
+                 "broadcasts": [{"name": "ESPN+", "market": "national"}]}]}
+
+    class Scoreboard:
+        def games(self, league, day, power_five=True):
+            asked.append((league, day, power_five))
+            return boards.get(league, [])
+    monkeypatch.setattr(server, "SPORTS_SCOREBOARD", Scoreboard())
+    payload = server.api_v1_sports_guide(now=1_800_205_200)     # Sunday 2027-01-17, noon Eastern
+    assert (payload["available"], payload["errors"]) == (True, [])
+    assert {(day, power_five) for _, day, power_five in asked} == {("2027-01-17", False)}
+    # On the DC stations the dial has from the primary (FOX 15, NBC 14), never Lansing's 5.1.
+    # Colts at Vikings is another market's FOX game; ESPN and ESPN+ need the Roku's YouTube TV.
+    assert [(game["title"], game["network"], game["tv_number"])
+            for sport in payload["sports"] for game in sport["games"]] == [
+        ("Commanders at Eagles", "FOX", 15), ("Chiefs at Seahawks", "NBC", 14)]

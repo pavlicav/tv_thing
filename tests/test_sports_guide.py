@@ -143,6 +143,41 @@ def test_a_regional_nfl_game_is_on_its_own_markets_station():
     assert [(row["network"], row["tv_number"]) for row in rows] == [("Sunday Ticket", 61)]
 
 
+def test_a_regional_game_is_never_put_on_the_antennas_station_for_another_market():
+    # YouTube TV's market has Colts at Vikings on its CBS, but its catalog did not answer:
+    # WUSA, the antenna's CBS, shows Washington's game, so it is not listed at all.
+    channels = sports_guide.Channels([*ANTENNA, {"number": "9.1", "tv_number": 9}], [])
+    espn = {"nfl": [game(14, "2026-10-25T17:00Z", ("Colts",), ("Vikings",), "CBS",
+                         suggested_target={"source_id": "youtube-tv", "channel_id": "CBS"},
+                         markets={"network": "CBS", "youtube_tv": True, "antenna": False, "listed": True})]}
+    assert sports_guide.day_games(espn, {}, channels) == []
+
+
+def test_with_no_roku_lane_a_regional_game_is_on_the_antenna_for_a_dc_team_only():
+    # A box with no Roku lane reads ESPN's scoreboard itself and marks the markets as the
+    # lane would: no YouTube TV, no Sunday Ticket, only the antenna's Washington stations.
+    channels = sports_guide.Channels([*ANTENNA, {"number": "9.1", "tv_number": 9}], [])
+
+    def nfl(game_id, start, away, home, *broadcasts):
+        found = game(game_id, start, (away[0],), (home[0],), *broadcasts, league="nfl")
+        found["away"]["abbreviation"], found["home"]["abbreviation"] = away[1], home[1]
+        return sports_guide.antenna_markets(found)
+    espn = {"nfl": [
+        nfl(1, "2026-10-25T17:00Z", ("Bengals", "CIN"), ("Ravens", "BAL"), "CBS"),       # Washington's
+        nfl(2, "2026-10-25T17:00Z", ("Colts", "IND"), ("Vikings", "MIN"), "CBS"),        # another market's
+        nfl(3, "2026-10-25T20:25Z", ("Packers", "GB"), ("Commanders", "WSH"), "Fox"),    # ESPN's spelling
+        nfl(4, "2026-10-25T20:25Z", ("Bears", "CHI"), ("Lions", "DET"), "FOX"),
+        nfl(5, "2026-10-26T00:20Z", ("Chiefs", "KC"), ("Seahawks", "SEA"), "NBC"),       # Sunday night: national
+        nfl(6, "2026-10-27T00:15Z", ("Bills", "BUF"), ("Jets", "NYJ"), "ESPN", "ABC"),   # Monday night
+        nfl(7, "2026-10-25T13:30Z", ("Jaguars", "JAX"), ("Rams", "LAR"), "NFL Net")]}   # London, cable only
+    assert espn["nfl"][1]["markets"] == {"network": "CBS", "youtube_tv": False, "antenna": False, "listed": False}
+    assert espn["nfl"][4]["markets"]["network"] is None
+    rows = sports_guide.day_games(espn, {}, channels)
+    assert [(row["title"], row["network"], row["tv_number"]) for row in rows] == [
+        ("Bengals at Ravens", "CBS", 9), ("Packers at Commanders", "FOX", 5),
+        ("Chiefs at Seahawks", "NBC", 4), ("Bills at Jets", "ABC", 7)]
+
+
 def test_finished_games_go_and_after_midnight_only_the_ones_still_on_stay():
     espn = {"nhl": [game(1, "2026-10-19T23:00Z", ("A",), ("B",), "TNT", state="post"),
                     game(2, "2026-10-20T02:00Z", ("C",), ("D",), "TNT", state="in"),

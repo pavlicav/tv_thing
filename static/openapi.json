@@ -334,7 +334,7 @@
     "/sports-guide": {
       "get": {
         "summary": "Today's watchable games by sport: the Sports Guide's listings (channel 6)",
-        "description": "A game is listed when a national broadcaster in the lineup carries it (by that channel's number; a network on its DC antenna station) or a Roku game source does (by its Live Sports number). Games already over are left out; before 06:00 Eastern, the night's games still being played stay in. Cached for a minute.",
+        "description": "A game is listed when a national broadcaster in the lineup carries it (by that channel's number; a network on its DC antenna station) or a Roku game source does (by its Live Sports number); on a box with no Roku lane, only the antenna's networks and the internet streams. Games already over are left out; before 06:00 Eastern, the night's games still being played stay in. Cached for a minute.",
         "responses": {
           "200": {
             "description": "Success",

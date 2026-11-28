@@ -1606,10 +1606,16 @@ def test_the_sports_guide_is_read_once_a_minute_and_says_when_it_cannot_be(monke
     first = server.api_v1_sports_guide()
     count = len(asked)
     assert server.api_v1_sports_guide() is first and len(asked) == count
-    monkeypatch.setattr(server, "roku", None)
+    # No schedule answers at all: nothing is listed, and the guide says why.
+
+    def timed_out(*args, **kwargs):
+        raise BaseballScheduleError("Could not load the schedule: timed out")
+    monkeypatch.setattr(server.roku.sports.scoreboard, "games", timed_out)
+    monkeypatch.setattr(server.roku.sports, "games", timed_out)
+    monkeypatch.setattr(server.roku, "catalog", timed_out)
     payload = server.api_v1_sports_guide(now=1_800_036_000)
     assert (payload["available"], payload["sports"]) == (False, [])
-    assert "not configured" in payload["errors"][0]["message"]
+    assert "timed out" in payload["errors"][0]["message"]
 
 
 def test_without_youtube_tv_the_sports_guide_still_places_antenna_games(monkeypatch):

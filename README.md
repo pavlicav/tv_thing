@@ -1143,6 +1143,13 @@ only the ranked ones), and the Roku's own catalogs for baseball and the game
 sources, cached for a minute. Its serif is TeX Gyre Pagella, shipped in
 `static/fonts/` (see the README there), so the page needs no internet.
 
+**On a box with no Roku lane** (viviserv2), the guide reads ESPN's scoreboards
+itself and lists the games on the dial there: the antenna's DC networks (which
+it plays from its peer, at the same numbers) and the internet streams (CFL+ on
+3). Games on YouTube TV's channels and the Roku's game sources are left out, and
+a Sunday-afternoon CBS or FOX game is listed for a Commanders or Ravens game
+only. Baseball is not listed there: it comes from the Roku's MLB catalog.
+
 **As video, for a Roku.** The same slides are a live stream at
 `/stream/sports-guide/index.m3u8` (the lineup's `stream_path`), made only while
 someone watches. The first request for the playlist starts

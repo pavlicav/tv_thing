@@ -59,7 +59,7 @@ from roku_control.errors import (BaseballScheduleError, ChannelNotFoundError,
                                  RokuStreamError)
 from roku_control.days import today as games_day
 from roku_control.networks import NETWORKS
-from roku_control.sports import estimated_end
+from roku_control.sports import EspnScoreboard, estimated_end
 
 BASE_DIR = Path(__file__).parent
 # This host's settings (host_config.py, the Config page): the node's role and name, the Roku
@@ -1473,6 +1473,13 @@ def antenna_dial():
                 row["node"] = node
             dial.append((source, key, row))
     return dial
+
+
+def network_station_channels():
+    """The antenna channels of networks.json's antenna market (Washington), numbered as the
+    dial has them: the stations its networks are on. A box in another market has them from its
+    peer, on the dial at the same numbers."""
+    return [row for _, _, row in antenna_dial() if row["market"] == NETWORKS.antenna.id]
 
 
 def dial_channel(channel_id):
@@ -5396,6 +5403,8 @@ SPORTS_GUIDE_LATE_HOURS = 3
 # Every viewer of the slides asks; the scoreboards change by the minute at most.
 SPORTS_GUIDE_CACHE_SECONDS = 60
 _sports_guide_cache = {"day": None, "at": 0.0, "payload": None}
+# ESPN's scoreboards for the Sports Guide on a box with no Roku lane (the lane's own otherwise).
+SPORTS_SCOREBOARD = EspnScoreboard()
 # The pages that play the station's slide channels (lineup.SLIDES), their data,
 # and the video a Roku plays instead (web_basic.py makes it). Cairo Radio's page plays
 # that video: its card is drawn for the video, and it has no listings of its own.
@@ -5450,39 +5459,43 @@ def api_v1_sports_guide(now=None):
         return cache["payload"]
     payload = {"api_version": API_VERSION, "date": today, "generated_at": clock,
                "channel": next((view for view in slide_views() if view["channel_id"] == "sports-guide"), None)}
-    if roku is None:
-        return {**payload, "available": False, "games": 0, "sports": [], "errors": [
-            {"message": f"{roku_unavailable_message()}, so TV Thing has no schedules."}]}
     days = [today]
     night = games_day(eastern - timedelta(hours=SPORTS_GUIDE_LATE_HOURS))
     if night != today:
         days.append(night)
-    sources = (*roku_lane.GAME_SOURCES, *roku_lane.LISTED_SOURCES)
+    # Without a Roku lane (viviserv2) only ESPN's scoreboards are read: the antenna's and the
+    # internet streams' games are still on the dial, YouTube TV and the game sources are not.
+    lane = roku
+    sources = (*roku_lane.GAME_SOURCES, *roku_lane.LISTED_SOURCES) if lane is not None else ()
 
     def scoreboard(league, day):
+        if lane is None:
+            games = SPORTS_SCOREBOARD.games(league, day, power_five=False)
+            return [sports_guide.antenna_markets(game) for game in games] if league == "nfl" else games
         if league == "nfl":   # with Sunday Ticket's and Prime Video's targets
-            return roku.sports.games(league, day)["games"]
-        return roku.sports.scoreboard.games(league, day, power_five=False)
+            return lane.sports.games(league, day)["games"]
+        return lane.sports.scoreboard.games(league, day, power_five=False)
 
     with ThreadPoolExecutor(max_workers=16) as pool:
         asked = {("league", league, day): pool.submit(scoreboard, league, day)
                  for day in days for league in sports_guide.ESPN_LEAGUES}
-        asked.update({("source_id", source_id, day): pool.submit(roku.catalog, source_id, day)
+        asked.update({("source_id", source_id, day): pool.submit(lane.catalog, source_id, day)
                       for day in days for source_id in sources})
-        youtube_tv = pool.submit(roku.catalog, roku_lane.YOUTUBE_TV)
+        youtube_tv = pool.submit(lane.catalog, roku_lane.YOUTUBE_TV) if lane is not None else None
     errors, results = [], {}
     for (kind, name, day), future in asked.items():
         try:
             results[(kind, name, day)] = future.result()
         except Exception as error:  # noqa: BLE001 - one schedule never sinks the guide
             errors.append({kind: name, "date": day, "message": str(error)})
+    cable = []
     try:
-        cable = numbered_roku_listings(
-            {roku_lane.YOUTUBE_TV: youtube_tv.result()})[roku_lane.YOUTUBE_TV]["items"]
+        if youtube_tv is not None:
+            cable = numbered_roku_listings(
+                {roku_lane.YOUTUBE_TV: youtube_tv.result()})[roku_lane.YOUTUBE_TV]["items"]
     except Exception as error:  # noqa: BLE001 - the antenna's networks still place games
-        cable = []
         errors.append({"source_id": roku_lane.YOUTUBE_TV, "date": None, "message": str(error)})
-    channels = sports_guide.Channels(numbered_channels(load_channels()), cable)
+    channels = sports_guide.Channels(network_station_channels(), cable)
     rows = []
     for day in days:
         catalogs = numbered_roku_listings({source_id: results[("source_id", source_id, day)]

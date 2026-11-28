@@ -121,8 +121,9 @@ time is to be announced, with `time_tbd`), `live`, `title` ("Away at Home"),
 `away`, `home`, `network` and `tv_number`: the broadcaster's lineup channel
 when one carries it nationally (`via: "channel"`; a network's DC antenna
 station), else a game source's Live Sports number, with `network` naming the
-service and `via` the source id. Finished games are left out; before 06:00 the
-night's games still on stay in. `errors` names the schedules that did not
+service and `via` the source id. On a box with no Roku lane, only the games on
+the antenna's networks and the internet streams are listed. Finished games are
+left out; before 06:00 the night's games still on stay in. `errors` names the schedules that did not
 answer (by `league` or `source_id`, and `date`); `available` is false when
 nothing could be read. The response is cached for a minute.
 

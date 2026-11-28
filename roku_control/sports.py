@@ -105,6 +105,12 @@ CLOSING_INNING = 9
 CLOSING_SECONDS = 120
 
 
+def sunday_window(game, start):
+    """Whether an NFL game starts in the Sunday-afternoon window (``start``: Eastern), when
+    CBS's and FOX's games are regional and Sunday Ticket carries the rest."""
+    return bool(game.get('league') == 'nfl' and start and start.weekday() == 6 and start.hour < 19)
+
+
 def closing(league, game):
     """Whether a game is in its closing stretch or over: the 9th inning or later, the last
     2 minutes of regulation, or overtime. ESPN's clock counts down, except soccer's."""
@@ -414,8 +420,7 @@ class SportsCatalog:
         start = datetime.fromisoformat(game['start_time'].replace('Z', '+00:00')).astimezone(_EASTERN) \
             if game.get('start_time') else None
         regional_networks = [c for c in channels if c in REGIONAL_NETWORKS]
-        regional = bool(game['league'] == 'nfl' and start and start.weekday() == 6 and start.hour < 19
-                        and regional_networks)
+        regional = sunday_window(game, start) and bool(regional_networks)
         sides = {(game.get(side) or {}).get('abbreviation') for side in ('away', 'home')}
         # A regional game's market: YouTube TV's station has it when its listings name
         # it (or, past them, it is a Lions game); the antenna's Washington one for a DC team.
@@ -432,8 +437,8 @@ class SportsCatalog:
         # what YouTube TV's own market's stations show.
         # Upper case: ESPN has written FOX as "Fox" (2026-10-18), which hid every FOX game.
         networks = {NETWORK_ALIASES.get(str(b['name']).upper(), str(b['name'])).upper() for b in game['broadcasts']}
-        on_ticket = bool(game['league'] == 'nfl' and start and start.weekday() == 6 and start.hour < 19
-                         and (not networks or networks & {'CBS', 'FOX'}) and not on_youtube_tv)
+        on_ticket = bool(sunday_window(game, start) and (not networks or networks & {'CBS', 'FOX'})
+                         and not on_youtube_tv)
         ticket = {'source_id': 'sunday-ticket', 'channel_id': str(game['game_id']),
                   'date': start.date().isoformat() if start else None}
         from .prime_video import prime_nfl_game

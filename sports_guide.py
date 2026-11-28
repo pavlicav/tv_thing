@@ -14,6 +14,10 @@ Channel 6 plays it as slides (static/sports-guide.html, from
 * or, for a league in INTERNET_LEAGUES, on the internet stream that carries it,
   its games read from that stream's own listings (CFL+ on 3).
 
+A box with no Roku lane (viviserv2) reads ESPN's scoreboards itself
+(antenna_markets) and lists the antenna's and the internet streams' games
+only: YouTube TV's channels and the Roku's game sources are not on its dial.
+
 Streaming-only games (Peacock, Apple TV, ESPN+ outside hockey and the NWSL), regional
 sports networks and games already over are left out. Sports go in a fixed
 order, each sport's games by start time, then by channel number.
@@ -26,7 +30,8 @@ from zoneinfo import ZoneInfo
 
 from roku_control.config import normalize_channel_name
 from roku_control.networks import NETWORKS
-from roku_control.sports import NETWORK_ALIASES, nhl_on_espn_unlimited, nwsl_on_espn_unlimited
+from roku_control.sports import (LOCAL_NFL_TEAMS, NETWORK_ALIASES, REGIONAL_NETWORKS, nhl_on_espn_unlimited,
+                                  nwsl_on_espn_unlimited, sunday_window)
 
 # Each sport and its leagues, as (league, tag), in the order the guide shows them.
 # The pros and the colleges each get their own pages, as the papers listed them.
@@ -164,10 +169,29 @@ def _where(league, game, numbered, channels):
             return _channel(station)
         if source in ("sunday-ticket", "thursday-night-football"):
             return _service(source, numbered.get((source, game_id)))
+        if regional:   # never the antenna's CBS or FOX: it has its own market's game
+            return None
     found = _national(game, channels)
     if found is None and league in ESPN_UNLIMITED and ESPN_UNLIMITED[league](game):
         found = _service(league, numbered.get((league, game_id)))
     return found
+
+
+def antenna_markets(game):
+    """An NFL game from ESPN's scoreboard with its ``markets``, as roku_control's
+    SportsCatalog marks them, for a box with no Roku lane to ask: a Sunday-afternoon CBS
+    or FOX game is regional, on the antenna's Washington station for a DC team only."""
+    start = _start(game.get("start_time"))
+    start = datetime.fromtimestamp(start, _EASTERN) if start is not None else None
+    networks = [name for name in (NETWORK_ALIASES.get(str(broadcast.get("name")).upper(),
+                                                      str(broadcast.get("name"))).upper()
+                                  for broadcast in game.get("broadcasts") or ()
+                                  if broadcast.get("market") in (None, "national"))
+                if name in REGIONAL_NETWORKS]
+    regional = sunday_window(game, start) and bool(networks)
+    sides = {(game.get(side) or {}).get("abbreviation") for side in ("away", "home")}
+    return {**game, "markets": {"network": networks[0] if regional else None, "youtube_tv": False,
+                                "antenna": not regional or bool(sides & LOCAL_NFL_TEAMS), "listed": False}}
 
 
 def _baseball_where(item, channels):
